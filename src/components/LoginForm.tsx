@@ -3,8 +3,8 @@ import { useAuth } from '../hooks/useAuth';
 
 export const LoginForm: React.FC = () => {
   const [formData, setFormData] = useState({
-    email: 'qaredadev@gmail.com',
-    password: 'qaretech'
+    email: '',
+    password: ''
   });
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -36,7 +36,7 @@ export const LoginForm: React.FC = () => {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-white/10 backdrop-blur-sm rounded-2xl mb-4">
             <span className="text-2xl">📡</span>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Qaretech Innovative</h1>
+          <h1 className="text-3xl font-bold text-white mb-2">Qaretech IpayNotify</h1>
           <p className="text-blue-200">Subscription Reminder System</p>
         </div>
 
@@ -108,16 +108,6 @@ export const LoginForm: React.FC = () => {
               )}
             </button>
           </form>
-
-          {/* Default Admin Credentials Info */}
-          <div className="mt-6 p-4 bg-blue-500/20 rounded-lg border border-blue-500/30">
-            <p className="text-blue-200 text-sm font-medium mb-2">Default Admin Credentials:</p>
-            <div className="text-blue-100 text-xs">
-              <p><strong>Email:</strong> qaredadev@gmail.com</p>
-              <p><strong>Password:</strong> qaretech</p>
-              <p className="mt-2 text-blue-200">These credentials are pre-filled for convenience</p>
-            </div>
-          </div>
         </div>
 
         {/* Footer */}
