@@ -20,6 +20,7 @@ export const VendorPasswordResetModal: React.FC<VendorPasswordResetModalProps> =
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [copied, setCopied] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,29 +41,28 @@ export const VendorPasswordResetModal: React.FC<VendorPasswordResetModalProps> =
 
     try {
       // Use Supabase Admin API to update password
-      // Note: This requires admin privileges. In production, you'd use a server-side function
-      // For now, we'll use the auth.admin.updateUserById method if available
-      // Since we're using the client, we'll need to call a server function or use admin API
+      // Note: This requires the service role key or proper RLS policies
+      const { error: updateError } = await supabase.auth.admin.updateUserById(adminId, {
+        password: newPassword
+      });
+
+      if (updateError) {
+        // If admin API fails, provide helpful error message
+        if (updateError.message?.includes('JWT') || updateError.message?.includes('permission')) {
+          throw new Error('Password reset requires admin privileges. Please ensure you are logged in as a super admin and that your Supabase project has the Admin API enabled.');
+        }
+        throw updateError;
+      }
+
+      setSuccess('Password reset successful!');
       
-      // Alternative: Use Supabase Admin API via a serverless function
-      // For client-side, we can only reset our own password, so we need a backend function
-      
-      // For now, let's show a message that this requires backend implementation
-      // In a real scenario, you'd call a serverless function or use Supabase Admin API
-      
-      // Simulate success for now - in production, implement proper admin password reset
-      setSuccess(`Password reset initiated for ${adminEmail}. The new password is: ${newPassword}`);
-      
-      // Note: In production, you should:
-      // 1. Call a serverless function that uses Supabase Admin API
-      // 2. Or use Supabase Admin API directly from a secure backend
-      // 3. Send the new password securely to the admin via email
-      
+      // Auto-close after 5 seconds to give user time to copy the password
       setTimeout(() => {
         onClose();
-      }, 3000);
+      }, 5000);
     } catch (err: any) {
-      setError(err.message || 'Failed to reset password');
+      console.error('Password reset error:', err);
+      setError(err.message || 'Failed to reset password. Please check your Supabase configuration and ensure Admin API is enabled.');
     } finally {
       setIsLoading(false);
     }
@@ -77,6 +77,29 @@ export const VendorPasswordResetModal: React.FC<VendorPasswordResetModalProps> =
     }
     setNewPassword(password);
     setConfirmPassword(password);
+  };
+
+  const copyPasswordToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(newPassword);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy password:', err);
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = newPassword;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (fallbackErr) {
+        console.error('Fallback copy failed:', fallbackErr);
+      }
+      document.body.removeChild(textArea);
+    }
   };
 
   return (
@@ -100,7 +123,24 @@ export const VendorPasswordResetModal: React.FC<VendorPasswordResetModalProps> =
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">{error}</div>
           )}
           {success && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-700 text-sm">{success}</div>
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-green-800">
+              <p className="font-medium mb-2">✅ Password Reset Successful!</p>
+              <p className="text-sm mb-2">{adminEmail}</p>
+              <div className="bg-white border border-green-300 rounded-lg p-3 mt-2 relative">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs text-gray-600">New Password:</p>
+                  <button
+                    type="button"
+                    onClick={copyPasswordToClipboard}
+                    className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                  >
+                    {copied ? '✓ Copied!' : '📋 Copy'}
+                  </button>
+                </div>
+                <p className="font-mono text-sm font-bold text-green-900 break-all">{newPassword}</p>
+              </div>
+              <p className="text-xs text-green-700 mt-2">Please securely share this password with the vendor admin.</p>
+            </div>
           )}
 
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700">
@@ -149,9 +189,9 @@ export const VendorPasswordResetModal: React.FC<VendorPasswordResetModalProps> =
             />
           </div>
 
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
-            <p className="font-medium">⚠️ Important:</p>
-            <p className="mt-1">In production, password reset should be handled via a secure backend function using Supabase Admin API. The new password should be securely communicated to the admin.</p>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+            <p className="font-medium">ℹ️ Note:</p>
+            <p className="mt-1">The new password will be displayed after reset. Please securely communicate this password to the vendor admin.</p>
           </div>
 
           <div className="flex space-x-3 pt-4">
