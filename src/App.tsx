@@ -2,6 +2,7 @@ import React from 'react';
 import { useAuth } from './hooks/useAuth';
 import { LoginForm } from './components/LoginForm';
 import { Dashboard } from './components/Dashboard';
+import { PWAInstallPrompt } from './components/PWAInstallPrompt';
 
 function App() {
   const { user, loading } = useAuth();
@@ -20,7 +21,12 @@ function App() {
     );
   }
 
-  return user ? <Dashboard /> : <LoginForm />;
+  return (
+    <>
+      {user ? <Dashboard /> : <LoginForm />}
+      <PWAInstallPrompt />
+    </>
+  );
 }
 
 export default App;

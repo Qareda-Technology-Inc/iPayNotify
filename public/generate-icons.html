@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>PWA Icon Generator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 { color: #2563eb; }
+    .preview { margin: 20px 0; }
+    .preview img { margin: 10px; border: 1px solid #ddd; }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover { background: #1d4ed8; }
+    .instructions {
+      background: #f0f9ff;
+      padding: 15px;
+      border-radius: 5px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📱 PWA Icon Generator</h1>
+    <p>Click the button below to generate and download all required PWA icons.</p>
+    
+    <button onclick="generateAllIcons()">Generate All Icons</button>
+    <button onclick="generateSingleIcon(192)">Generate 192x192 Only</button>
+    
+    <div id="preview" class="preview"></div>
+    <div id="output"></div>
+    
+    <div class="instructions">
+      <h3>Instructions:</h3>
+      <ol>
+        <li>Click "Generate All Icons" to create all required icon sizes</li>
+        <li>Icons will be downloaded automatically</li>
+        <li>Move all downloaded icons to the <code>public</code> folder in your project</li>
+        <li>Make sure the filenames match: <code>icon-{size}x{size}.png</code></li>
+      </ol>
+    </div>
+  </div>
+
+  <canvas id="canvas" style="display: none;"></canvas>
+
+  <script>
+    const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    function generateIcon(size) {
+      canvas.width = size;
+      canvas.height = size;
+
+      // Background gradient
+      const gradient = ctx.createLinearGradient(0, 0, size, size);
+      gradient.addColorStop(0, '#2563eb');
+      gradient.addColorStop(1, '#1d4ed8');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, size, size);
+
+      // Draw rounded corners effect
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.beginPath();
+      const radius = size * 0.15;
+      ctx.roundRect(0, 0, size, size, radius);
+      ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+
+      // Draw signal/antenna icon
+      ctx.strokeStyle = '#ffffff';
+      ctx.fillStyle = '#ffffff';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      const centerX = size / 2;
+      const centerY = size * 0.6;
+      const baseRadius = size * 0.25;
+
+      // Antenna pole
+      ctx.lineWidth = size * 0.04;
+      ctx.beginPath();
+      ctx.moveTo(centerX, size * 0.2);
+      ctx.lineTo(centerX, centerY - baseRadius);
+      ctx.stroke();
+
+      // Signal waves (3 arcs)
+      ctx.lineWidth = size * 0.03;
+      for (let i = 0; i < 3; i++) {
+        const radius = baseRadius + (i * size * 0.08);
+        const startAngle = -Math.PI / 3;
+        const endAngle = Math.PI / 3;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, startAngle, endAngle, false);
+        ctx.stroke();
+      }
+
+      // Center dot
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, size * 0.06, 0, Math.PI * 2);
+      ctx.fill();
+
+      return canvas.toDataURL('image/png');
+    }
+
+    function downloadIcon(size) {
+      const dataUrl = generateIcon(size);
+      const link = document.createElement('a');
+      link.download = `icon-${size}x${size}.png`;
+      link.href = dataUrl;
+      link.click();
+      
+      // Show preview
+      const preview = document.getElementById('preview');
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.width = 64;
+      img.height = 64;
+      img.title = `${size}x${size}`;
+      preview.appendChild(img);
+    }
+
+    function generateAllIcons() {
+      document.getElementById('preview').innerHTML = '';
+      document.getElementById('output').innerHTML = '<p>Generating icons... Check your downloads folder.</p>';
+      
+      sizes.forEach((size, index) => {
+        setTimeout(() => {
+          downloadIcon(size);
+          if (index === sizes.length - 1) {
+            document.getElementById('output').innerHTML = '<p style="color: green;">✅ All icons generated successfully! Move them to the public folder.</p>';
+          }
+        }, index * 200); // Stagger downloads
+      });
+    }
+
+    function generateSingleIcon(size) {
+      document.getElementById('preview').innerHTML = '';
+      downloadIcon(size);
+      document.getElementById('output').innerHTML = `<p style="color: green;">✅ Icon ${size}x${size} generated!</p>`;
+    }
+
+    // Polyfill for roundRect if not available
+    if (!CanvasRenderingContext2D.prototype.roundRect) {
+      CanvasRenderingContext2D.prototype.roundRect = function(x, y, width, height, radius) {
+        this.beginPath();
+        this.moveTo(x + radius, y);
+        this.lineTo(x + width - radius, y);
+        this.quadraticCurveTo(x + width, y, x + width, y + radius);
+        this.lineTo(x + width, y + height - radius);
+        this.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        this.lineTo(x + radius, y + height);
+        this.quadraticCurveTo(x, y + height, x, y + height - radius);
+        this.lineTo(x, y + radius);
+        this.quadraticCurveTo(x, y, x + radius, y);
+        this.closePath();
+      };
+    }
+  </script>
+</body>
+</html>
+
