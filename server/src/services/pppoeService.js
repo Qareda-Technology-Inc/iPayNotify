@@ -34,22 +34,44 @@ function desiredRouterState(account) {
     account.disabled || expired ? account.expiredProfile : account.activeProfile;
   /** Expired users stay enabled on the router so the expired profile (e.g. nonpayment) can show renewal info. */
   const disabled = account.disabled && !expired;
-  return { comment, profile, disabled };
+  return { comment, profile, disabled, expired };
+}
+
+/**
+ * Changing `/ppp/secret` does not refresh addresses/profile on an already-up session.
+ * Disconnect `/ppp/active` when the secret row changes, or when billing is expired but the
+ * row already matched the expired profile (RouterOS would otherwise keep the old pool/IP until reboot).
+ */
+function shouldDisconnectPppActive(prevSecretRow, desired, account) {
+  const prevProfile = String(prevSecretRow?.profile ?? '').trim();
+  const nextProfile = String(desired.profile ?? '').trim();
+  const prevComment = String(prevSecretRow?.comment ?? '').trim();
+  const nextComment = String(desired.comment ?? '').trim();
+  const prevDisabled = secretRowDisabled(prevSecretRow);
+  const nextDisabled = Boolean(desired.disabled);
+  const needsSessionReset =
+    prevProfile !== nextProfile ||
+    prevComment !== nextComment ||
+    prevDisabled !== nextDisabled;
+  const expiredProfileNorm = String(account.expiredProfile ?? '').trim();
+  const stuckExpiredLiveSession =
+    desired.expired &&
+    prevProfile === nextProfile &&
+    nextProfile !== '' &&
+    nextProfile === expiredProfileNorm;
+  return needsSessionReset || stuckExpiredLiveSession;
 }
 
 export async function syncPppoeAccountToRouter(account) {
   const router = await resolveRouter(account.routerId);
-  const { comment, profile, disabled } = desiredRouterState(account);
+  const desired = desiredRouterState(account);
+  const { comment, profile, disabled } = desired;
 
   await withRouterMikrotik(router, async (api) => {
     const existing = await ppp.findPppSecretByName(api, account.secretName);
     if (existing) {
       const rowId = existing['.id'] ?? existing.numbers;
-      const prevProfile = String(existing.profile ?? '').trim();
-      const nextProfile = String(profile ?? '').trim();
-      const prevDisabled = secretRowDisabled(existing);
-      const needsSessionReset =
-        prevProfile !== nextProfile || prevDisabled !== disabled;
+      const kickActive = shouldDisconnectPppActive(existing, desired, account);
 
       await ppp.setPppSecret(
         api,
@@ -62,7 +84,7 @@ export async function syncPppoeAccountToRouter(account) {
         },
         account.secretName
       );
-      if (needsSessionReset) {
+      if (kickActive) {
         await ppp.disconnectPppSessionsBySecretName(api, account.secretName, {
           service: account.service || 'pppoe',
         });
@@ -95,11 +117,7 @@ export async function syncPppoeAccountToRouter(account) {
         throw err;
       }
       const rowId = created['.id'] ?? created.numbers;
-      const prevProfile = String(created.profile ?? '').trim();
-      const nextProfile = String(profile ?? '').trim();
-      const prevDisabled = secretRowDisabled(created);
-      const needsSessionReset =
-        prevProfile !== nextProfile || prevDisabled !== disabled;
+      const kickActive = shouldDisconnectPppActive(created, desired, account);
       await ppp.setPppSecret(
         api,
         rowId,
@@ -111,7 +129,7 @@ export async function syncPppoeAccountToRouter(account) {
         },
         account.secretName
       );
-      if (needsSessionReset) {
+      if (kickActive) {
         await ppp.disconnectPppSessionsBySecretName(api, account.secretName, {
           service: account.service || 'pppoe',
         });
