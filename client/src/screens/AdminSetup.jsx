@@ -36,7 +36,7 @@ export function AdminSetup({ onDone }) {
   }
 
   return (
-    <div className="mx-auto max-w-md px-4 py-16">
+    <div className="mx-auto min-h-[100dvh] max-w-md overflow-x-hidden px-4 py-10 sm:py-16">
       <h1 className="text-xl font-semibold text-white">QareFi Billing</h1>
       <p className="mt-2 text-sm text-slate-400">
         Create the first super administrator (only if no default admin was seeded on the server).

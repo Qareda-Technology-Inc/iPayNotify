@@ -163,8 +163,8 @@ export function HotspotPanel() {
         <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
           Recent vouchers
         </h3>
-        <div className="overflow-hidden rounded-xl border border-slate-800">
-          <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto rounded-xl border border-slate-800">
+          <table className="w-full min-w-[520px] text-left text-sm">
             <thead className="bg-slate-900 text-slate-400">
               <tr>
                 <th className="px-4 py-3 font-medium">Code</th>

@@ -65,11 +65,26 @@ function headerTitleForPath(pathname) {
   return 'Admin';
 }
 
+function MenuIcon({ open }) {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      {open ? (
+        <path d="M6 6L18 18M18 6L6 18" strokeLinecap="round" />
+      ) : (
+        <>
+          <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 export function AdminShell({ onSignOut }) {
   const location = useLocation();
   const [me, setMe] = useState(null);
   const [counts, setCounts] = useState(null);
   const [sessionTick, setSessionTick] = useState(0);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const adminEmail = me?.admin?.email || '';
   const adminRole = me?.admin?.role || 'super_admin';
@@ -87,6 +102,19 @@ export function AdminShell({ onSignOut }) {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setMobileNavOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileNavOpen]);
+
   function clearActingOrganization() {
     setActingOrganizationId(null);
     setSessionTick((n) => n + 1);
@@ -97,8 +125,22 @@ export function AdminShell({ onSignOut }) {
   const headerTitle = headerTitleForPath(location.pathname);
 
   return (
-    <div className="flex min-h-screen bg-slate-950 text-slate-200">
-      <aside className="flex w-60 shrink-0 flex-col border-r border-slate-800/80 bg-slate-900/95">
+    <div className="flex min-h-screen min-h-[100dvh] bg-slate-950 text-slate-200">
+      <button
+        type="button"
+        aria-label="Close navigation menu"
+        className={`fixed inset-0 z-30 bg-slate-950/60 backdrop-blur-sm transition-opacity lg:hidden ${
+          mobileNavOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+        onClick={() => setMobileNavOpen(false)}
+      />
+
+      <aside
+        id="admin-sidebar"
+        className={`fixed inset-y-0 left-0 z-40 flex w-60 max-w-[85vw] shrink-0 flex-col border-r border-slate-800/80 bg-slate-900/95 shadow-2xl shadow-black/40 transition-transform duration-200 ease-out lg:static lg:z-0 lg:max-w-none lg:translate-x-0 lg:shadow-none ${
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
+      >
         <div className="border-b border-slate-800 px-4 py-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-indigo-400">QareFi</p>
           <h1 className="mt-1 text-lg font-semibold text-white">Billing</h1>
@@ -177,11 +219,20 @@ export function AdminShell({ onSignOut }) {
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-slate-800 bg-slate-900/50 px-6 py-3">
-          <h2 className="text-sm font-semibold text-white sm:text-base">{headerTitle}</h2>
-          <div className="flex flex-wrap items-center justify-end gap-2">
+        <header className="sticky top-0 z-20 flex min-h-14 flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-900/90 px-3 py-2 backdrop-blur-sm sm:gap-3 sm:px-4 sm:py-3 lg:px-6">
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-700 p-2 text-slate-200 hover:bg-slate-800 lg:hidden"
+            aria-expanded={mobileNavOpen}
+            aria-controls="admin-sidebar"
+            onClick={() => setMobileNavOpen((o) => !o)}
+          >
+            <MenuIcon open={mobileNavOpen} />
+          </button>
+          <h2 className="min-w-0 flex-1 text-sm font-semibold text-white sm:text-base">{headerTitle}</h2>
+          <div className="flex basis-full min-w-0 flex-wrap items-center justify-end gap-2 sm:basis-auto sm:w-auto sm:flex-initial">
             {adminRole === 'super_admin' && actingId && (
-              <div className="flex max-w-full items-center gap-2 rounded-lg border border-emerald-700/35 bg-emerald-950/25 px-3 py-1.5 text-xs text-emerald-100">
+              <div className="flex w-full max-w-full items-center gap-2 rounded-lg border border-emerald-700/35 bg-emerald-950/25 px-3 py-1.5 text-xs text-emerald-100 sm:w-auto">
                 <span className="truncate">
                   Acting as{' '}
                   <strong className="text-emerald-50">
@@ -199,7 +250,7 @@ export function AdminShell({ onSignOut }) {
             )}
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
           <Outlet />
         </main>
       </div>

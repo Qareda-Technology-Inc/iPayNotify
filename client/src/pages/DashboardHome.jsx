@@ -51,7 +51,7 @@ export function DashboardHome() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-xl font-semibold text-white">
+        <h2 className="text-balance text-lg font-semibold text-white sm:text-xl">
           {greet}
           <span className="text-slate-400">{orgLabel}</span>
           <span className="text-slate-500"> · QareFi Billing</span>
