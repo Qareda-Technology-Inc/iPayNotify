@@ -55,6 +55,16 @@ function connectDisplay(r) {
   return p === 8728 ? r.host : `${r.host}:${p}`;
 }
 
+function hostnameFromViteApiBase() {
+  const raw = import.meta.env.VITE_API_BASE_URL;
+  if (!raw || typeof raw !== 'string') return '';
+  try {
+    return new URL(raw.trim()).hostname;
+  } catch {
+    return '';
+  }
+}
+
 
 export function RoutersPanel() {
   const [routers, setRouters] = useState([]);
@@ -65,6 +75,8 @@ export function RoutersPanel() {
   const [connError, setConnError] = useState('');
   const [testing, setTesting] = useState(false);
   const [wgSyncing, setWgSyncing] = useState(false);
+  const [billingChecklist, setBillingChecklist] = useState(null);
+  const [billingChecklistErr, setBillingChecklistErr] = useState('');
 
   const [addComment, setAddComment] = useState('');
   const [addConnect, setAddConnect] = useState('');
@@ -99,6 +111,20 @@ export function RoutersPanel() {
   useEffect(() => {
     loadRouters().catch((e) => setListError(e.message));
   }, [loadRouters]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/routers/billing-access-checklist')
+      .then((d) => {
+        if (!cancelled) setBillingChecklist(d);
+      })
+      .catch((e) => {
+        if (!cancelled) setBillingChecklistErr(e.message || 'Could not load checklist');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const selected = routers.find((r) => r._id === selectedId);
 
@@ -282,6 +308,68 @@ export function RoutersPanel() {
           <span className="font-mono">SYNC_WALLED_GARDEN_ON_PING=false</span> to skip auto-sync.
         </p>
       </div>
+
+      <section className="rounded-2xl border border-amber-500/30 bg-amber-950/15 p-5">
+        <h3 className="text-sm font-semibold text-amber-100">PPPoE renew / payment page (firewall)</h3>
+        <p className="mt-2 text-sm text-amber-100/90">
+          <strong>Hotspot walled garden does not apply to PPPoE.</strong> Subscribers on your{' '}
+          <strong>expired PPP profile</strong> must be allowed to reach the billing site and payment
+          APIs over <strong className="font-mono">HTTPS (443)</strong> (and usually <strong>DNS</strong>).
+          Add firewall filter / address-list rules on the MikroTik for those clients before any rule that
+          blocks them.
+        </p>
+        {billingChecklistErr && (
+          <p className="mt-2 text-sm text-red-300">{billingChecklistErr}</p>
+        )}
+        {billingChecklist && (
+          <>
+            <p className="mt-3 text-xs font-medium uppercase tracking-wide text-amber-200/80">
+              Hostnames from server config (allow TCP 443)
+            </p>
+            <ul className="mt-2 space-y-1 font-mono text-xs text-amber-50/95">
+              {[...(billingChecklist.hosts || []), ...(billingChecklist.ips || [])].map((h) => (
+                <li key={h} className="break-all">
+                  {h}
+                </li>
+              ))}
+            </ul>
+            {(() => {
+              const apiHost = hostnameFromViteApiBase();
+              const listed = new Set([
+                ...(billingChecklist.hosts || []),
+                ...(billingChecklist.ips || []),
+              ]);
+              if (!apiHost || listed.has(apiHost)) return null;
+              return (
+                <p className="mt-3 rounded-lg border border-amber-400/40 bg-slate-950/40 px-3 py-2 text-xs text-amber-100">
+                  This admin UI calls the API at <span className="font-mono">{apiHost}</span> but that
+                  host is <strong>not</strong> in the list above. Add it to server env{' '}
+                  <span className="font-mono">WALLED_GARDEN_EXTRA_HOSTS</span> on Render (comma-separated),
+                  redeploy the API, then allow the same hostname on the router for PPPoE clients.
+                </p>
+              );
+            })()}
+            <ul className="mt-4 list-disc space-y-2 pl-5 text-xs text-amber-100/85">
+              {(billingChecklist.tips || []).map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className="mt-4 rounded-lg border border-amber-500/50 px-3 py-1.5 text-xs font-medium text-amber-50 hover:bg-amber-900/30"
+              onClick={() => {
+                const lines = [
+                  ...(billingChecklist.hosts || []),
+                  ...(billingChecklist.ips || []),
+                ].join('\n');
+                navigator.clipboard.writeText(lines).catch(() => {});
+              }}
+            >
+              Copy host list
+            </button>
+          </>
+        )}
+      </section>
 
       {listError && (
         <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">

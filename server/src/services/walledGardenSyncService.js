@@ -42,6 +42,16 @@ export function buildPaymentWalledGardenTargets() {
     /* ignore */
   }
 
+  const cb = String(config.mtnMomo.callbackUrl || '').trim();
+  if (cb) {
+    try {
+      const u = new URL(cb);
+      if (u.hostname) addHost(u.hostname);
+    } catch {
+      /* ignore invalid callback URL */
+    }
+  }
+
   for (const h of config.walledGarden.extraDstHosts) {
     addHost(h);
   }

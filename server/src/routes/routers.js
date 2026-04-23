@@ -7,7 +7,10 @@ import {
   listActiveSessionsAllRouters,
   pingRouterApi,
 } from '../services/mikrotikReadService.js';
-import { syncPaymentWalledGarden } from '../services/walledGardenSyncService.js';
+import {
+  buildPaymentWalledGardenTargets,
+  syncPaymentWalledGarden,
+} from '../services/walledGardenSyncService.js';
 import { config } from '../config.js';
 import {
   isValidPortalSlug,
@@ -18,6 +21,27 @@ import { routerDisplayName } from '../utils/routerLabel.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
 
 export const routersApi = express.Router();
+
+/**
+ * Hostnames (and any literal IPs) the billing app and MoMo flow need over HTTPS — for operators
+ * configuring PPPoE expired-profile firewall / DNS. Hotspot walled garden uses the same set.
+ */
+routersApi.get(
+  '/billing-access-checklist',
+  asyncHandler(async (req, res) => {
+    const { hosts, ips } = buildPaymentWalledGardenTargets();
+    res.json({
+      hosts,
+      ips,
+      tips: [
+        'PPPoE expired profile does not use Hotspot walled garden. Allow TCP/443 (and DNS if you filter it) from those subscribers to every hostname below — e.g. Firewall → Filter Rules in the forward chain, above broad drop rules.',
+        'RouterOS 7 can use address-list entries with FQDNs that resolve for dst-address / address-list match; older builds may need resolved IPs or layer7 — adjust to your ROS version.',
+        'If the pay page is on one host and the browser calls the API on another (split Vercel + Render), put the API hostname in server env WALLED_GARDEN_EXTRA_HOSTS so it appears in this list.',
+        'If renew still loads but styles/fonts fail, allow fonts.googleapis.com and fonts.gstatic.com for the same clients.',
+      ],
+    });
+  })
+);
 
 routersApi.get(
   '/',

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<!--
+  MikroTik web-proxy: this file is NOT read from Vercel automatically. Copy this HTML into your
+  proxy www directory (or keep a copy on the router). The page URL is usually http://ROUTER/…
+  so "Renew" cannot guess your billing host — pass either:
+    ?billing_base=https%3A%2F%2FYOUR-APP.vercel.app   (optional &r=portal-slug for the right site)
+  or a full link:
+    ?renew=https%3A%2F%2FYOUR-APP.vercel.app%2Fportal%2Frenew%3Fr%3Dyour-slug
+  Point your expired PPP profile / web-proxy HTML to that URL (or redirect to it).
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Renew your subscription · QareFi Billing</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #020617;
+        --card: rgba(15, 23, 42, 0.92);
+        --border: rgba(51, 65, 85, 0.9);
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --accent: #10b981;
+        --accent-dim: rgba(16, 185, 129, 0.15);
+        --danger: #f87171;
+        --danger-bg: rgba(248, 113, 113, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        font-family: 'DM Sans', system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.25rem;
+        padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+        line-height: 1.5;
+      }
+
+      .glow {
+        pointer-events: none;
+        position: fixed;
+        inset: 0;
+        background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(16, 185, 129, 0.18), transparent);
+      }
+
+      .card {
+        position: relative;
+        z-index: 1;
+        width: 100%;
+        max-width: 28rem;
+        border-radius: 1rem;
+        border: 1px solid var(--border);
+        background: var(--card);
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.45);
+        padding: 1.5rem;
+        text-align: center;
+      }
+
+      @media (min-width: 480px) {
+        .card {
+          padding: 2rem;
+        }
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-size: 0.65rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #fca5a5;
+        background: var(--danger-bg);
+        border: 1px solid rgba(248, 113, 113, 0.35);
+        border-radius: 9999px;
+        padding: 0.25rem 0.65rem;
+        margin-bottom: 1rem;
+      }
+
+      .brand {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #6ee7b7;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        margin-bottom: 0.35rem;
+      }
+
+      h1 {
+        font-size: 1.35rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0 0 0.75rem;
+        line-height: 1.25;
+      }
+
+      @media (min-width: 480px) {
+        h1 {
+          font-size: 1.5rem;
+        }
+      }
+
+      .lead {
+        font-size: 0.9rem;
+        color: var(--muted);
+        margin: 0 0 1.5rem;
+        text-wrap: balance;
+      }
+
+      .lead strong {
+        color: #cbd5e1;
+        font-weight: 600;
+      }
+
+      .cta {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        width: 100%;
+        border: none;
+        border-radius: 0.75rem;
+        padding: 0.85rem 1.25rem;
+        font-family: inherit;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #fff;
+        text-decoration: none;
+        cursor: pointer;
+        background: linear-gradient(135deg, #059669, #0d9488);
+        box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.35);
+        transition: filter 0.15s ease, transform 0.1s ease;
+      }
+
+      .cta:hover {
+        filter: brightness(1.06);
+      }
+
+      .cta:active {
+        transform: scale(0.99);
+      }
+
+      .note {
+        margin-top: 1.25rem;
+        font-size: 0.8rem;
+        color: var(--muted);
+        text-wrap: balance;
+      }
+
+      .note strong {
+        color: #cbd5e1;
+      }
+
+      hr {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 1.5rem 0 1.25rem;
+      }
+
+      .support-title {
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #64748b;
+        margin: 0 0 0.75rem;
+      }
+
+      .support-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      @media (min-width: 400px) {
+        .support-grid {
+          flex-direction: row;
+          flex-wrap: wrap;
+          justify-content: center;
+        }
+      }
+
+      .support-grid a {
+        flex: 1 1 auto;
+        min-width: 8rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-decoration: none;
+        border-radius: 0.5rem;
+        padding: 0.6rem 0.75rem;
+        border: 1px solid var(--border);
+        color: var(--text);
+        background: rgba(15, 23, 42, 0.6);
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+
+      .support-grid a:hover {
+        background: rgba(30, 41, 59, 0.9);
+        border-color: #475569;
+      }
+
+      .support-grid a.wa {
+        color: #86efac;
+        border-color: rgba(34, 197, 94, 0.35);
+      }
+
+      .footer {
+        margin-top: 1.25rem;
+        font-size: 0.7rem;
+        color: #64748b;
+        line-height: 1.5;
+      }
+
+      .footer a {
+        color: #6ee7b7;
+        text-decoration: none;
+      }
+
+      .footer a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="glow" aria-hidden="true"></div>
+
+    <article class="card">
+      <div class="badge" id="status-badge">Service notice</div>
+      <p class="brand" id="brand-label">QareFi Billing</p>
+      <h1 id="headline">Your subscription has ended</h1>
+      <p class="lead" id="lead-text">
+        Your internet access is on an <strong>expired</strong> plan. Renew now to restore full speed and
+        normal service.
+      </p>
+
+      <a class="cta" id="renew-cta" href="/portal/renew">Renew &amp; pay</a>
+
+      <p class="note" id="wait-note">
+        If you already paid, wait up to <strong>5 minutes</strong> for the network to refresh. Still stuck?
+        Contact support below.
+      </p>
+
+      <hr />
+
+      <p class="support-title">Need help?</p>
+      <div class="support-grid" id="support-links">
+        <a class="tel" id="link-call" href="tel:+233501774210">Call support</a>
+        <a class="wa" id="link-whatsapp" href="https://wa.me/233501774210">WhatsApp</a>
+      </div>
+      <p class="footer" id="email-line">
+        Email:
+        <a id="link-email" href="mailto:support@qaretech.com">support@qaretech.com</a>
+      </p>
+      <p class="footer" id="powered-line">
+        <span id="copyright-year"></span> ·
+        <a href="https://qaretech.com" rel="noopener noreferrer">Qaretech Innovative</a>
+      </p>
+    </article>
+
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+
+        function text(id, v) {
+          var n = document.getElementById(id);
+          if (n && v) n.textContent = v;
+        }
+
+        var renewEl = document.getElementById('renew-cta');
+        if (renewEl) {
+          var customRenew = params.get('renew');
+          var billingBase = (params.get('billing_base') || '').trim().replace(/\/+$/, '');
+          var portalSlug = params.get('r') || params.get('slug') || '';
+
+          function renewPath() {
+            return '/portal/renew' + (portalSlug ? '?r=' + encodeURIComponent(portalSlug) : '');
+          }
+
+          if (customRenew) {
+            renewEl.href = customRenew;
+          } else if (billingBase) {
+            try {
+              renewEl.href = new URL(renewPath(), billingBase + '/').href;
+            } catch (e) {
+              renewEl.href = billingBase + renewPath();
+            }
+          } else {
+            try {
+              renewEl.href = new URL(renewPath(), window.location.origin).href;
+            } catch (e2) {
+              renewEl.href = renewPath();
+            }
+          }
+        }
+
+        var brand = params.get('brand');
+        if (brand) text('brand-label', brand);
+
+        var headline = params.get('headline');
+        if (headline) text('headline', headline);
+
+        var lead = params.get('lead');
+        if (lead) {
+          var leadEl = document.getElementById('lead-text');
+          if (leadEl) leadEl.textContent = lead;
+        }
+
+        var phone = params.get('phone') || '+233501774210';
+        var phoneDigits = phone.replace(/\D/g, '');
+        var call = document.getElementById('link-call');
+        if (call && phoneDigits) {
+          call.href = 'tel:' + phone;
+          call.textContent = 'Call support';
+        }
+
+        var wa = params.get('whatsapp') || phoneDigits;
+        var waDigits = String(wa).replace(/\D/g, '');
+        var waLink = document.getElementById('link-whatsapp');
+        if (waLink && waDigits) {
+          var msg = encodeURIComponent(
+            params.get('wa_text') || 'I need help renewing my internet subscription.'
+          );
+          waLink.href = 'https://wa.me/' + waDigits + (msg ? '?text=' + msg : '');
+        }
+
+        var email = params.get('email') || 'support@qaretech.com';
+        var mail = document.getElementById('link-email');
+        if (mail) {
+          mail.href = 'mailto:' + email;
+          mail.textContent = email;
+        }
+
+        var soft = params.get('soft') === '1' || params.get('soft') === 'true';
+        if (soft) {
+          var badge = document.getElementById('status-badge');
+          if (badge) badge.textContent = 'Friendly reminder';
+          text('headline', 'Renew before your line expires');
+          var leadEl2 = document.getElementById('lead-text');
+          if (leadEl2 && !lead)
+            leadEl2.innerHTML =
+              'Your plan is ending or has ended. <strong>Renew early</strong> to avoid interruption.';
+        }
+
+        var y = document.getElementById('copyright-year');
+        if (y) y.textContent = '© ' + new Date().getFullYear();
+      })();
+    </script>
+  </body>
+</html>
