@@ -1,5 +1,16 @@
 import { getToken, setToken, getActingOrganizationId } from './authStorage.js';
 
+/**
+ * When the SPA is on Vercel (or any static host) and the API is elsewhere (e.g. Render),
+ * set `VITE_API_BASE_URL` at build time to your API origin, e.g. `https://your-api.onrender.com`
+ * (no trailing slash). Leave unset for same-origin or Vite dev proxy (`/api` → local server).
+ */
+export function resolveApiUrl(path) {
+  const p = String(path ?? '').startsWith('/') ? String(path) : `/${path}`;
+  const base = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '');
+  return base ? `${base}${p}` : p;
+}
+
 export async function apiFetch(path, options = {}) {
   const token = getToken();
   const headers = {
@@ -12,7 +23,8 @@ export async function apiFetch(path, options = {}) {
     headers['X-Organization-Id'] = acting;
   }
 
-  const res = await fetch(path, {
+  const url = resolveApiUrl(path);
+  const res = await fetch(url, {
     cache: 'no-store',
     ...options,
     headers,
@@ -33,7 +45,8 @@ export async function apiFetch(path, options = {}) {
 }
 
 export async function publicFetch(path, options = {}) {
-  const res = await fetch(path, {
+  const url = resolveApiUrl(path);
+  const res = await fetch(url, {
     cache: 'no-store',
     ...options,
     headers: {

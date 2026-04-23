@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { apiFetch } from '../api.js';
+import { apiFetch, resolveApiUrl } from '../api.js';
 import { getActingOrganizationId, getToken } from '../authStorage.js';
 
 function auditMetaSummary(meta) {
@@ -112,7 +112,7 @@ export function OrganizationSettingsPage() {
       if (token) headers.Authorization = `Bearer ${token}`;
       const acting = getActingOrganizationId();
       if (acting) headers['X-Organization-Id'] = acting;
-      const res = await fetch('/api/organization/audit-log?format=csv&limit=500', {
+      const res = await fetch(resolveApiUrl('/api/organization/audit-log?format=csv&limit=500'), {
         headers,
         cache: 'no-store',
       });

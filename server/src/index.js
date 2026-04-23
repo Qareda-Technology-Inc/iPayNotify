@@ -20,11 +20,21 @@ if (process.env.TRUST_PROXY === 'true' || process.env.TRUST_PROXY === '1') {
   app.set('trust proxy', Number(process.env.TRUST_PROXY));
 }
 
-const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+/** Comma-separated origins when the SPA has several URLs (e.g. prod + Vercel preview). Wildcards are not supported. */
+const clientOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const corsOrigin =
+  clientOrigins.length === 0
+    ? 'http://localhost:5173'
+    : clientOrigins.length === 1
+      ? clientOrigins[0]
+      : clientOrigins;
 
 app.use(
   cors({
-    origin: clientOrigin,
+    origin: corsOrigin,
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Organization-Id'],
   })
