@@ -20,21 +20,67 @@ if (process.env.TRUST_PROXY === 'true' || process.env.TRUST_PROXY === '1') {
   app.set('trust proxy', Number(process.env.TRUST_PROXY));
 }
 
-/** Comma-separated origins when the SPA has several URLs (e.g. prod + Vercel preview). Wildcards are not supported. */
-const clientOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+/** Strip trailing slashes so `https://app.vercel.app/` matches the browser's `https://app.vercel.app`. */
+function normalizeCorsOrigin(o) {
+  return String(o ?? '')
+    .trim()
+    .replace(/\/+$/, '');
+}
+
+/** Comma-separated exact origins (prod + any preview URL you paste in). No trailing slash. */
+const clientOriginsRaw = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
   .split(',')
-  .map((s) => s.trim())
+  .map((s) => normalizeCorsOrigin(s))
   .filter(Boolean);
-const corsOrigin =
-  clientOrigins.length === 0
-    ? 'http://localhost:5173'
-    : clientOrigins.length === 1
-      ? clientOrigins[0]
-      : clientOrigins;
+const allowedOriginsExact = new Set(clientOriginsRaw);
+
+/**
+ * Optional: allow every Vercel deployment hostname for your team without listing each preview URL.
+ * Set to the stable part of preview hosts, e.g. `elprofessortechs-projects.vercel.app` (from
+ * `something-elprofessortechs-projects.vercel.app`). Comma-separated for multiple teams.
+ * Only https origins on matching hosts are accepted.
+ */
+const vercelPreviewHostSuffixes = (process.env.CORS_VERCEL_PREVIEW_HOST_SUFFIX || '')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+function hostMatchesVercelPreviewSuffix(hostname, suffixes) {
+  const h = String(hostname || '').toLowerCase();
+  return suffixes.some((s) => h === s || h.endsWith(`.${s}`) || h.endsWith(s));
+}
 
 app.use(
   cors({
-    origin: corsOrigin,
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      const norm = normalizeCorsOrigin(origin);
+      if (allowedOriginsExact.has(norm)) {
+        callback(null, origin);
+        return;
+      }
+      try {
+        const u = new URL(origin);
+        if (u.protocol !== 'https:') {
+          callback(null, false);
+          return;
+        }
+        if (
+          vercelPreviewHostSuffixes.length > 0 &&
+          hostMatchesVercelPreviewSuffix(u.hostname, vercelPreviewHostSuffixes)
+        ) {
+          callback(null, origin);
+          return;
+        }
+      } catch {
+        callback(null, false);
+        return;
+      }
+      callback(null, false);
+    },
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Organization-Id'],
   })

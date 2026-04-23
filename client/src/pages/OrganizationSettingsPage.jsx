@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { apiFetch, resolveApiUrl } from '../api.js';
+import { apiFetch, resolveApiUrl, fetchWithApiDiagnostics } from '../api.js';
 import { getActingOrganizationId, getToken } from '../authStorage.js';
 
 function auditMetaSummary(meta) {
@@ -112,10 +112,13 @@ export function OrganizationSettingsPage() {
       if (token) headers.Authorization = `Bearer ${token}`;
       const acting = getActingOrganizationId();
       if (acting) headers['X-Organization-Id'] = acting;
-      const res = await fetch(resolveApiUrl('/api/organization/audit-log?format=csv&limit=500'), {
-        headers,
-        cache: 'no-store',
-      });
+      const res = await fetchWithApiDiagnostics(
+        resolveApiUrl('/api/organization/audit-log?format=csv&limit=500'),
+        {
+          headers,
+          cache: 'no-store',
+        }
+      );
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
         throw new Error(errBody.error || res.statusText || 'Download failed');

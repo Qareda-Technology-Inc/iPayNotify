@@ -11,6 +11,28 @@ export function resolveApiUrl(path) {
   return base ? `${base}${p}` : p;
 }
 
+export async function fetchWithApiDiagnostics(url, init) {
+  if (
+    typeof window !== 'undefined' &&
+    window.location.protocol === 'https:' &&
+    String(url).startsWith('http:')
+  ) {
+    throw new Error(
+      'Mixed content blocked: the page is HTTPS but VITE_API_BASE_URL is http. Use https:// for your Render API URL.'
+    );
+  }
+  try {
+    return await fetch(url, init);
+  } catch (e) {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const base = String(import.meta.env.VITE_API_BASE_URL || '').trim();
+    const extra = base
+      ? ` Tried: ${url}. On Render set CLIENT_ORIGIN to include ${origin || '(your Vercel origin)'} (CORS).`
+      : ` Tried: ${url}. Set VITE_API_BASE_URL in Vercel to your Render API origin (https://…) and redeploy.`;
+    throw new Error(`${e?.message || 'Failed to fetch'}.${extra}`);
+  }
+}
+
 export async function apiFetch(path, options = {}) {
   const token = getToken();
   const headers = {
@@ -24,7 +46,7 @@ export async function apiFetch(path, options = {}) {
   }
 
   const url = resolveApiUrl(path);
-  const res = await fetch(url, {
+  const res = await fetchWithApiDiagnostics(url, {
     cache: 'no-store',
     ...options,
     headers,
@@ -46,7 +68,7 @@ export async function apiFetch(path, options = {}) {
 
 export async function publicFetch(path, options = {}) {
   const url = resolveApiUrl(path);
-  const res = await fetch(url, {
+  const res = await fetchWithApiDiagnostics(url, {
     cache: 'no-store',
     ...options,
     headers: {
