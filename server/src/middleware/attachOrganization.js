@@ -15,7 +15,7 @@ async function attachOrganizationMeta(req) {
 
 /**
  * After `requireAuth`, sets `req.organizationId` for tenant-scoped APIs.
- * - **org_admin**: always the organisation from their admin record (JWT may mirror it).
+ * - **org_admin / ticket_manager / org_staff**: always the organisation from their admin record (JWT may mirror it).
  * - **super_admin**: optional `X-Organization-Id` header or `?organizationId=` to act in one tenant;
  *   otherwise falls back to the default organisation (slug / env) so the main dashboard still works.
  */
@@ -31,7 +31,7 @@ export async function attachOrganization(req, res, next) {
       ? String(adminDoc.organizationId)
       : null;
 
-    if (role === 'org_admin') {
+    if (role === 'org_admin' || role === 'ticket_manager' || role === 'org_staff') {
       const fromJwt =
         req.jwtOrganizationId != null &&
         String(req.jwtOrganizationId).trim() &&

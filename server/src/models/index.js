@@ -12,3 +12,6 @@ export { MessageBroadcastLog } from './MessageBroadcastLog.js';
 export { HotspotVoucher } from './HotspotVoucher.js';
 export { Transaction } from './Transaction.js';
 export { BillingJobRun } from './BillingJobRun.js';
+export { TicketSite } from './TicketSite.js';
+export { TicketType } from './TicketType.js';
+export { TicketSale } from './TicketSale.js';

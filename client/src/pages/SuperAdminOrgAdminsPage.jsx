@@ -11,6 +11,7 @@ export function SuperAdminOrgAdminsPage() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [role, setRole] = useState('org_admin');
   const [creating, setCreating] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
@@ -18,6 +19,7 @@ export function SuperAdminOrgAdminsPage() {
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editPassword, setEditPassword] = useState('');
+  const [editRole, setEditRole] = useState('org_admin');
   const [savingEdit, setSavingEdit] = useState(false);
 
   const load = useCallback(async () => {
@@ -50,6 +52,7 @@ export function SuperAdminOrgAdminsPage() {
     setEditEmail(a.email || '');
     setEditPhone(a.phone || '');
     setEditPassword('');
+    setEditRole(a.role || 'org_admin');
     setEditOpen(true);
     setErr('');
   }
@@ -66,6 +69,7 @@ export function SuperAdminOrgAdminsPage() {
     setErr('');
     try {
       const body = { email: email.trim(), password };
+      body.role = role;
       if (phone.trim()) body.phone = phone.trim();
       await apiFetch(`/api/super-admin/organizations/${orgId}/admins`, {
         method: 'POST',
@@ -74,6 +78,7 @@ export function SuperAdminOrgAdminsPage() {
       setEmail('');
       setPhone('');
       setPassword('');
+      setRole('org_admin');
       await load();
     } catch (e) {
       setErr(e.message || 'Create failed');
@@ -88,7 +93,7 @@ export function SuperAdminOrgAdminsPage() {
     setSavingEdit(true);
     setErr('');
     try {
-      const body = { email: editEmail.trim(), phone: editPhone.trim() };
+      const body = { email: editEmail.trim(), phone: editPhone.trim(), role: editRole };
       if (editPassword.trim().length > 0) {
         body.password = editPassword;
       }
@@ -146,8 +151,8 @@ export function SuperAdminOrgAdminsPage() {
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
         <h2 className="text-lg font-medium text-white">Invite administrator</h2>
         <p className="mt-1 text-xs text-slate-500">
-          They sign in with this email and password and only see data for this organisation. Add a Ghana phone for SMS
-          login codes when verification is enabled.
+          Create organisation admins, ticket managers, or organisation staff for this organisation. Add a Ghana phone for
+          SMS login codes when verification is enabled.
         </p>
         <form onSubmit={createAdmin} className="mt-4 space-y-4">
           <label className="block text-sm text-slate-300">
@@ -159,6 +164,18 @@ export function SuperAdminOrgAdminsPage() {
               onChange={(e) => setEmail(e.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
             />
+          </label>
+          <label className="block text-sm text-slate-300">
+            Role
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+            >
+              <option value="org_admin">Organisation admin</option>
+              <option value="ticket_manager">Ticket manager</option>
+              <option value="org_staff">Organisation staff</option>
+            </select>
           </label>
           <label className="block text-sm text-slate-300">
             Phone <span className="text-slate-500">(optional, Ghana 0XX… or 233…)</span>
@@ -202,7 +219,16 @@ export function SuperAdminOrgAdminsPage() {
             {admins.map((a) => (
               <li key={a._id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-slate-200">{a.email}</p>
+                  <p className="text-sm text-slate-200">
+                    {a.email}{' '}
+                    <span className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] uppercase text-slate-400">
+                      {a.role === 'ticket_manager'
+                        ? 'Ticket manager'
+                        : a.role === 'org_staff'
+                          ? 'Org staff'
+                          : 'Org admin'}
+                    </span>
+                  </p>
                   {a.phone ? (
                     <p className="mt-0.5 font-mono text-xs text-slate-500">{a.phone}</p>
                   ) : (
@@ -256,6 +282,18 @@ export function SuperAdminOrgAdminsPage() {
                   onChange={(e) => setEditEmail(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
                 />
+              </label>
+              <label className="block text-sm text-slate-300">
+                Role
+                <select
+                  value={editRole}
+                  onChange={(e) => setEditRole(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+                >
+                  <option value="org_admin">Organisation admin</option>
+                  <option value="ticket_manager">Ticket manager</option>
+                  <option value="org_staff">Organisation staff</option>
+                </select>
               </label>
               <label className="block text-sm text-slate-300">
                 Phone <span className="text-slate-500">(optional)</span>

@@ -12,6 +12,7 @@ import { messageBroadcastsRouter } from './messageBroadcasts.js';
 import { jobsRouter } from './jobs.js';
 import { dashboardRouter } from './dashboard.js';
 import { organizationRouter } from './organization.js';
+import { ticketSalesRouter } from './ticketSales.js';
 
 const router = express.Router();
 
@@ -28,5 +29,6 @@ router.use('/message-broadcasts', messageBroadcastsRouter);
 router.use('/pppoe', pppoeRouter);
 router.use('/hotspot', hotspotRouter);
 router.use('/jobs', jobsRouter);
+router.use('/ticket-sales', ticketSalesRouter);
 
 export const protectedApiRouter = router;

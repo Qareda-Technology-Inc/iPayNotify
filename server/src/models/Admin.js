@@ -10,13 +10,13 @@ const adminSchema = new mongoose.Schema(
       trim: true,
     },
     passwordHash: { type: String, required: true },
-    /** `super_admin` = platform; `org_admin` = dashboard for one organisation only. */
+    /** `super_admin` = platform; `org_admin` = full org dashboard; `ticket_manager` = ticket sales + reports; `org_staff` = organisation staff access. */
     role: {
       type: String,
-      enum: ['super_admin', 'org_admin'],
+      enum: ['super_admin', 'org_admin', 'ticket_manager', 'org_staff'],
       default: 'super_admin',
     },
-    /** Required when role is `org_admin`; null for super admins. */
+    /** Required when role is organisation-scoped (`org_admin` / `ticket_manager` / `org_staff`); null for super admins. */
     organizationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Organization',

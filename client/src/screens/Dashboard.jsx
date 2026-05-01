@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { AdminShell } from '../layout/AdminShell.jsx';
 import { DashboardHome } from '../pages/DashboardHome.jsx';
 import { PaymentsPlaceholder } from '../pages/PaymentsPlaceholder.jsx';
@@ -15,22 +15,146 @@ import { SuperAdminOrgAdminsPage } from '../pages/SuperAdminOrgAdminsPage.jsx';
 import { SuperAdminEmailTemplatesPage } from '../pages/SuperAdminEmailTemplatesPage.jsx';
 import { OrganizationSettingsPage } from '../pages/OrganizationSettingsPage.jsx';
 import { SuperAdminGate } from '../components/SuperAdminGate.jsx';
+import { RoleGate } from '../components/RoleGate.jsx';
+import { TicketSitesPage } from '../pages/tickets/TicketSitesPage.jsx';
+import { TicketTypesPage } from '../pages/tickets/TicketTypesPage.jsx';
+import { TicketIssuePage } from '../pages/tickets/TicketIssuePage.jsx';
+import { TicketCollectionsPage } from '../pages/tickets/TicketCollectionsPage.jsx';
+import { TicketReportsPage } from '../pages/tickets/TicketReportsPage.jsx';
 
 export function Dashboard({ onSignOut }) {
   return (
     <Routes>
       <Route path="/" element={<AdminShell onSignOut={onSignOut} />}>
-        <Route index element={<DashboardHome />} />
-        <Route path="org/settings" element={<OrganizationSettingsPage />} />
-        <Route path="users/customers" element={<CustomersPage />} />
-        <Route path="users/active" element={<ActiveUsersPage />} />
-        <Route path="finance/packages" element={<PackagesPage />} />
-        <Route path="hotspot" element={<HotspotPanel />} />
-        <Route path="finance/pppoe" element={<PppoePanel />} />
-        <Route path="users/remote-access" element={<RemoteAccessPanel />} />
-        <Route path="finance/payments" element={<PaymentsPlaceholder />} />
-        <Route path="finance/messages" element={<MessagesPage />} />
-        <Route path="devices/mikrotik" element={<RoutersPanel />} />
+        <Route
+          index
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}>
+              <DashboardHome />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="org/settings"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
+              <OrganizationSettingsPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="users/customers"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
+              <CustomersPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="users/active"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
+              <ActiveUsersPage />
+            </RoleGate>
+          }
+        />
+        <Route path="tickets/sales" element={<Navigate to="/tickets/issue" replace />} />
+        <Route
+          path="tickets/sites"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}>
+              <TicketSitesPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="tickets/types"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}>
+              <TicketTypesPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="tickets/issue"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}>
+              <TicketIssuePage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="tickets/collections"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}>
+              <TicketCollectionsPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="tickets/reports"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}>
+              <TicketReportsPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="finance/packages"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
+              <PackagesPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="hotspot"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
+              <HotspotPanel />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="finance/pppoe"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
+              <PppoePanel />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="users/remote-access"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
+              <RemoteAccessPanel />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="finance/payments"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
+              <PaymentsPlaceholder />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="finance/messages"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
+              <MessagesPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="devices/mikrotik"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
+              <RoutersPanel />
+            </RoleGate>
+          }
+        />
         <Route
           path="super/organizations"
           element={

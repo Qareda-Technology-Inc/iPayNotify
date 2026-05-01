@@ -96,7 +96,10 @@ router.delete(
       return res.status(400).json({ error: 'Invalid id' });
     }
     const orgId = req.params.id;
-    const admins = await Admin.countDocuments({ organizationId: orgId, role: 'org_admin' });
+    const admins = await Admin.countDocuments({
+      organizationId: orgId,
+      role: { $in: ORG_SCOPED_ADMIN_ROLES },
+    });
     if (admins > 0) {
       return res.status(400).json({
         error: `Remove or reassign ${admins} organisation administrator(s) before deleting this organisation.`,
@@ -114,7 +117,9 @@ router.delete(
   })
 );
 
-/** Organisation-scoped admins (org_admin) */
+const ORG_SCOPED_ADMIN_ROLES = ['org_admin', 'ticket_manager', 'org_staff'];
+
+/** Organisation-scoped admins (org_admin, ticket_manager) */
 router.get(
   '/organizations/:orgId/admins',
   asyncHandler(async (req, res) => {
@@ -125,7 +130,7 @@ router.get(
     if (!org) return res.status(404).json({ error: 'Organisation not found' });
     const list = await Admin.find({
       organizationId: req.params.orgId,
-      role: 'org_admin',
+      role: { $in: ORG_SCOPED_ADMIN_ROLES },
     })
       .select('email phone role organizationId createdAt updatedAt')
       .sort({ email: 1 })
@@ -146,6 +151,9 @@ router.post(
       .toLowerCase()
       .trim();
     const password = req.body?.password;
+    const role = ORG_SCOPED_ADMIN_ROLES.includes(String(req.body?.role || '').trim())
+      ? String(req.body.role).trim()
+      : 'org_admin';
     const phoneRaw = req.body?.phone;
     let phone = '';
     if (phoneRaw != null && String(phoneRaw).trim()) {
@@ -170,7 +178,7 @@ router.post(
       email,
       phone,
       passwordHash,
-      role: 'org_admin',
+      role,
       organizationId: org._id,
     });
     res.status(201).json({
@@ -193,8 +201,15 @@ router.patch(
     const doc = await Admin.findOne({
       _id: req.params.adminId,
       organizationId: req.params.orgId,
-      role: 'org_admin',
+      role: { $in: ORG_SCOPED_ADMIN_ROLES },
     });
+    if (req.body.role != null) {
+      const role = String(req.body.role).trim();
+      if (!ORG_SCOPED_ADMIN_ROLES.includes(role)) {
+        return res.status(400).json({ error: 'Invalid role' });
+      }
+      doc.role = role;
+    }
     if (!doc) return res.status(404).json({ error: 'Administrator not found' });
     if (req.body.email != null) {
       const email = String(req.body.email).toLowerCase().trim();
@@ -289,7 +304,7 @@ router.delete(
     const r = await Admin.findOneAndDelete({
       _id: req.params.adminId,
       organizationId: req.params.orgId,
-      role: 'org_admin',
+      role: { $in: ORG_SCOPED_ADMIN_ROLES },
     });
     if (!r) return res.status(404).json({ error: 'Administrator not found' });
     res.status(204).end();

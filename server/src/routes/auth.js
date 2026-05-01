@@ -25,7 +25,10 @@ function signToken(admin) {
     email: admin.email,
     role,
   };
-  if (role === 'org_admin' && admin.organizationId) {
+  if (
+    (role === 'org_admin' || role === 'ticket_manager' || role === 'org_staff') &&
+    admin.organizationId
+  ) {
     payload.organizationId = String(admin.organizationId);
   }
   return jwt.sign(payload, config.jwtSecret, { expiresIn: config.jwtExpiresIn });
