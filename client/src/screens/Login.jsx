@@ -2,6 +2,34 @@ import { useEffect, useState } from 'react';
 import { setToken, setActingOrganizationId } from '../authStorage.js';
 import { publicFetch } from '../api.js';
 
+const VERIFY_PENDING_KEY = 'adminLoginVerifyPending';
+
+function readPendingVerify() {
+  try {
+    const raw = sessionStorage.getItem(VERIFY_PENDING_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writePendingVerify(payload) {
+  try {
+    sessionStorage.setItem(VERIFY_PENDING_KEY, JSON.stringify(payload));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearPendingVerify() {
+  try {
+    sessionStorage.removeItem(VERIFY_PENDING_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 function LogoMark({ className = '' }) {
   return (
     <svg className={className} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
@@ -53,7 +81,21 @@ export function Login({ onDone }) {
     };
   }, []);
 
+  useEffect(() => {
+    const p = readPendingVerify();
+    if (p?.challengeId) {
+      setChallengeId(p.challengeId);
+      setSentEmail(Boolean(p.sentEmail));
+      setSentSms(Boolean(p.sentSms));
+      setSameCodeOnBothChannels(Boolean(p.sameCodeOnBothChannels));
+      if (p.email) setEmail(String(p.email));
+      setStep('verify');
+      setCode('');
+    }
+  }, []);
+
   function resetFlow() {
+    clearPendingVerify();
     setStep('password');
     setChallengeId('');
     setSentEmail(false);
@@ -84,20 +126,47 @@ export function Login({ onDone }) {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
-      if (data.step === 'verify') {
-        setChallengeId(data.challengeId);
+      if (data._nonJson) {
+        setError('Login response was not valid JSON. Check API URL / hosting (proxy returning HTML).');
+        return;
+      }
+      const needsVerify =
+        data.step === 'verify' ||
+        (!data.token &&
+          typeof data.challengeId === 'string' &&
+          data.challengeId.length > 10);
+      if (needsVerify) {
+        const cid =
+          typeof data.challengeId === 'string' && data.challengeId.trim()
+            ? data.challengeId.trim()
+            : '';
+        if (!cid) {
+          setError('Verification was required but no challenge id was returned. Please try again.');
+          return;
+        }
+        setChallengeId(cid);
         setSentEmail(Boolean(data.sentEmail));
         setSentSms(Boolean(data.sentSms));
         setSameCodeOnBothChannels(Boolean(data.sameCodeOnBothChannels));
+        writePendingVerify({
+          challengeId: cid,
+          sentEmail: Boolean(data.sentEmail),
+          sentSms: Boolean(data.sentSms),
+          sameCodeOnBothChannels: Boolean(data.sameCodeOnBothChannels),
+          email: String(email || '').trim(),
+        });
         setStep('verify');
         setCode('');
         return;
       }
       if (data.token) {
+        clearPendingVerify();
         setToken(data.token);
         setActingOrganizationId(null);
         onDone();
+        return;
       }
+      setError('Unexpected login response. Please try again.');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -118,10 +187,13 @@ export function Login({ onDone }) {
         }),
       });
       if (data.token) {
+        clearPendingVerify();
         setToken(data.token);
         setActingOrganizationId(null);
         onDone();
+        return;
       }
+      setError('Verification did not return a session. Please try again.');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -163,10 +235,16 @@ export function Login({ onDone }) {
 
         <div className="rounded-2xl border border-slate-800/90 bg-slate-900/70 p-6 shadow-2xl shadow-black/40 ring-1 ring-white/5 backdrop-blur-md sm:p-8">
           {step === 'verify' && (
-            <div className="mb-6 flex items-center justify-center gap-2">
-              <span className="h-1.5 w-8 rounded-full bg-slate-700" />
-              <span className="h-1.5 w-8 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500" />
-            </div>
+            <>
+              <div className="mb-4 text-center">
+                <h2 className="text-lg font-semibold text-white">Verify it&apos;s you</h2>
+                <p className="mt-1 text-xs text-slate-500">Enter the 6-digit code we sent</p>
+              </div>
+              <div className="mb-6 flex items-center justify-center gap-2">
+                <span className="h-1.5 w-8 rounded-full bg-slate-700" />
+                <span className="h-1.5 w-8 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500" />
+              </div>
+            </>
           )}
 
           {loginVerifyEnabled && step === 'password' && (
@@ -276,7 +354,7 @@ export function Login({ onDone }) {
         </div>
 
         <p className="mt-8 text-center text-[11px] text-slate-600">
-          Protected by your organization&apos;s policies. Only use credentials you were given.
+          Protected by your organiz&apos;s policies. Only use credentials you were given.
         </p>
       </div>
     </div>
