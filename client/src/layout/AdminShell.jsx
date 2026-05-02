@@ -93,6 +93,7 @@ export function AdminShell({ onSignOut }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const adminEmail = me?.admin?.email || '';
+  const adminDisplayName = String(me?.admin?.fullName || '').trim() || adminEmail;
   const adminRole = me?.admin?.role || 'super_admin';
   const organizationName = me?.organizationName || null;
 
@@ -150,8 +151,11 @@ export function AdminShell({ onSignOut }) {
         <div className="border-b border-slate-800 px-4 py-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-indigo-400">QareFi</p>
           <h1 className="mt-1 text-lg font-semibold text-white">Billing</h1>
-          <p className="mt-1 truncate text-xs text-slate-500" title={adminEmail}>
-            {adminEmail}
+          <p className="mt-1 truncate text-xs text-slate-500" title={adminEmail ? `${adminDisplayName} · ${adminEmail}` : adminDisplayName}>
+            {adminDisplayName}
+            {adminEmail && adminDisplayName !== adminEmail ? (
+              <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-600">{adminEmail}</span>
+            ) : null}
           </p>
           {organizationName && (
             <p className="mt-1 truncate text-xs text-slate-400" title={organizationName}>

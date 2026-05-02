@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../api.js';
+import {
+  SellerOutstandingByTypePanel,
+  sellerOutstandingByTicketType,
+} from './tickets/SellerOutstandingByType.jsx';
 
 function money(cents) {
   return new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS' }).format((Number(cents) || 0) / 100);
+}
+
+function idOf(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object' && value._id) return String(value._id);
+  return String(value);
 }
 
 export function TicketSalesPage() {
@@ -26,10 +37,18 @@ export function TicketSalesPage() {
   const [saleSiteId, setSaleSiteId] = useState('');
   const [issueSellerName, setIssueSellerName] = useState('');
   const [quantity, setQuantity] = useState(1);
+  const [issueSellerPhone, setIssueSellerPhone] = useState('');
   const [note, setNote] = useState('');
   const [collectionIssueId, setCollectionIssueId] = useState('');
   const [collectionAmountGhs, setCollectionAmountGhs] = useState('');
   const [collectionNote, setCollectionNote] = useState('');
+  const [collectionHandoverByOther, setCollectionHandoverByOther] = useState(false);
+  const [collectionReceivedFromName, setCollectionReceivedFromName] = useState('');
+  const [collectionReceivedFromPhone, setCollectionReceivedFromPhone] = useState('');
+  const [issueSellerOpenRows, setIssueSellerOpenRows] = useState([]);
+  const [issueOutstandingLoading, setIssueOutstandingLoading] = useState(false);
+  const [collectionSellerOpenRows, setCollectionSellerOpenRows] = useState([]);
+  const [collectionOutstandingLoading, setCollectionOutstandingLoading] = useState(false);
 
   const isCatalogEditor = ['super_admin', 'org_admin'].includes(me?.admin?.role || '');
   const isSuperAdmin = me?.admin?.role === 'super_admin';
@@ -81,6 +100,78 @@ export function TicketSalesPage() {
     () => openIssues.find((i) => String(i._id) === String(collectionIssueId)),
     [openIssues, collectionIssueId]
   );
+
+  const issueOutstandingBreakdown = useMemo(
+    () => sellerOutstandingByTicketType(saleTypeOptions, issueSellerOpenRows),
+    [saleTypeOptions, issueSellerOpenRows]
+  );
+
+  const collectionSiteTypes = useMemo(
+    () =>
+      types.filter(
+        (t) =>
+          t.active &&
+          idOf(t.siteId) === idOf(selectedIssue?.siteId)
+      ),
+    [types, selectedIssue]
+  );
+
+  const collectionOutstandingBreakdown = useMemo(
+    () => sellerOutstandingByTicketType(collectionSiteTypes, collectionSellerOpenRows),
+    [collectionSiteTypes, collectionSellerOpenRows]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const site = String(saleSiteId || '').trim();
+    const seller = String(issueSellerName || '').trim();
+    if (!site || !seller) {
+      setIssueSellerOpenRows([]);
+      setIssueOutstandingLoading(false);
+      return undefined;
+    }
+    setIssueOutstandingLoading(true);
+    const qs = new URLSearchParams({ siteId: site, sellerName: seller });
+    apiFetch(`/api/ticket-sales/issues/open?${qs}`)
+      .then((rows) => {
+        if (!cancelled) setIssueSellerOpenRows(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setIssueSellerOpenRows([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIssueOutstandingLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [saleSiteId, issueSellerName]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const site = idOf(selectedIssue?.siteId);
+    const seller = String(selectedIssue?.sellerName || '').trim();
+    if (!site || !seller) {
+      setCollectionSellerOpenRows([]);
+      setCollectionOutstandingLoading(false);
+      return undefined;
+    }
+    setCollectionOutstandingLoading(true);
+    const qs = new URLSearchParams({ siteId: site, sellerName: seller });
+    apiFetch(`/api/ticket-sales/issues/open?${qs}`)
+      .then((rows) => {
+        if (!cancelled) setCollectionSellerOpenRows(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setCollectionSellerOpenRows([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCollectionOutstandingLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedIssue?._id, selectedIssue?.sellerName, idOf(selectedIssue?.siteId)]);
 
   async function createType(e) {
     e.preventDefault();
@@ -190,11 +281,13 @@ export function TicketSalesPage() {
           ticketTypeId: sellTypeId,
           sellerName: issueSellerName.trim(),
           quantity: Number(quantity),
+          ...(issueSellerPhone.trim() ? { sellerPhone: issueSellerPhone.trim() } : {}),
           note: note.trim() || undefined,
         }),
       });
       setQuantity(1);
       setIssueSellerName('');
+      setIssueSellerPhone('');
       setNote('');
       await loadAll();
     } catch (e2) {
@@ -206,6 +299,10 @@ export function TicketSalesPage() {
 
   async function recordCollection(e) {
     e.preventDefault();
+    if (collectionHandoverByOther && !collectionReceivedFromName.trim()) {
+      setErr('Enter the name of the person who handed over the cash.');
+      return;
+    }
     setBusy(true);
     setErr('');
     try {
@@ -214,11 +311,22 @@ export function TicketSalesPage() {
         body: JSON.stringify({
           issueSaleId: collectionIssueId,
           amountCents: Math.round(Number(collectionAmountGhs || 0) * 100),
+          ...(collectionHandoverByOther && collectionReceivedFromName.trim()
+            ? {
+                receivedFromName: collectionReceivedFromName.trim(),
+                ...(collectionReceivedFromPhone.trim()
+                  ? { receivedFromPhone: collectionReceivedFromPhone.trim() }
+                  : {}),
+              }
+            : {}),
           note: collectionNote.trim() || undefined,
         }),
       });
       setCollectionAmountGhs('');
       setCollectionNote('');
+      setCollectionHandoverByOther(false);
+      setCollectionReceivedFromName('');
+      setCollectionReceivedFromPhone('');
       setCollectionIssueId('');
       await loadAll();
     } catch (e2) {
@@ -359,9 +467,31 @@ export function TicketSalesPage() {
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
             />
           </label>
+          <SellerOutstandingByTypePanel
+            heading="Outstanding by ticket type (this seller)"
+            contextLine={
+              saleSiteId && issueSellerName.trim()
+                ? `${issueSellerName.trim()} · ${
+                    sites.find((s) => String(s._id) === String(saleSiteId))?.name || 'Site'
+                  }`
+                : ''
+            }
+            placeholder="Select site and seller name to see remaining quantity and amount for each ticket type."
+            breakdown={issueOutstandingBreakdown}
+            loading={issueOutstandingLoading}
+          />
           <label className="text-sm text-slate-300">
             Quantity
             <input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+          </label>
+          <label className="text-sm text-slate-300 sm:col-span-2">
+            Seller mobile (Ghana SMS, optional)
+            <input
+              value={issueSellerPhone}
+              onChange={(e) => setIssueSellerPhone(e.target.value)}
+              placeholder="SMS with quantity and amount when issued"
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+            />
           </label>
           <label className="text-sm text-slate-300 sm:col-span-2">
             Note (optional)
@@ -407,8 +537,60 @@ export function TicketSalesPage() {
               Seller: <strong className="text-white">{selectedIssue?.sellerName || '—'}</strong>
             </div>
             <div>
-              Remaining: <strong className="text-amber-300">{money(selectedIssue?.remainingCents || 0)}</strong>
+              Remaining on this batch:{' '}
+              <strong className="text-amber-300">{money(selectedIssue?.remainingCents || 0)}</strong>
             </div>
+          </div>
+          <SellerOutstandingByTypePanel
+            heading="This seller · all ticket types at site"
+            contextLine={
+              selectedIssue?.sellerName && idOf(selectedIssue?.siteId)
+                ? `${String(selectedIssue.sellerName).trim()} · ${
+                    sites.find((s) => String(s._id) === idOf(selectedIssue?.siteId))?.name || 'Site'
+                  }`
+                : ''
+            }
+            placeholder="Select an issued batch to see this seller's remaining quantity and amount for every ticket type."
+            breakdown={collectionOutstandingBreakdown}
+            loading={collectionOutstandingLoading}
+          />
+          <div className="sm:col-span-2 space-y-2 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-3">
+            <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={collectionHandoverByOther}
+                onChange={(e) => {
+                  setCollectionHandoverByOther(e.target.checked);
+                  if (!e.target.checked) {
+                    setCollectionReceivedFromName('');
+                    setCollectionReceivedFromPhone('');
+                  }
+                }}
+                className="mt-1 rounded border-slate-600"
+              />
+              <span>Someone else handed over the cash (optional: name and their phone for SMS).</span>
+            </label>
+            {collectionHandoverByOther && (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="text-sm text-slate-300 sm:col-span-2">
+                  Received cash from
+                  <input
+                    value={collectionReceivedFromName}
+                    onChange={(e) => setCollectionReceivedFromName(e.target.value)}
+                    required={collectionHandoverByOther}
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm text-slate-300 sm:col-span-2">
+                  Their mobile (optional)
+                  <input
+                    value={collectionReceivedFromPhone}
+                    onChange={(e) => setCollectionReceivedFromPhone(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+                  />
+                </label>
+              </div>
+            )}
           </div>
           <label className="text-sm text-slate-300">
             Note (optional)
@@ -493,7 +675,9 @@ export function TicketSalesPage() {
                       {s.kind === 'collected' ? 'Collected' : 'Issued'}
                     </span>
                   </td>
-                  <td className="px-2 py-2">{s.sellerAdminId?.email || '—'}</td>
+                  <td className="px-2 py-2">
+                    {String(s.sellerAdminId?.fullName || '').trim() || s.sellerAdminId?.email || '—'}
+                  </td>
                   <td className="px-2 py-2 font-semibold text-emerald-300">{money(s.amountCents)}</td>
                 </tr>
               ))}

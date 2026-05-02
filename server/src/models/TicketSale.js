@@ -26,6 +26,8 @@ const ticketSaleSchema = new mongoose.Schema(
       index: true,
     },
     sellerName: { type: String, required: true, trim: true, index: true },
+    /** Receiver/seller Ghana mobile for SMS alerts (stored as entered; normalized when sending). */
+    sellerPhone: { type: String, trim: true, default: '' },
     issueSaleId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'TicketSale',
@@ -41,6 +43,8 @@ const ticketSaleSchema = new mongoose.Schema(
     amountCents: { type: Number, required: true, min: 0 },
     /** Cash collection only: physical payer when not the seller (agent/messenger). */
     receivedFromName: { type: String, trim: true, default: '' },
+    /** Optional mobile for messenger when handing over cash (Ghana digits). */
+    receivedFromPhone: { type: String, trim: true, default: '' },
     note: { type: String, trim: true, default: '' },
     soldAt: { type: Date, default: Date.now, index: true },
   },

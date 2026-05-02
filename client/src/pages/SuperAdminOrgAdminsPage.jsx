@@ -8,6 +8,7 @@ export function SuperAdminOrgAdminsPage() {
   const [admins, setAdmins] = useState([]);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -16,6 +17,7 @@ export function SuperAdminOrgAdminsPage() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [editAdmin, setEditAdmin] = useState(null);
+  const [editFullName, setEditFullName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editPassword, setEditPassword] = useState('');
@@ -68,13 +70,14 @@ export function SuperAdminOrgAdminsPage() {
     setCreating(true);
     setErr('');
     try {
-      const body = { email: email.trim(), password };
+      const body = { fullName: fullName.trim(), email: email.trim(), password };
       body.role = role;
       if (phone.trim()) body.phone = phone.trim();
       await apiFetch(`/api/super-admin/organizations/${orgId}/admins`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
+      setFullName('');
       setEmail('');
       setPhone('');
       setPassword('');
@@ -93,7 +96,12 @@ export function SuperAdminOrgAdminsPage() {
     setSavingEdit(true);
     setErr('');
     try {
-      const body = { email: editEmail.trim(), phone: editPhone.trim(), role: editRole };
+      const body = {
+        fullName: editFullName.trim(),
+        email: editEmail.trim(),
+        phone: editPhone.trim(),
+        role: editRole,
+      };
       if (editPassword.trim().length > 0) {
         body.password = editPassword;
       }
@@ -155,6 +163,17 @@ export function SuperAdminOrgAdminsPage() {
           SMS login codes when verification is enabled.
         </p>
         <form onSubmit={createAdmin} className="mt-4 space-y-4">
+          <label className="block text-sm text-slate-300">
+            Full name
+            <input
+              type="text"
+              required
+              autoComplete="name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+            />
+          </label>
           <label className="block text-sm text-slate-300">
             Email
             <input
@@ -219,7 +238,10 @@ export function SuperAdminOrgAdminsPage() {
             {admins.map((a) => (
               <li key={a._id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-slate-200">
+                  <p className="text-sm font-medium text-white">
+                    {String(a.fullName || '').trim() || a.email}
+                  </p>
+                  <p className="text-sm text-slate-300">
                     {a.email}{' '}
                     <span className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] uppercase text-slate-400">
                       {a.role === 'ticket_manager'
@@ -273,6 +295,17 @@ export function SuperAdminOrgAdminsPage() {
               Edit administrator
             </h2>
             <form onSubmit={saveEdit} className="mt-4 space-y-4">
+              <label className="block text-sm text-slate-300">
+                Full name
+                <input
+                  type="text"
+                  required
+                  autoComplete="name"
+                  value={editFullName}
+                  onChange={(e) => setEditFullName(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+                />
+              </label>
               <label className="block text-sm text-slate-300">
                 Email
                 <input

@@ -177,7 +177,9 @@ export function TicketReportsPage() {
                       : '—'}
                   </td>
                   <td className="px-2 py-2">{s.kind === 'collected' ? 'Collected' : 'Issued'}</td>
-                  <td className="px-2 py-2">{s.sellerAdminId?.email || '—'}</td>
+                  <td className="px-2 py-2">
+                    {String(s.sellerAdminId?.fullName || '').trim() || s.sellerAdminId?.email || '—'}
+                  </td>
                   <td className="px-2 py-2 font-semibold text-emerald-300">{money(s.amountCents)}</td>
                 </tr>
               ))}

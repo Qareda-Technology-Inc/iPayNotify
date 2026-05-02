@@ -8,7 +8,7 @@ export async function seedDefaultAdmin() {
   const existing = await Admin.countDocuments();
   if (existing > 0) return { seeded: false };
 
-  const { email, password, phone } = config.defaultAdmin;
+  const { email, password, phone, fullName } = config.defaultAdmin;
   if (!email || !password) {
     console.warn('[QareFi] No default admin credentials; use POST /api/auth/setup or set env.');
     return { seeded: false };
@@ -22,6 +22,7 @@ export async function seedDefaultAdmin() {
   }
   await Admin.create({
     email: email.toLowerCase().trim(),
+    fullName: fullName ? String(fullName).trim() : '',
     passwordHash,
     phone: phoneNorm,
     role: 'super_admin',

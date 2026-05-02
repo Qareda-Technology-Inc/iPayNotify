@@ -67,9 +67,13 @@ authRouter.post(
     if (existing > 0) {
       return res.status(403).json({ error: 'An administrator account already exists' });
     }
-    const { email, password, phone: phoneRaw } = req.body;
+    const { email, password, phone: phoneRaw, fullName: fullNameRaw } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'email and password are required' });
+    }
+    const fullName = String(fullNameRaw || '').trim();
+    if (!fullName) {
+      return res.status(400).json({ error: 'fullName is required' });
     }
     if (String(password).length < 8) {
       return res.status(400).json({ error: 'Password must be at least 8 characters' });
@@ -85,6 +89,7 @@ authRouter.post(
     const passwordHash = await bcrypt.hash(String(password), SALT_ROUNDS);
     const admin = await Admin.create({
       email: String(email).toLowerCase().trim(),
+      fullName,
       passwordHash,
       phone,
       role: 'super_admin',
@@ -93,7 +98,7 @@ authRouter.post(
     const token = signToken(admin);
     res.status(201).json({
       token,
-      admin: { id: admin._id, email: admin.email, role: admin.role },
+      admin: { id: admin._id, email: admin.email, fullName: admin.fullName || '', role: admin.role },
     });
   })
 );
@@ -140,6 +145,7 @@ authRouter.post(
       admin: {
         id: admin._id,
         email: admin.email,
+        fullName: admin.fullName || '',
         role: admin.role || 'super_admin',
         organizationId: admin.organizationId || null,
       },
@@ -176,6 +182,7 @@ authRouter.post(
       admin: {
         id: admin._id,
         email: admin.email,
+        fullName: admin.fullName || '',
         role: admin.role || 'super_admin',
         organizationId: admin.organizationId || null,
       },
@@ -188,12 +195,15 @@ authRouter.get(
   requireAuth,
   attachOrganization,
   asyncHandler(async (req, res) => {
+    const row = await Admin.findById(req.admin.id).select('email role organizationId fullName phone').lean();
     res.json({
       admin: {
         id: req.admin.id,
-        email: req.admin.email,
-        role: req.admin.role || 'super_admin',
-        organizationId: req.admin.organizationId || null,
+        email: row?.email || req.admin.email,
+        fullName: String(row?.fullName || '').trim(),
+        phone: row?.phone || '',
+        role: row?.role || req.admin.role || 'super_admin',
+        organizationId: row?.organizationId != null ? row.organizationId : req.admin.organizationId || null,
       },
       organizationId: req.organizationId,
       organizationName: req.organizationName || null,

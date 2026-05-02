@@ -49,6 +49,17 @@ export async function createAndDispatchLoginChallenge(admin) {
   const codeHash = await bcrypt.hash(otp, OTP_ROUNDS);
   const expiresAt = new Date(Date.now() + CHALLENGE_TTL_MIN * 60 * 1000);
 
+  /** Create row first so we never return 200 after SMS without a persisted challenge the client can verify. */
+  const challengeDoc = await AdminLoginChallenge.create({
+    adminId: admin._id,
+    codeHash,
+    sentEmail: false,
+    sentSms: false,
+    consumed: false,
+    expiresAt,
+  });
+  const challengeId = String(challengeDoc._id);
+
   const smsTimeoutMs = Math.min(120_000, Math.max(5_000, Number(process.env.LOGIN_OTP_SMS_TIMEOUT_MS) || 20_000));
   const emailTimeoutMs = Math.min(120_000, Math.max(5_000, Number(process.env.LOGIN_OTP_EMAIL_TIMEOUT_MS) || 28_000));
 
@@ -99,6 +110,7 @@ export async function createAndDispatchLoginChallenge(admin) {
   const sentEmail = Boolean(emailOutcome.sent);
 
   if (!sentSms && !sentEmail) {
+    await AdminLoginChallenge.deleteOne({ _id: challengeDoc._id });
     const parts = [];
     if (smsOutcome.attempted) parts.push(`SMS: ${smsOutcome.detail || 'failed'}`);
     if (emailOutcome.attempted) parts.push(`Email: ${emailOutcome.detail || 'failed'}`);
@@ -111,17 +123,13 @@ export async function createAndDispatchLoginChallenge(admin) {
     throw e;
   }
 
-  const doc = await AdminLoginChallenge.create({
-    adminId: admin._id,
-    codeHash,
-    sentEmail,
-    sentSms,
-    consumed: false,
-    expiresAt,
-  });
+  await AdminLoginChallenge.updateOne(
+    { _id: challengeDoc._id },
+    { $set: { sentEmail, sentSms } }
+  );
 
   return {
-    challengeId: String(doc._id),
+    challengeId,
     sentEmail,
     sentSms,
     /** Same 6-digit code was sent to email and SMS when both are true. */

@@ -82,6 +82,7 @@ export const config = {
     password: process.env.DEFAULT_ADMIN_PASSWORD || 'qarefi2026',
     /** Optional Ghana MSISDN for SMS login verification on seeded super admin */
     phone: (process.env.DEFAULT_ADMIN_PHONE || '').trim(),
+    fullName: (process.env.DEFAULT_ADMIN_FULL_NAME || '').trim(),
   },
   /**
    * When true, POST /api/auth/login returns a verification step; codes are sent by email (SMTP) and/or SMS (Arkesel).

@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../api.js';
 import { money } from './common.js';
+import {
+  SellerOutstandingByTypePanel,
+  sellerOutstandingByTicketType,
+} from './SellerOutstandingByType.jsx';
 
 export function TicketIssuePage() {
   const [sites, setSites] = useState([]);
@@ -13,9 +17,12 @@ export function TicketIssuePage() {
   const [existingSellerName, setExistingSellerName] = useState('');
   const [sellerName, setSellerName] = useState('');
   const [quantity, setQuantity] = useState(1);
+  const [sellerPhone, setSellerPhone] = useState('');
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [sellerOpenIssues, setSellerOpenIssues] = useState([]);
+  const [outstandingLoading, setOutstandingLoading] = useState(false);
 
   async function load() {
     setErr('');
@@ -72,6 +79,37 @@ export function TicketIssuePage() {
   const sellType = useMemo(() => types.find((t) => String(t._id) === String(sellTypeId)), [types, sellTypeId]);
   const effectiveSellerName = useExistingSeller ? existingSellerName : sellerName;
 
+  const outstandingBreakdown = useMemo(
+    () => sellerOutstandingByTicketType(options, sellerOpenIssues),
+    [options, sellerOpenIssues]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const site = String(saleSiteId || '').trim();
+    const seller = String(effectiveSellerName || '').trim();
+    if (!site || !seller) {
+      setSellerOpenIssues([]);
+      setOutstandingLoading(false);
+      return undefined;
+    }
+    setOutstandingLoading(true);
+    const qs = new URLSearchParams({ siteId: site, sellerName: seller });
+    apiFetch(`/api/ticket-sales/issues/open?${qs}`)
+      .then((rows) => {
+        if (!cancelled) setSellerOpenIssues(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setSellerOpenIssues([]);
+      })
+      .finally(() => {
+        if (!cancelled) setOutstandingLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [saleSiteId, effectiveSellerName]);
+
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
@@ -83,11 +121,13 @@ export function TicketIssuePage() {
           ticketTypeId: sellTypeId,
           sellerName: String(effectiveSellerName || '').trim(),
           quantity: Number(quantity),
+          ...(sellerPhone.trim() ? { sellerPhone: sellerPhone.trim() } : {}),
           note: note.trim() || undefined,
         }),
       });
       setSellerName('');
       setQuantity(1);
+      setSellerPhone('');
       setNote('');
       await load();
     } catch (e2) {
@@ -167,8 +207,31 @@ export function TicketIssuePage() {
             />
           )}
         </div>
+        <SellerOutstandingByTypePanel
+          heading="Outstanding by ticket type (this seller)"
+          contextLine={
+            saleSiteId && String(effectiveSellerName || '').trim()
+              ? `${String(effectiveSellerName).trim()} · ${
+                  sites.find((s) => String(s._id) === String(saleSiteId))?.name || 'Site'
+                }`
+              : ''
+          }
+          placeholder="Select site and receiver name to see remaining quantity and amount for each ticket type."
+          breakdown={outstandingBreakdown}
+          loading={outstandingLoading}
+        />
         <label className="text-sm text-slate-300">Quantity
           <input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+        </label>
+        <label className="text-sm text-slate-300 sm:col-span-2">
+          Receiver mobile (Ghana SMS, optional)
+          <input
+            value={sellerPhone}
+            onChange={(e) => setSellerPhone(e.target.value)}
+            placeholder="e.g. 054… or 233…"
+            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+          />
+          <span className="mt-1 block text-xs text-slate-500">SMS includes quantity and total amount issued.</span>
         </label>
         <label className="text-sm text-slate-300 sm:col-span-2">Note (optional)
           <input value={note} onChange={(e) => setNote(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />

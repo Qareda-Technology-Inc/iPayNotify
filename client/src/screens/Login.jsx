@@ -30,6 +30,13 @@ function clearPendingVerify() {
   }
 }
 
+function coerceChallengeId(raw) {
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw.trim();
+  if (typeof raw === 'object' && typeof raw.$oid === 'string') return String(raw.$oid).trim();
+  return String(raw).trim();
+}
+
 function LogoMark({ className = '' }) {
   return (
     <svg className={className} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
@@ -83,8 +90,9 @@ export function Login({ onDone }) {
 
   useEffect(() => {
     const p = readPendingVerify();
-    if (p?.challengeId) {
-      setChallengeId(p.challengeId);
+    const pendingCid = coerceChallengeId(p?.challengeId);
+    if (pendingCid.length > 10) {
+      setChallengeId(pendingCid);
       setSentEmail(Boolean(p.sentEmail));
       setSentSms(Boolean(p.sentSms));
       setSameCodeOnBothChannels(Boolean(p.sameCodeOnBothChannels));
@@ -130,16 +138,11 @@ export function Login({ onDone }) {
         setError('Login response was not valid JSON. Check API URL / hosting (proxy returning HTML).');
         return;
       }
+      const cidFromApi = coerceChallengeId(data.challengeId);
       const needsVerify =
-        data.step === 'verify' ||
-        (!data.token &&
-          typeof data.challengeId === 'string' &&
-          data.challengeId.length > 10);
+        data.step === 'verify' || (!data.token && cidFromApi.length > 10);
       if (needsVerify) {
-        const cid =
-          typeof data.challengeId === 'string' && data.challengeId.trim()
-            ? data.challengeId.trim()
-            : '';
+        const cid = cidFromApi;
         if (!cid) {
           setError('Verification was required but no challenge id was returned. Please try again.');
           return;

@@ -3,6 +3,7 @@ import { setToken, setActingOrganizationId } from '../authStorage.js';
 import { publicFetch } from '../api.js';
 
 export function AdminSetup({ onDone }) {
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -19,7 +20,7 @@ export function AdminSetup({ onDone }) {
     }
     setLoading(true);
     try {
-      const body = { email, password };
+      const body = { fullName: fullName.trim(), email, password };
       if (phone.trim()) body.phone = phone.trim();
       const data = await publicFetch('/api/auth/setup', {
         method: 'POST',
@@ -42,6 +43,18 @@ export function AdminSetup({ onDone }) {
         Create the first super administrator (only if no default admin was seeded on the server).
       </p>
       <form onSubmit={onSubmit} className="mt-8 space-y-4">
+        <label className="block text-sm">
+          <span className="text-slate-300">Full name</span>
+          <input
+            type="text"
+            required
+            autoComplete="name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            placeholder="Jane Mensah"
+            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-slate-100 outline-none ring-emerald-500/40 focus:ring-2"
+          />
+        </label>
         <label className="block text-sm">
           <span className="text-slate-300">Email</span>
           <input

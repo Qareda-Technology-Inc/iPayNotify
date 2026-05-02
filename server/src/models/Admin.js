@@ -9,6 +9,8 @@ const adminSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    /** Display name for tickets, notices, and the dashboard (required on new admins via API). */
+    fullName: { type: String, trim: true, default: '' },
     passwordHash: { type: String, required: true },
     /** `super_admin` = platform; `org_admin` = full org dashboard; `ticket_manager` = ticket sales + reports; `org_staff` = organisation staff access. */
     role: {

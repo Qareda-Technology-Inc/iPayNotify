@@ -132,7 +132,7 @@ router.get(
       organizationId: req.params.orgId,
       role: { $in: ORG_SCOPED_ADMIN_ROLES },
     })
-      .select('email phone role organizationId createdAt updatedAt')
+      .select('email phone fullName role organizationId createdAt updatedAt')
       .sort({ email: 1 })
       .lean();
     res.json(list);
@@ -166,6 +166,10 @@ router.post(
     if (!email) {
       return res.status(400).json({ error: 'email is required' });
     }
+    const fullName = String(req.body?.fullName || '').trim();
+    if (!fullName) {
+      return res.status(400).json({ error: 'fullName is required' });
+    }
     if (!password || String(password).length < 8) {
       return res.status(400).json({ error: 'password must be at least 8 characters' });
     }
@@ -176,6 +180,7 @@ router.post(
     const passwordHash = await bcrypt.hash(String(password), SALT);
     const doc = await Admin.create({
       email,
+      fullName,
       phone,
       passwordHash,
       role,
@@ -184,6 +189,7 @@ router.post(
     res.status(201).json({
       _id: doc._id,
       email: doc.email,
+      fullName: doc.fullName || '',
       phone: doc.phone || '',
       role: doc.role,
       organizationId: doc.organizationId,
@@ -203,6 +209,7 @@ router.patch(
       organizationId: req.params.orgId,
       role: { $in: ORG_SCOPED_ADMIN_ROLES },
     });
+    if (!doc) return res.status(404).json({ error: 'Administrator not found' });
     if (req.body.role != null) {
       const role = String(req.body.role).trim();
       if (!ORG_SCOPED_ADMIN_ROLES.includes(role)) {
@@ -210,7 +217,6 @@ router.patch(
       }
       doc.role = role;
     }
-    if (!doc) return res.status(404).json({ error: 'Administrator not found' });
     if (req.body.email != null) {
       const email = String(req.body.email).toLowerCase().trim();
       if (!email) return res.status(400).json({ error: 'email cannot be empty' });
@@ -236,10 +242,16 @@ router.patch(
         doc.phone = n;
       }
     }
+    if (req.body.fullName !== undefined) {
+      const fn = String(req.body.fullName || '').trim();
+      if (!fn) return res.status(400).json({ error: 'fullName cannot be empty' });
+      doc.fullName = fn;
+    }
     await doc.save();
     res.json({
       _id: doc._id,
       email: doc.email,
+      fullName: doc.fullName || '',
       phone: doc.phone || '',
       role: doc.role,
       organizationId: doc.organizationId,

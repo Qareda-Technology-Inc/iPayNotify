@@ -7,6 +7,10 @@ import { notifyTicketTransactionUpdate } from '../services/ticketNotificationSer
 
 export const ticketSalesRouter = express.Router();
 
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 ticketSalesRouter.use(requireRoles('super_admin', 'org_admin', 'ticket_manager', 'org_staff'));
 
 ticketSalesRouter.get(
@@ -160,7 +164,7 @@ ticketSalesRouter.get(
       organizationId: req.organizationId,
       role: 'ticket_manager',
     })
-      .select('_id email phone role createdAt updatedAt')
+      .select('_id email phone fullName role createdAt updatedAt')
       .sort({ email: 1 })
       .lean();
     res.json(rows);
@@ -198,6 +202,7 @@ ticketSalesRouter.post(
     const ticketTypeId = String(req.body?.ticketTypeId || '').trim();
     const quantity = Number(req.body?.quantity || 1);
     const sellerName = String(req.body?.sellerName || '').trim();
+    const sellerPhone = String(req.body?.sellerPhone || '').trim();
     const note = String(req.body?.note || '').trim();
     if (!mongoose.isValidObjectId(ticketTypeId)) {
       return res.status(400).json({ error: 'ticketTypeId is required' });
@@ -226,6 +231,7 @@ ticketSalesRouter.post(
       sellerAdminId: req.admin.id,
       quantity: Math.round(quantity),
       amountCents,
+      ...(sellerPhone ? { sellerPhone } : {}),
       ...(note ? { note } : {}),
     });
     notifyTicketTransactionUpdate({
@@ -245,6 +251,7 @@ ticketSalesRouter.post(
     const amountCents = Number(req.body?.amountCents);
     const note = String(req.body?.note || '').trim();
     const receivedFromName = String(req.body?.receivedFromName || '').trim();
+    const receivedFromPhone = String(req.body?.receivedFromPhone || '').trim();
     if (!mongoose.isValidObjectId(issueSaleId)) {
       return res.status(400).json({ error: 'issueSaleId is required' });
     }
@@ -256,7 +263,7 @@ ticketSalesRouter.post(
       organizationId: req.organizationId,
       kind: 'issued',
     })
-      .select('siteId sellerName amountCents ticketTypeId')
+      .select('siteId sellerName sellerPhone amountCents ticketTypeId')
       .lean();
     if (!issue) return res.status(404).json({ error: 'Issued batch not found' });
     const agg = await TicketSale.aggregate([
@@ -302,6 +309,7 @@ ticketSalesRouter.post(
       quantity: collectedQty,
       amountCents: add,
       ...(receivedFromName ? { receivedFromName } : {}),
+      ...(receivedFromPhone ? { receivedFromPhone } : {}),
       ...(note ? { note } : {}),
     });
     notifyTicketTransactionUpdate({
@@ -325,13 +333,13 @@ ticketSalesRouter.get(
       matchIssued.ticketTypeId = String(req.query.ticketTypeId);
     }
     if (req.query.sellerName) {
-      matchIssued.sellerName = new RegExp(`^${String(req.query.sellerName).trim()}$`, 'i');
+      matchIssued.sellerName = new RegExp(`^${escapeRegex(String(req.query.sellerName).trim())}$`, 'i');
     }
     const issued = await TicketSale.find(matchIssued)
       .sort({ soldAt: -1, createdAt: -1 })
       .limit(300)
       .populate('siteId', 'name')
-      .populate('ticketTypeId', 'label')
+      .populate('ticketTypeId', 'label priceCents')
       .lean();
     const ids = issued.map((r) => r._id).filter(Boolean);
     const sums = await TicketSale.aggregate([
@@ -377,14 +385,14 @@ ticketSalesRouter.get(
       q.kind = String(req.query.kind);
     }
     if (req.query.sellerName) {
-      q.sellerName = new RegExp(`^${String(req.query.sellerName).trim()}$`, 'i');
+      q.sellerName = new RegExp(`^${escapeRegex(String(req.query.sellerName).trim())}$`, 'i');
     }
     const rows = await TicketSale.find(q)
       .sort({ soldAt: -1, createdAt: -1 })
       .limit(limit)
       .populate('ticketTypeId', 'label durationDays priceCents')
       .populate('siteId', 'name active')
-      .populate('sellerAdminId', 'email role')
+      .populate('sellerAdminId', 'email role fullName')
       .lean();
     res.json(rows);
   })
