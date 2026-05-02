@@ -250,7 +250,7 @@ export function Login({ onDone }) {
           {loginVerifyEnabled && step === 'password' && (
             <p className="mb-6 rounded-lg border border-slate-700/60 bg-slate-950/50 px-3 py-2.5 text-xs leading-relaxed text-slate-400">
               <span className="font-medium text-slate-300">Tip:</span> Org admins may get a one-time code by email
-              or SMS after password. Super admins sign in with password only.
+              or SMS after password.
             </p>
           )}
 
@@ -360,7 +360,7 @@ export function Login({ onDone }) {
         </div>
 
         <p className="mt-8 text-center text-[11px] text-slate-600">
-          Protected by your organization&apos;s policies. Only use credentials you were given.
+          Protected by QareTech&apos;s policies. Only use credentials you were given.
         </p>
       </div>
     </div>
