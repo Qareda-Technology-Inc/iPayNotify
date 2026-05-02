@@ -255,25 +255,29 @@ export function Login({ onDone }) {
           )}
 
           {step === 'password' ? (
-            <form onSubmit={onSubmitPassword} className="space-y-5">
-              <label className="block text-sm font-medium text-slate-200">
+            <form onSubmit={onSubmitPassword} className="space-y-5" autoComplete="on">
+              <label htmlFor="admin-login-email" className="block text-sm font-medium text-slate-200">
                 <span className="mb-1.5 block text-xs uppercase tracking-wider text-slate-500">Email</span>
                 <FieldShell>
                   <input
+                    id="admin-login-email"
+                    name="email"
                     type="email"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    autoComplete="email"
+                    autoComplete="username"
                     placeholder="you@company.com"
                     className="w-full rounded-xl border-0 bg-transparent px-4 py-3 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-0"
                   />
                 </FieldShell>
               </label>
-              <label className="block text-sm font-medium text-slate-200">
+              <label htmlFor="admin-login-password" className="block text-sm font-medium text-slate-200">
                 <span className="mb-1.5 block text-xs uppercase tracking-wider text-slate-500">Password</span>
                 <FieldShell>
                   <input
+                    id="admin-login-password"
+                    name="password"
                     type="password"
                     required
                     value={password}
@@ -305,12 +309,14 @@ export function Login({ onDone }) {
               </button>
             </form>
           ) : (
-            <form onSubmit={onSubmitVerify} className="space-y-5">
+            <form onSubmit={onSubmitVerify} className="space-y-5" autoComplete="on">
               <p className="text-center text-sm leading-relaxed text-slate-300">{verifyHint()}</p>
-              <label className="block text-sm font-medium text-slate-200">
+              <label htmlFor="admin-login-otp" className="block text-sm font-medium text-slate-200">
                 <span className="mb-1.5 block text-xs uppercase tracking-wider text-slate-500">6-digit code</span>
                 <FieldShell>
                   <input
+                    id="admin-login-otp"
+                    name="one-time-code"
                     type="text"
                     inputMode="numeric"
                     autoComplete="one-time-code"
@@ -354,7 +360,7 @@ export function Login({ onDone }) {
         </div>
 
         <p className="mt-8 text-center text-[11px] text-slate-600">
-          Protected by your organiz&apos;s policies. Only use credentials you were given.
+          Protected by your organization&apos;s policies. Only use credentials you were given.
         </p>
       </div>
     </div>
