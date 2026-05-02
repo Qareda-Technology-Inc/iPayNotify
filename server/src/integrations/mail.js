@@ -65,6 +65,10 @@ function getTransport() {
     host: String(host).trim(),
     port,
     secure,
+    /** Avoid hanging login / cron on Render when SMTP is slow or blocked */
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 25_000,
     auth:
       user && String(user).trim()
         ? { user: String(user).trim(), pass: String(pass || '') }

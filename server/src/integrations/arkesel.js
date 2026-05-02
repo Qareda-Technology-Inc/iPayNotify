@@ -43,31 +43,40 @@ export async function sendArkeselSms({ to, message, senderId: senderIdOverride }
     recipients: [phone],
   };
 
+  const timeoutMs = Math.min(120_000, Math.max(5_000, Number(process.env.ARKESEL_FETCH_TIMEOUT_MS) || 20_000));
+
   const doFetch = async () => {
-    const res = await fetch(smsUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify(payload),
-    });
-    const rawText = await res.text();
-    let data = {};
-    if (rawText) {
-      try {
-        data = JSON.parse(rawText);
-      } catch {
-        return {
-          res,
-          data: {
-            parseError: true,
-            _snippet: rawText.slice(0, 300),
-          },
-        };
+    const ac = new AbortController();
+    const kill = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      const res = await fetch(smsUrl, {
+        method: 'POST',
+        signal: ac.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': apiKey,
+        },
+        body: JSON.stringify(payload),
+      });
+      const rawText = await res.text();
+      let data = {};
+      if (rawText) {
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          return {
+            res,
+            data: {
+              parseError: true,
+              _snippet: rawText.slice(0, 300),
+            },
+          };
+        }
       }
+      return { res, data };
+    } finally {
+      clearTimeout(kill);
     }
-    return { res, data };
   };
 
   try {
@@ -103,7 +112,11 @@ export async function sendArkeselSms({ to, message, senderId: senderIdOverride }
 
     return { ok: true, raw: data };
   } catch (e) {
-    return { ok: false, error: e.message };
+    const msg =
+      e?.name === 'AbortError'
+        ? `SMS request timed out after ${timeoutMs}ms (check ARKESEL_FETCH_TIMEOUT_MS and outbound HTTPS from Render)`
+        : e.message;
+    return { ok: false, error: msg };
   }
 }
 
