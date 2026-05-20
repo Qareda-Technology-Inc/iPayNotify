@@ -125,6 +125,21 @@ export function parseDetailPrintOutput(stdout) {
       continue;
     }
 
+    /**
+     * RouterOS 7+ detail lines often start with a resource id (`*3FA2…`) instead of a decimal row index.
+     */
+    const hexRowId = /^\*([0-9A-Fa-f]+)\s+(.+)$/.exec(trimmed);
+    if (hexRowId) {
+      if (cur) rows.push(cur);
+      const idTok = `*${hexRowId[1]}`;
+      const parsed = parseRosKvSegment(hexRowId[2]);
+      cur =
+        Object.keys(parsed).length > 0
+          ? { numbers: idTok, '.id': idTok, ...parsed }
+          : { numbers: idTok, '.id': idTok };
+      continue;
+    }
+
     if (!trimmed.includes('=')) continue;
 
     const withIdx = /^(\d+)\s+(.+)$/.exec(trimmed);
@@ -160,7 +175,16 @@ export function parseAsValuePrintOutput(stdout) {
     if (/^flags:/i.test(line)) continue;
     /* Strip optional prompt / column header noise */
     line = line.replace(/^#\s*\d+:\s*/, '').replace(/^>\s*/, '');
-    if (!line || line.startsWith('!')) continue;
+    if (!line) continue;
+    /**
+     * Export / `print as-value` often prefixes each row with `!`. Stripping restores `key=value;…`.
+     * Skip only bare `!` or `!re` markers with no property data.
+     */
+    if (line.startsWith('!')) {
+      const rest = line.slice(1).trim();
+      if (!rest.includes('=')) continue;
+      line = rest;
+    }
 
     if (line.startsWith(':')) line = line.slice(1);
     const retEq = /^ret\s*=\s*(.+)$/i.exec(line);

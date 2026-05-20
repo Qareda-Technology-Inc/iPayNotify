@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../api.js';
+import { presetMessages, useMessage } from '../../messages/index.js';
 import { money } from './common.js';
 
 export function TicketTypesPage() {
+  const { showSuccess } = useMessage();
   const [me, setMe] = useState(null);
   const [sites, setSites] = useState([]);
   const [types, setTypes] = useState([]);
@@ -53,6 +55,7 @@ export function TicketTypesPage() {
           priceCents: Math.round(Number(priceGhs || 0) * 100),
         }),
       });
+      showSuccess(presetMessages.ticketTypeCreated);
       await load();
     } catch (e2) {
       setErr(e2.message || 'Could not create ticket type');

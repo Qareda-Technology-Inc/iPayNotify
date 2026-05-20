@@ -21,11 +21,13 @@ import { TicketTypesPage } from '../pages/tickets/TicketTypesPage.jsx';
 import { TicketIssuePage } from '../pages/tickets/TicketIssuePage.jsx';
 import { TicketCollectionsPage } from '../pages/tickets/TicketCollectionsPage.jsx';
 import { TicketReportsPage } from '../pages/tickets/TicketReportsPage.jsx';
+import { MessageProvider } from '../messages/MessageProvider.jsx';
 
 export function Dashboard({ onSignOut }) {
   return (
-    <Routes>
-      <Route path="/" element={<AdminShell onSignOut={onSignOut} />}>
+    <MessageProvider>
+      <Routes>
+        <Route path="/" element={<AdminShell onSignOut={onSignOut} />}>
         <Route
           index
           element={
@@ -179,7 +181,8 @@ export function Dashboard({ onSignOut }) {
             </SuperAdminGate>
           }
         />
-      </Route>
-    </Routes>
+        </Route>
+      </Routes>
+    </MessageProvider>
   );
 }

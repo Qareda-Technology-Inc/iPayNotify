@@ -139,6 +139,7 @@ function mapPppActiveRow(r) {
   let secret = rosFirstStr(r, [
     'user',
     'login',
+    'account',
     'caller-id',
     'caller-id-value',
     'name',
@@ -152,7 +153,12 @@ function mapPppActiveRow(r) {
       return null;
     }
   }
-  const address = rosFirstStr(r, ['address', 'remote-address', 'local-address']);
+  const address = rosFirstStr(r, [
+    'address',
+    'remote-address',
+    'client-address',
+    'local-address',
+  ]);
   const uptime = rosFirstStr(r, ['uptime', 'session-time', 'last-link-up-time']);
   return {
     id,

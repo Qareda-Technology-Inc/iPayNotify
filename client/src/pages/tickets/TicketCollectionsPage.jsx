@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../api.js';
+import { presetMessages, useMessage } from '../../messages/index.js';
 import { money } from './common.js';
 import {
   SellerOutstandingByTypePanel,
@@ -22,6 +23,7 @@ function issuesQueryString({ siteId, ticketTypeId }) {
 }
 
 export function TicketCollectionsPage() {
+  const { showSuccess } = useMessage();
   const [sites, setSites] = useState([]);
   const [types, setTypes] = useState([]);
   const [openIssues, setOpenIssues] = useState([]);
@@ -186,6 +188,7 @@ export function TicketCollectionsPage() {
           note: note.trim() || undefined,
         }),
       });
+      showSuccess(presetMessages.collectionRecorded);
       setAmountGhs('');
       setHandoverByOther(false);
       setReceivedFromName('');

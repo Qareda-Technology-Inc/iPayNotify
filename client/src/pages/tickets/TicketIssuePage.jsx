@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { apiFetch } from '../../api.js';
+import { presetMessages, useMessage } from '../../messages/index.js';
 import { money } from './common.js';
 import {
   SellerOutstandingByTypePanel,
@@ -7,14 +9,16 @@ import {
 } from './SellerOutstandingByType.jsx';
 
 export function TicketIssuePage() {
+  const { showSuccess } = useMessage();
   const [sites, setSites] = useState([]);
   const [types, setTypes] = useState([]);
   const [sales, setSales] = useState([]);
-  const [knownSellerNames, setKnownSellerNames] = useState([]);
+  const [siteSellers, setSiteSellers] = useState([]);
   const [saleSiteId, setSaleSiteId] = useState('');
   const [sellTypeId, setSellTypeId] = useState('');
-  const [useExistingSeller, setUseExistingSeller] = useState(true);
-  const [existingSellerName, setExistingSellerName] = useState('');
+  /** 'saved' = pick from TicketSiteSeller; 'legacy' = free-text name (no site seller row). */
+  const [sellerMode, setSellerMode] = useState('saved');
+  const [ticketSiteSellerId, setTicketSiteSellerId] = useState('');
   const [sellerName, setSellerName] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [sellerPhone, setSellerPhone] = useState('');
@@ -42,23 +46,30 @@ export function TicketIssuePage() {
     }
   }
 
-  async function loadSellerNames(site) {
+  async function loadSiteSellers(siteId) {
+    if (!siteId) {
+      setSiteSellers([]);
+      return;
+    }
     try {
-      const qs = site ? `?siteId=${encodeURIComponent(site)}` : '';
-      const names = await apiFetch(`/api/ticket-sales/seller-names${qs}`);
-      const normalized = Array.isArray(names) ? names : [];
-      setKnownSellerNames(normalized);
-      if (normalized.length > 0 && !normalized.some((n) => n === existingSellerName)) {
-        setExistingSellerName(normalized[0]);
+      const rows = await apiFetch(`/api/ticket-sales/sites/${encodeURIComponent(siteId)}/sellers`);
+      const list = Array.isArray(rows) ? rows : [];
+      setSiteSellers(list);
+      const active = list.filter((x) => x.active !== false);
+      if (active.length === 0) {
+        setSellerMode('legacy');
+        setTicketSiteSellerId('');
+        return;
       }
-      if (normalized.length === 0) {
-        setUseExistingSeller(false);
-        setExistingSellerName('');
+      if (!ticketSiteSellerId || !active.some((x) => String(x._id) === String(ticketSiteSellerId))) {
+        const first = active[0];
+        setTicketSiteSellerId(String(first._id));
+        setSellerPhone(String(first.phone || '').trim());
       }
     } catch {
-      setKnownSellerNames([]);
-      setUseExistingSeller(false);
-      setExistingSellerName('');
+      setSiteSellers([]);
+      setSellerMode('legacy');
+      setTicketSiteSellerId('');
     }
   }
 
@@ -68,7 +79,7 @@ export function TicketIssuePage() {
 
   useEffect(() => {
     if (!saleSiteId) return;
-    loadSellerNames(saleSiteId);
+    loadSiteSellers(saleSiteId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saleSiteId]);
 
@@ -77,7 +88,15 @@ export function TicketIssuePage() {
     [types, saleSiteId]
   );
   const sellType = useMemo(() => types.find((t) => String(t._id) === String(sellTypeId)), [types, sellTypeId]);
-  const effectiveSellerName = useExistingSeller ? existingSellerName : sellerName;
+  const activeSiteSellers = useMemo(() => siteSellers.filter((x) => x.active !== false), [siteSellers]);
+  const selectedSiteSeller = useMemo(
+    () => activeSiteSellers.find((x) => String(x._id) === String(ticketSiteSellerId)),
+    [activeSiteSellers, ticketSiteSellerId]
+  );
+  const effectiveSellerName =
+    sellerMode === 'saved' && selectedSiteSeller
+      ? String(selectedSiteSeller.name || '').trim()
+      : String(sellerName || '').trim();
 
   const outstandingBreakdown = useMemo(
     () => sellerOutstandingByTicketType(options, sellerOpenIssues),
@@ -115,21 +134,29 @@ export function TicketIssuePage() {
     setBusy(true);
     setErr('');
     try {
+      const body = {
+        ticketTypeId: sellTypeId,
+        quantity: Number(quantity),
+        note: note.trim() || undefined,
+      };
+      if (sellerMode === 'saved' && ticketSiteSellerId) {
+        body.ticketSiteSellerId = ticketSiteSellerId;
+        if (sellerPhone.trim()) body.sellerPhone = sellerPhone.trim();
+      } else {
+        body.sellerName = String(sellerName || '').trim();
+        if (sellerPhone.trim()) body.sellerPhone = sellerPhone.trim();
+      }
       await apiFetch('/api/ticket-sales/sales', {
         method: 'POST',
-        body: JSON.stringify({
-          ticketTypeId: sellTypeId,
-          sellerName: String(effectiveSellerName || '').trim(),
-          quantity: Number(quantity),
-          ...(sellerPhone.trim() ? { sellerPhone: sellerPhone.trim() } : {}),
-          note: note.trim() || undefined,
-        }),
+        body: JSON.stringify(body),
       });
+      showSuccess(presetMessages.ticketsIssued);
       setSellerName('');
       setQuantity(1);
       setSellerPhone('');
       setNote('');
       await load();
+      await loadSiteSellers(saleSiteId);
     } catch (e2) {
       setErr(e2.message || 'Could not save issued tickets');
     } finally {
@@ -141,20 +168,43 @@ export function TicketIssuePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-white">Issue tickets</h1>
-        <p className="mt-1 text-sm text-slate-400">Record ticket batches issued to sellers.</p>
+        <p className="mt-1 text-sm text-slate-400">
+          Record ticket batches issued to sellers. Manage{' '}
+          <Link to="/tickets/sites" className="text-emerald-400 underline hover:text-emerald-300">
+            sellers per site
+          </Link>{' '}
+          under Ticket sites.
+        </p>
       </div>
       {err && <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{err}</p>}
       <form onSubmit={submit} className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 grid gap-3 sm:grid-cols-2">
-        <label className="text-sm text-slate-300">Site
-          <select value={saleSiteId} onChange={(e) => { setSaleSiteId(e.target.value); setSellTypeId(''); }} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+        <label className="text-sm text-slate-300">
+          Site
+          <select
+            value={saleSiteId}
+            onChange={(e) => {
+              setSaleSiteId(e.target.value);
+              setSellTypeId('');
+            }}
+            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+          >
             <option value="">Select site…</option>
-            {sites.filter((s) => s.active !== false).map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
+            {sites.filter((s) => s.active !== false).map((s) => (
+              <option key={s._id} value={s._id}>
+                {s.name}
+              </option>
+            ))}
           </select>
         </label>
-        <label className="text-sm text-slate-300">Ticket type
+        <label className="text-sm text-slate-300">
+          Ticket type
           <select value={sellTypeId} onChange={(e) => setSellTypeId(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
             <option value="">Select ticket…</option>
-            {options.map((t) => <option key={t._id} value={t._id}>{t.label} - {money(t.priceCents)}</option>)}
+            {options.map((t) => (
+              <option key={t._id} value={t._id}>
+                {t.label} - {money(t.priceCents)}
+              </option>
+            ))}
           </select>
         </label>
         <div className="text-sm text-slate-300 sm:col-span-2">
@@ -164,35 +214,36 @@ export function TicketIssuePage() {
               <input
                 type="radio"
                 name="sellerMode"
-                checked={useExistingSeller}
-                onChange={() => setUseExistingSeller(true)}
-                disabled={knownSellerNames.length === 0}
+                checked={sellerMode === 'saved'}
+                onChange={() => setSellerMode('saved')}
+                disabled={activeSiteSellers.length === 0}
               />
-              <span>Select existing person</span>
+              <span>Saved seller for this site</span>
             </label>
             <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
-              <input
-                type="radio"
-                name="sellerMode"
-                checked={!useExistingSeller}
-                onChange={() => setUseExistingSeller(false)}
-              />
-              <span>Enter new person</span>
+              <input type="radio" name="sellerMode" checked={sellerMode === 'legacy'} onChange={() => setSellerMode('legacy')} />
+              <span>One-off name (not saved)</span>
             </label>
           </div>
-          {useExistingSeller ? (
+          {sellerMode === 'saved' ? (
             <select
-              value={existingSellerName}
-              onChange={(e) => setExistingSellerName(e.target.value)}
-              disabled={knownSellerNames.length === 0}
+              value={ticketSiteSellerId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setTicketSiteSellerId(id);
+                const row = activeSiteSellers.find((x) => String(x._id) === id);
+                setSellerPhone(String(row?.phone || '').trim());
+              }}
+              disabled={activeSiteSellers.length === 0}
               className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 disabled:opacity-60"
             >
-              {knownSellerNames.length === 0 ? (
-                <option value="">No existing names for this site yet</option>
+              {activeSiteSellers.length === 0 ? (
+                <option value="">No sellers for this site yet — add under Ticket sites</option>
               ) : (
-                knownSellerNames.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
+                activeSiteSellers.map((row) => (
+                  <option key={row._id} value={row._id}>
+                    {row.name}
+                    {row.phone ? ` · ${row.phone}` : ''}
                   </option>
                 ))
               )}
@@ -201,7 +252,7 @@ export function TicketIssuePage() {
             <input
               value={sellerName}
               onChange={(e) => setSellerName(e.target.value)}
-              required={!useExistingSeller}
+              required={sellerMode === 'legacy'}
               placeholder="Enter receiver name"
               className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
             />
@@ -211,20 +262,19 @@ export function TicketIssuePage() {
           heading="Outstanding by ticket type (this seller)"
           contextLine={
             saleSiteId && String(effectiveSellerName || '').trim()
-              ? `${String(effectiveSellerName).trim()} · ${
-                  sites.find((s) => String(s._id) === String(saleSiteId))?.name || 'Site'
-                }`
+              ? `${String(effectiveSellerName).trim()} · ${sites.find((s) => String(s._id) === String(saleSiteId))?.name || 'Site'}`
               : ''
           }
-          placeholder="Select site and receiver name to see remaining quantity and amount for each ticket type."
+          placeholder="Select site and receiver to see remaining quantity and amount for each ticket type."
           breakdown={outstandingBreakdown}
           loading={outstandingLoading}
         />
-        <label className="text-sm text-slate-300">Quantity
+        <label className="text-sm text-slate-300">
+          Quantity
           <input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
         </label>
         <label className="text-sm text-slate-300 sm:col-span-2">
-          Receiver mobile (Ghana SMS, optional)
+          Receiver mobile (Ghana SMS, optional — overrides saved seller phone when using saved seller)
           <input
             value={sellerPhone}
             onChange={(e) => setSellerPhone(e.target.value)}
@@ -233,7 +283,8 @@ export function TicketIssuePage() {
           />
           <span className="mt-1 block text-xs text-slate-500">SMS includes quantity and total amount issued.</span>
         </label>
-        <label className="text-sm text-slate-300 sm:col-span-2">Note (optional)
+        <label className="text-sm text-slate-300 sm:col-span-2">
+          Note (optional)
           <input value={note} onChange={(e) => setNote(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
         </label>
         <div className="sm:col-span-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-300">
@@ -241,7 +292,12 @@ export function TicketIssuePage() {
         </div>
         <button
           type="submit"
-          disabled={busy || !sellTypeId || !String(effectiveSellerName || '').trim()}
+          disabled={
+            busy ||
+            !sellTypeId ||
+            (sellerMode === 'saved' && (!ticketSiteSellerId || activeSiteSellers.length === 0)) ||
+            (sellerMode === 'legacy' && !String(sellerName || '').trim())
+          }
           className="sm:col-span-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-50"
         >
           Save issued tickets
@@ -261,4 +317,3 @@ export function TicketIssuePage() {
     </div>
   );
 }
-

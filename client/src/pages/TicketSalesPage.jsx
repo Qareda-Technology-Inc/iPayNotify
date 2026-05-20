@@ -36,6 +36,9 @@ export function TicketSalesPage() {
   const [sellTypeId, setSellTypeId] = useState('');
   const [saleSiteId, setSaleSiteId] = useState('');
   const [issueSellerName, setIssueSellerName] = useState('');
+  const [issueSiteSellers, setIssueSiteSellers] = useState([]);
+  const [issueSellerMode, setIssueSellerMode] = useState('saved');
+  const [issueTicketSiteSellerId, setIssueTicketSiteSellerId] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [issueSellerPhone, setIssueSellerPhone] = useState('');
   const [note, setNote] = useState('');
@@ -96,6 +99,51 @@ export function TicketSalesPage() {
         (!saleSiteId || String(t.siteId) === String(saleSiteId))
     );
   }, [types, saleSiteId]);
+
+  const activeIssueSiteSellers = useMemo(
+    () => issueSiteSellers.filter((s) => s.active !== false),
+    [issueSiteSellers]
+  );
+  const selectedIssueSiteSeller = useMemo(
+    () => activeIssueSiteSellers.find((s) => String(s._id) === String(issueTicketSiteSellerId)),
+    [activeIssueSiteSellers, issueTicketSiteSellerId]
+  );
+  const issueEffectiveSellerName = useMemo(() => {
+    if (issueSellerMode === 'saved' && selectedIssueSiteSeller) {
+      return String(selectedIssueSiteSeller.name || '').trim();
+    }
+    return String(issueSellerName || '').trim();
+  }, [issueSellerMode, selectedIssueSiteSeller, issueSellerName]);
+
+  useEffect(() => {
+    if (!saleSiteId) {
+      setIssueSiteSellers([]);
+      setIssueTicketSiteSellerId('');
+      return undefined;
+    }
+    let cancelled = false;
+    setIssueTicketSiteSellerId('');
+    apiFetch(`/api/ticket-sales/sites/${saleSiteId}/sellers`)
+      .then((rows) => {
+        if (cancelled) return;
+        const list = Array.isArray(rows) ? rows : [];
+        setIssueSiteSellers(list);
+        const activeList = list.filter((s) => s.active !== false);
+        if (activeList.length > 0) {
+          setIssueTicketSiteSellerId(String(activeList[0]._id));
+          setIssueSellerMode((m) => (m === 'legacy' ? m : 'saved'));
+        } else {
+          setIssueSellerMode('legacy');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setIssueSiteSellers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [saleSiteId]);
+
   const selectedIssue = useMemo(
     () => openIssues.find((i) => String(i._id) === String(collectionIssueId)),
     [openIssues, collectionIssueId]
@@ -124,7 +172,7 @@ export function TicketSalesPage() {
   useEffect(() => {
     let cancelled = false;
     const site = String(saleSiteId || '').trim();
-    const seller = String(issueSellerName || '').trim();
+    const seller = issueEffectiveSellerName;
     if (!site || !seller) {
       setIssueSellerOpenRows([]);
       setIssueOutstandingLoading(false);
@@ -145,7 +193,7 @@ export function TicketSalesPage() {
     return () => {
       cancelled = true;
     };
-  }, [saleSiteId, issueSellerName]);
+  }, [saleSiteId, issueEffectiveSellerName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -272,18 +320,33 @@ export function TicketSalesPage() {
 
   async function recordSale(e) {
     e.preventDefault();
+    const useSaved = issueSellerMode === 'saved' && activeIssueSiteSellers.length > 0;
+    if (useSaved && !issueTicketSiteSellerId) {
+      setErr('Select a saved seller for this site.');
+      return;
+    }
+    if (!useSaved && !issueSellerName.trim()) {
+      setErr('Enter a seller name or add saved sellers for this site.');
+      return;
+    }
     setBusy(true);
     setErr('');
     try {
+      const body = {
+        ticketTypeId: sellTypeId,
+        quantity: Number(quantity),
+        note: note.trim() || undefined,
+      };
+      if (useSaved) {
+        body.ticketSiteSellerId = issueTicketSiteSellerId;
+        if (issueSellerPhone.trim()) body.sellerPhone = issueSellerPhone.trim();
+      } else {
+        body.sellerName = issueSellerName.trim();
+        if (issueSellerPhone.trim()) body.sellerPhone = issueSellerPhone.trim();
+      }
       await apiFetch('/api/ticket-sales/sales', {
         method: 'POST',
-        body: JSON.stringify({
-          ticketTypeId: sellTypeId,
-          sellerName: issueSellerName.trim(),
-          quantity: Number(quantity),
-          ...(issueSellerPhone.trim() ? { sellerPhone: issueSellerPhone.trim() } : {}),
-          note: note.trim() || undefined,
-        }),
+        body: JSON.stringify(body),
       });
       setQuantity(1);
       setIssueSellerName('');
@@ -341,7 +404,11 @@ export function TicketSalesPage() {
       <div>
         <h1 className="text-xl font-semibold text-white">Ticket sales control</h1>
         <p className="mt-1 text-sm text-slate-400">
-          Track 1-day / 2-day / 1-week / 1-month ticket sales per site and per seller.
+          Track 1-day / 2-day / 1-week / 1-month ticket sales per site and per seller. Manage{' '}
+          <Link to="/tickets/sites" className="text-emerald-400 underline hover:text-emerald-300">
+            sellers per site
+          </Link>{' '}
+          under Ticket sites.
         </p>
       </div>
       {isSuperAdmin && (
@@ -457,26 +524,70 @@ export function TicketSalesPage() {
               ))}
             </select>
           </label>
-          <label className="text-sm text-slate-300">
-            Seller name
-            <input
-              required
-              value={issueSellerName}
-              onChange={(e) => setIssueSellerName(e.target.value)}
-              placeholder="e.g. Kofi, Ama"
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-            />
-          </label>
+          <div className="text-sm text-slate-300 sm:col-span-2">
+            Receiver / seller
+            <div className="mt-1 grid gap-2 sm:grid-cols-2">
+              <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+                <input
+                  type="radio"
+                  name="issueSellerMode"
+                  checked={issueSellerMode === 'saved'}
+                  onChange={() => setIssueSellerMode('saved')}
+                  disabled={activeIssueSiteSellers.length === 0}
+                />
+                <span>Saved seller for this site</span>
+              </label>
+              <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+                <input
+                  type="radio"
+                  name="issueSellerMode"
+                  checked={issueSellerMode === 'legacy'}
+                  onChange={() => setIssueSellerMode('legacy')}
+                />
+                <span>One-off name (not saved)</span>
+              </label>
+            </div>
+            {issueSellerMode === 'saved' ? (
+              <select
+                value={issueTicketSiteSellerId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setIssueTicketSiteSellerId(id);
+                  const row = activeIssueSiteSellers.find((x) => String(x._id) === id);
+                  setIssueSellerPhone(String(row?.phone || '').trim());
+                }}
+                disabled={activeIssueSiteSellers.length === 0}
+                className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 disabled:opacity-60"
+              >
+                {activeIssueSiteSellers.length === 0 ? (
+                  <option value="">No sellers for this site yet — add under Ticket sites</option>
+                ) : (
+                  activeIssueSiteSellers.map((row) => (
+                    <option key={row._id} value={row._id}>
+                      {row.name}
+                      {row.phone ? ` · ${row.phone}` : ''}
+                    </option>
+                  ))
+                )}
+              </select>
+            ) : (
+              <input
+                value={issueSellerName}
+                onChange={(e) => setIssueSellerName(e.target.value)}
+                required={issueSellerMode === 'legacy'}
+                placeholder="Enter receiver name"
+                className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+              />
+            )}
+          </div>
           <SellerOutstandingByTypePanel
             heading="Outstanding by ticket type (this seller)"
             contextLine={
-              saleSiteId && issueSellerName.trim()
-                ? `${issueSellerName.trim()} · ${
-                    sites.find((s) => String(s._id) === String(saleSiteId))?.name || 'Site'
-                  }`
+              saleSiteId && issueEffectiveSellerName
+                ? `${issueEffectiveSellerName} · ${sites.find((s) => String(s._id) === String(saleSiteId))?.name || 'Site'}`
                 : ''
             }
-            placeholder="Select site and seller name to see remaining quantity and amount for each ticket type."
+            placeholder="Select site and receiver to see remaining quantity and amount for each ticket type."
             breakdown={issueOutstandingBreakdown}
             loading={issueOutstandingLoading}
           />
@@ -485,7 +596,7 @@ export function TicketSalesPage() {
             <input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
           </label>
           <label className="text-sm text-slate-300 sm:col-span-2">
-            Seller mobile (Ghana SMS, optional)
+            Seller mobile (Ghana SMS, optional — overrides saved seller phone when using saved seller)
             <input
               value={issueSellerPhone}
               onChange={(e) => setIssueSellerPhone(e.target.value)}
@@ -500,7 +611,17 @@ export function TicketSalesPage() {
           <div className="sm:col-span-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-300">
             Total: <strong className="text-white">{money((sellType?.priceCents || 0) * Number(quantity || 0))}</strong>
           </div>
-          <button type="submit" disabled={busy || !sellTypeId || !issueSellerName.trim()} className="sm:col-span-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+          <button
+            type="submit"
+            disabled={
+              busy ||
+              !sellTypeId ||
+              (issueSellerMode === 'saved'
+                ? !issueTicketSiteSellerId || activeIssueSiteSellers.length === 0
+                : !issueSellerName.trim())
+            }
+            className="sm:col-span-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
             Save issued tickets
           </button>
         </form>

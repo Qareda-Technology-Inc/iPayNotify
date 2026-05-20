@@ -2,7 +2,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
-import { Admin, TicketSale, TicketSite, TicketType } from '../models/index.js';
+import { Admin, TicketSale, TicketSite, TicketSiteSeller, TicketType } from '../models/index.js';
 import { notifyTicketTransactionUpdate } from '../services/ticketNotificationService.js';
 
 export const ticketSalesRouter = express.Router();
@@ -73,6 +73,13 @@ ticketSalesRouter.delete(
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
     const inUse = await TicketType.countDocuments({ organizationId: req.organizationId, siteId: req.params.id });
     if (inUse > 0) return res.status(400).json({ error: 'Site is in use by ticket types. Deactivate or move types first.' });
+    const sellersLeft = await TicketSiteSeller.countDocuments({
+      organizationId: req.organizationId,
+      siteId: req.params.id,
+    });
+    if (sellersLeft > 0) {
+      return res.status(400).json({ error: 'Site has registered sellers. Remove or move them first.' });
+    }
     const r = await TicketSite.findOneAndDelete({ _id: req.params.id, organizationId: req.organizationId });
     if (!r) return res.status(404).json({ error: 'Site not found' });
     res.status(204).end();
@@ -157,6 +164,116 @@ ticketSalesRouter.patch(
 );
 
 ticketSalesRouter.get(
+  '/sites/:siteId/sellers',
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.siteId)) {
+      return res.status(400).json({ error: 'Invalid site id' });
+    }
+    const site = await TicketSite.findOne({
+      _id: req.params.siteId,
+      organizationId: req.organizationId,
+    })
+      .select('_id')
+      .lean();
+    if (!site) return res.status(404).json({ error: 'Site not found' });
+    const rows = await TicketSiteSeller.find({
+      siteId: site._id,
+      organizationId: req.organizationId,
+    })
+      .sort({ name: 1 })
+      .lean();
+    res.json(rows);
+  })
+);
+
+ticketSalesRouter.post(
+  '/sites/:siteId/sellers',
+  requireRoles('super_admin', 'org_admin', 'ticket_manager'),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.siteId)) {
+      return res.status(400).json({ error: 'Invalid site id' });
+    }
+    const site = await TicketSite.findOne({
+      _id: req.params.siteId,
+      organizationId: req.organizationId,
+    })
+      .select('_id')
+      .lean();
+    if (!site) return res.status(404).json({ error: 'Site not found' });
+    const name = String(req.body?.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const phone = String(req.body?.phone || '').trim();
+    const notes = String(req.body?.notes || '').trim();
+    try {
+      const doc = await TicketSiteSeller.create({
+        organizationId: req.organizationId,
+        siteId: site._id,
+        name,
+        ...(phone ? { phone } : {}),
+        ...(notes ? { notes } : {}),
+        active: req.body?.active !== false,
+      });
+      res.status(201).json(doc.toObject());
+    } catch (e) {
+      if (e?.code === 11000) {
+        return res.status(400).json({ error: 'A seller with this name already exists at this site' });
+      }
+      throw e;
+    }
+  })
+);
+
+ticketSalesRouter.patch(
+  '/sites/:siteId/sellers/:sellerId',
+  requireRoles('super_admin', 'org_admin', 'ticket_manager'),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.siteId) || !mongoose.isValidObjectId(req.params.sellerId)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    const doc = await TicketSiteSeller.findOne({
+      _id: req.params.sellerId,
+      siteId: req.params.siteId,
+      organizationId: req.organizationId,
+    });
+    if (!doc) return res.status(404).json({ error: 'Seller not found' });
+    if (req.body?.name != null) {
+      const n = String(req.body.name).trim();
+      if (!n) return res.status(400).json({ error: 'name cannot be empty' });
+      doc.name = n;
+    }
+    if (req.body?.phone !== undefined) doc.phone = String(req.body.phone || '').trim();
+    if (req.body?.notes !== undefined) doc.notes = String(req.body.notes || '').trim();
+    if (req.body?.active != null) doc.active = Boolean(req.body.active);
+    try {
+      await doc.save();
+    } catch (e) {
+      if (e?.code === 11000) {
+        return res.status(400).json({ error: 'A seller with this name already exists at this site' });
+      }
+      throw e;
+    }
+    res.json(doc.toObject());
+  })
+);
+
+ticketSalesRouter.delete(
+  '/sites/:siteId/sellers/:sellerId',
+  requireRoles('super_admin', 'org_admin', 'ticket_manager'),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.siteId) || !mongoose.isValidObjectId(req.params.sellerId)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    const r = await TicketSiteSeller.findOneAndDelete({
+      _id: req.params.sellerId,
+      siteId: req.params.siteId,
+      organizationId: req.organizationId,
+    });
+    if (!r) return res.status(404).json({ error: 'Seller not found' });
+    res.status(204).end();
+  })
+);
+
+ticketSalesRouter.get(
   '/sellers',
   requireRoles('super_admin', 'org_admin'),
   asyncHandler(async (req, res) => {
@@ -178,13 +295,30 @@ ticketSalesRouter.get(
     if (req.query.siteId && mongoose.isValidObjectId(String(req.query.siteId))) {
       q.siteId = String(req.query.siteId);
     }
+    const seen = new Set();
+    const names = [];
+    if (req.query.siteId && mongoose.isValidObjectId(String(req.query.siteId))) {
+      const sellers = await TicketSiteSeller.find({
+        organizationId: req.organizationId,
+        siteId: String(req.query.siteId),
+        active: true,
+      })
+        .select('name')
+        .sort({ name: 1 })
+        .lean();
+      for (const s of sellers) {
+        const n = String(s?.name || '').trim();
+        const k = n.toLowerCase();
+        if (!n || seen.has(k)) continue;
+        seen.add(k);
+        names.push(n);
+      }
+    }
     const rows = await TicketSale.find(q)
       .select('sellerName')
       .sort({ soldAt: -1, createdAt: -1 })
       .limit(500)
       .lean();
-    const seen = new Set();
-    const names = [];
     for (const r of rows) {
       const n = String(r?.sellerName || '').trim();
       const k = n.toLowerCase();
@@ -201,17 +335,15 @@ ticketSalesRouter.post(
   asyncHandler(async (req, res) => {
     const ticketTypeId = String(req.body?.ticketTypeId || '').trim();
     const quantity = Number(req.body?.quantity || 1);
-    const sellerName = String(req.body?.sellerName || '').trim();
-    const sellerPhone = String(req.body?.sellerPhone || '').trim();
+    const ticketSiteSellerIdRaw = String(req.body?.ticketSiteSellerId || '').trim();
+    let sellerName = String(req.body?.sellerName || '').trim();
+    let sellerPhone = String(req.body?.sellerPhone || '').trim();
     const note = String(req.body?.note || '').trim();
     if (!mongoose.isValidObjectId(ticketTypeId)) {
       return res.status(400).json({ error: 'ticketTypeId is required' });
     }
     if (!Number.isFinite(quantity) || quantity < 1) {
       return res.status(400).json({ error: 'quantity must be >= 1' });
-    }
-    if (!sellerName) {
-      return res.status(400).json({ error: 'sellerName is required' });
     }
     const tt = await TicketType.findOne({
       _id: ticketTypeId,
@@ -221,6 +353,26 @@ ticketSalesRouter.post(
       .select('_id siteId priceCents')
       .lean();
     if (!tt) return res.status(404).json({ error: 'Active ticket type not found' });
+
+    let ticketSiteSellerId = null;
+    if (mongoose.isValidObjectId(ticketSiteSellerIdRaw)) {
+      const ts = await TicketSiteSeller.findOne({
+        _id: ticketSiteSellerIdRaw,
+        organizationId: req.organizationId,
+        siteId: tt.siteId,
+        active: true,
+      }).lean();
+      if (!ts) {
+        return res.status(400).json({ error: 'ticketSiteSellerId not found for this ticket site' });
+      }
+      ticketSiteSellerId = ts._id;
+      sellerName = String(ts.name || '').trim();
+      if (!sellerPhone) sellerPhone = String(ts.phone || '').trim();
+    }
+    if (!sellerName) {
+      return res.status(400).json({ error: 'sellerName or ticketSiteSellerId is required' });
+    }
+
     const amountCents = Math.round(Number(tt.priceCents || 0) * Math.round(quantity));
     const doc = await TicketSale.create({
       organizationId: req.organizationId,
@@ -231,6 +383,7 @@ ticketSalesRouter.post(
       sellerAdminId: req.admin.id,
       quantity: Math.round(quantity),
       amountCents,
+      ...(ticketSiteSellerId ? { ticketSiteSellerId } : {}),
       ...(sellerPhone ? { sellerPhone } : {}),
       ...(note ? { note } : {}),
     });
@@ -263,7 +416,7 @@ ticketSalesRouter.post(
       organizationId: req.organizationId,
       kind: 'issued',
     })
-      .select('siteId sellerName sellerPhone amountCents ticketTypeId')
+      .select('siteId sellerName sellerPhone ticketSiteSellerId amountCents ticketTypeId')
       .lean();
     if (!issue) return res.status(404).json({ error: 'Issued batch not found' });
     const agg = await TicketSale.aggregate([
@@ -305,6 +458,7 @@ ticketSalesRouter.post(
       kind: 'collected',
       sellerName: issue.sellerName,
       issueSaleId: issue._id,
+      ...(issue.ticketSiteSellerId ? { ticketSiteSellerId: issue.ticketSiteSellerId } : {}),
       sellerAdminId: req.admin.id,
       quantity: collectedQty,
       amountCents: add,

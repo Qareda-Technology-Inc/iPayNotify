@@ -26,6 +26,13 @@ const ticketSaleSchema = new mongoose.Schema(
       index: true,
     },
     sellerName: { type: String, required: true, trim: true, index: true },
+    /** When set, links to TicketSiteSeller for this site (sellerName is still denormalised for reports). */
+    ticketSiteSellerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TicketSiteSeller',
+      index: true,
+      default: null,
+    },
     /** Receiver/seller Ghana mobile for SMS alerts (stored as entered; normalized when sending). */
     sellerPhone: { type: String, trim: true, default: '' },
     issueSaleId: {
