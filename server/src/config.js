@@ -61,6 +61,21 @@ export const config = {
   cronTz: process.env.CRON_TZ || 'UTC',
   // PPPOE_EXPIRY_CRON: 5-field cron (min hour dom mon dow). Default every 10 minutes if unset.
   pppoeExpiryCron: (process.env.PPPOE_EXPIRY_CRON || '*/10 * * * *').trim(),
+  /**
+   * SMS to PPPoE (linked User.phone) & remote-access subscribers when paidUntil is within N days (not yet expired).
+   * Opt-in: set EXPIRY_REMINDER_SMS_ENABLED=true. Uses MessageTemplate category `expiry_reminder_3d` per organisation.
+   */
+  expiryReminderSms: {
+    enabled: process.env.EXPIRY_REMINDER_SMS_ENABLED === 'true' || process.env.EXPIRY_REMINDER_SMS_ENABLED === '1',
+    days: Math.min(
+      14,
+      Math.max(1, Number(process.env.EXPIRY_REMINDER_DAYS) || 3)
+    ),
+    cron: (process.env.EXPIRY_REMINDER_SMS_CRON || '0 9 * * *').trim(),
+    logQuiet:
+      String(process.env.EXPIRY_REMINDER_SMS_LOG_QUIET || '').toLowerCase() === 'true' ||
+      process.env.EXPIRY_REMINDER_SMS_LOG_QUIET === '1',
+  },
   /** Arkesel SMS — https://sms.arkesel.com/api/v2/sms/send */
   arkesel: {
     apiKey: (process.env.ARKESEL_API_KEY || '').trim(),

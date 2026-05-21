@@ -356,6 +356,13 @@ export function MessagesPage() {
           For <strong className="text-slate-300">broadcasts</strong>, you can pick a site below to message{' '}
           <strong className="text-slate-300">everyone on that router</strong> (by segment: PPPoE and/or hotspot
           customers linked to that router), using that site&apos;s SMS name in <code className="text-slate-400">{'{{brand}}'}</code>.
+          The <strong className="text-slate-300">Expiry reminder (~3 days before)</strong> template is used automatically for
+          PPPoE (linked user with phone) and remote-access lines whose <code className="text-slate-500">paidUntil</code> falls
+          within the next few days — enable on the server with{' '}
+          <code className="text-slate-500">EXPIRY_REMINDER_SMS_ENABLED=true</code>{' '}
+          (see <code className="text-slate-500">EXPIRY_REMINDER_DAYS</code>,{' '}
+          <code className="text-slate-500">EXPIRY_REMINDER_SMS_CRON</code>). Template placeholders include{' '}
+          <code className="text-slate-400">{'{{brand}} {{name}} {{paidUntil}} {{package}} {{secret}} {{service_type}}'}</code>.
           Remote-only and manual phone lists cannot be combined with a site filter. Anonymous hotspot buyers (no user
           account) are never in segment lists.
         </p>

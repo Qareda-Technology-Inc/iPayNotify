@@ -23,6 +23,7 @@ import {
   MessageBroadcastLog,
   HotspotVoucher,
   BillingJobRun,
+  ExpiryReminderSmsLog,
 } from '../src/models/index.js';
 
 const ORG_NAME = String(process.env.ORG_BACKFILL_NAME || 'Qaretech Innovative').trim();
@@ -63,6 +64,7 @@ async function main() {
       ['messagebroadcastlogs', MessageBroadcastLog],
       ['hotspotvouchers', HotspotVoucher],
       ['billingjobruns', BillingJobRun],
+      ['expiryremindersmslogs', ExpiryReminderSmsLog],
     ];
 
     for (const [label, Model] of pairs) {

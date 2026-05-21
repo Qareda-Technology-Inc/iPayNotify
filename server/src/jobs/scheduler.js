@@ -3,10 +3,12 @@ import {
   runMidnightBillingJob,
   enforceExpiredPppoeAccounts,
 } from '../services/renewalService.js';
+import { runExpiryReminderSmsJob } from '../services/expiryReminderSmsService.js';
 import { config } from '../config.js';
 
 let task;
 let pppoeExpiryTask;
+let expiryReminderSmsTask;
 
 export function startBillingScheduler() {
   if (!task) {
@@ -46,6 +48,31 @@ export function startBillingScheduler() {
     );
     console.log(`[billing] PPPoE expiry check "${expr}" (${config.cronTz})`);
   }
+
+  if (config.expiryReminderSms.enabled && !expiryReminderSmsTask) {
+    const expr = config.expiryReminderSms.cron || '0 9 * * *';
+    expiryReminderSmsTask = cron.schedule(
+      expr,
+      async () => {
+        try {
+          const summary = await runExpiryReminderSmsJob({ respectEnabledFlag: true });
+          if (summary.skipped) return;
+          const quiet = config.expiryReminderSms.logQuiet;
+          const totalSent = (summary.pppoe?.sent || 0) + (summary.remote?.sent || 0);
+          const totalFail = (summary.pppoe?.failed || 0) + (summary.remote?.failed || 0);
+          if (!quiet || totalSent > 0 || totalFail > 0) {
+            console.log('[billing] expiry reminder SMS', new Date().toISOString(), summary);
+          }
+        } catch (e) {
+          console.error('[billing] expiry reminder SMS tick failed', e);
+        }
+      },
+      { timezone: config.cronTz }
+    );
+    console.log(
+      `[billing] Expiry reminder SMS cron "${expr}" (${config.cronTz}) — requires EXPIRY_REMINDER_SMS_ENABLED=true`
+    );
+  }
 }
 
 export function stopBillingScheduler() {
@@ -56,5 +83,9 @@ export function stopBillingScheduler() {
   if (pppoeExpiryTask) {
     pppoeExpiryTask.stop();
     pppoeExpiryTask = null;
+  }
+  if (expiryReminderSmsTask) {
+    expiryReminderSmsTask.stop();
+    expiryReminderSmsTask = null;
   }
 }
