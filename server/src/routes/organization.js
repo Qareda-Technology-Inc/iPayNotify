@@ -46,48 +46,42 @@ function applyBillingPatch(doc, billingBody) {
   if (b.smsBrandName !== undefined) {
     doc.billing.smsBrandName = String(b.smsBrandName || '').trim();
   }
-  if (b.useCustomMomo !== undefined) {
-    doc.billing.useCustomMomo = Boolean(b.useCustomMomo);
+  if (b.useCustomHubtel !== undefined) {
+    doc.billing.useCustomHubtel = Boolean(b.useCustomHubtel);
   }
 
-  if (b.mtnMomoSubscriptionKey !== undefined && String(b.mtnMomoSubscriptionKey).trim() !== '') {
-    doc.billing.mtnMomoSubscriptionKey = String(b.mtnMomoSubscriptionKey).trim();
+  if (b.hubtelMerchantAccount !== undefined) {
+    doc.billing.hubtelMerchantAccount = String(b.hubtelMerchantAccount || '').trim();
   }
-  if (b.mtnMomoApiUser !== undefined) {
-    doc.billing.mtnMomoApiUser = String(b.mtnMomoApiUser || '').trim();
+  if (b.hubtelClientId !== undefined) {
+    doc.billing.hubtelClientId = String(b.hubtelClientId || '').trim();
   }
-  if (b.mtnMomoApiKey !== undefined && String(b.mtnMomoApiKey).trim() !== '') {
-    doc.billing.mtnMomoApiKey = String(b.mtnMomoApiKey).trim();
+  if (b.hubtelClientSecret !== undefined && String(b.hubtelClientSecret).trim() !== '') {
+    doc.billing.hubtelClientSecret = String(b.hubtelClientSecret).trim();
   }
-  if (b.mtnMomoBaseUrl !== undefined) {
-    doc.billing.mtnMomoBaseUrl = String(b.mtnMomoBaseUrl || '').trim();
-  }
-  if (b.mtnMomoTargetEnvironment !== undefined) {
-    doc.billing.mtnMomoTargetEnvironment = String(b.mtnMomoTargetEnvironment || '').trim();
-  }
-  if (b.mtnMomoCallbackUrl !== undefined) {
-    doc.billing.mtnMomoCallbackUrl = String(b.mtnMomoCallbackUrl || '').trim();
+  if (b.hubtelCallbackUrl !== undefined) {
+    doc.billing.hubtelCallbackUrl = String(b.hubtelCallbackUrl || '').trim();
   }
 
   doc.markModified('billing');
 
-  if (doc.billing.useCustomMomo) {
-    const sk = String(doc.billing.mtnMomoSubscriptionKey || '').trim();
-    const au = String(doc.billing.mtnMomoApiUser || '').trim();
-    const ak = String(doc.billing.mtnMomoApiKey || '').trim();
+  if (doc.billing.useCustomHubtel) {
+    const ma = String(doc.billing.hubtelMerchantAccount || '').trim();
+    const cid = String(doc.billing.hubtelClientId || '').trim();
+    const secret = String(doc.billing.hubtelClientSecret || '').trim();
     const cb =
-      String(doc.billing.mtnMomoCallbackUrl || '').trim() ||
-      String(config.mtnMomo.callbackUrl || '').trim();
-    if (!sk || !au || !ak) {
+      String(doc.billing.hubtelCallbackUrl || '').trim() ||
+      String(config.hubtel.callbackUrl || '').trim();
+    if (!ma || !cid || !secret) {
       const err = new Error(
-        'Custom MoMo requires subscription key, API user, and API key (callback URL can inherit from platform env).'
+        'Custom Hubtel requires merchant account, client ID, and client secret (callback URL can inherit from platform env).'
       );
       err.status = 400;
       throw err;
     }
     if (!cb) {
       const err = new Error(
-        'Set MTN_MOMO_CALLBACK_URL on the server or enter a callback URL for this organisation.'
+        'Set HUBTEL_CALLBACK_URL on the server or enter a callback URL for this organisation.'
       );
       err.status = 400;
       throw err;

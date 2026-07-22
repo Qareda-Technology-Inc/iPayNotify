@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { publicFetch } from '../api.js';
 
-/** Dev / mock: completes payment via API without MTN (see MTN_MOMO_MOCK, ALLOW_PAYMENT_SIMULATION). */
+/** Dev / mock: completes payment via API without Hubtel (see HUBTEL_MOCK, PAYMENT_DRAFT_CHECKOUT, ALLOW_PAYMENT_SIMULATION). */
 export function PayMockPage() {
   const [params] = useSearchParams();
   const ref = params.get('ref');
@@ -36,7 +36,7 @@ export function PayMockPage() {
       <div className="mx-auto max-w-md px-4 py-16 text-center text-red-300">
         {error}
         <p className="mt-4 text-sm text-slate-500">
-          Set MTN_MOMO_MOCK=true, PAYMENT_DRAFT_MOMO=true, or ALLOW_PAYMENT_SIMULATION=true for mock
+          Set HUBTEL_MOCK=true, PAYMENT_DRAFT_CHECKOUT=true, or ALLOW_PAYMENT_SIMULATION=true for mock
           payments (non-production).
         </p>
       </div>

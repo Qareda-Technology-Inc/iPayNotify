@@ -18,7 +18,7 @@ const transactionSchema = new mongoose.Schema(
       enum: ['pending', 'paid', 'failed', 'refunded'],
       required: true,
     },
-    provider: { type: String, default: 'mtn_momo' },
+    provider: { type: String, default: 'hubtel' },
     providerReference: { type: String },
     /** Your reference sent to MTN as externalId; used in callbacks to match the transaction */
     clientReference: { type: String, unique: true, sparse: true },

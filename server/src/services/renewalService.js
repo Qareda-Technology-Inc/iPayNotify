@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { PppoeAccount, User, PlanPackage, Transaction, BillingJobRun } from '../models/index.js';
 import { resolveDefaultOrganizationId } from '../db/defaultOrganizationId.js';
-import { chargeForRenewal } from '../integrations/mtnMomo.js';
+import { chargeForRenewal } from '../integrations/hubtel.js';
 import { syncPppoeAccountToRouter } from './pppoeService.js';
 import { notifyTransactionPaidSms } from './paymentSmsService.js';
 import { formatExpiryComment } from '../utils/expiryComment.js';

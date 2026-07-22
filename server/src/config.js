@@ -22,26 +22,37 @@ export const config = {
   publicAppUrl:
     process.env.PUBLIC_APP_URL || process.env.CLIENT_ORIGIN || 'http://localhost:5173',
   /**
-   * When true, PPPoE renew + hotspot checkout skip MTN API and return `mode: draft_momo` for an
-   * in-app test prompt. Set false and configure MTN MoMo for production.
+   * When true, PPPoE renew + hotspot checkout skip Hubtel and return `mode: draft_hubtel`
+   * for an in-app test prompt. Prefer HUBTEL_MOCK for redirect-to-mock-page testing.
    */
-  paymentDraftMomo: process.env.PAYMENT_DRAFT_MOMO === 'true',
-  /** Shown on MoMo request-to-pay (payee note) and draft checkout UI */
+  paymentDraftCheckout:
+    process.env.PAYMENT_DRAFT_CHECKOUT === 'true' ||
+    process.env.PAYMENT_DRAFT_MOMO === 'true',
+  /** Shown on checkout description / draft UI */
   merchant: {
     displayName: (process.env.MERCHANT_DISPLAY_NAME || 'QareFi Billing').trim(),
   },
+  /** Hubtel Online Checkout — https://developers.hubtel.com / unified-pay SDK */
+  hubtel: {
+    merchantAccount: (process.env.HUBTEL_MERCHANT_ACCOUNT || '').trim(),
+    clientId: (process.env.HUBTEL_CLIENT_ID || '').trim(),
+    clientSecret: (process.env.HUBTEL_CLIENT_SECRET || '').trim(),
+    callbackUrl: (process.env.HUBTEL_CALLBACK_URL || '').trim(),
+    mock: process.env.HUBTEL_MOCK === 'true',
+    allowedChannels: String(process.env.HUBTEL_ALLOWED_CHANNELS || 'mobileMoney,bankCard')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  },
+  /** @deprecated Prefer `hubtel` — kept empty so older walled-garden helpers do not crash. */
   mtnMomo: {
-    subscriptionKey: (process.env.MTN_MOMO_SUBSCRIPTION_KEY || '').trim(),
-    apiUser: (process.env.MTN_MOMO_API_USER || '').trim(),
-    apiKey: (process.env.MTN_MOMO_API_KEY || '').trim(),
-    /** e.g. sandbox, mtnghana — set per MTN MoMo developer portal / environment */
-    targetEnvironment: (process.env.MTN_MOMO_TARGET_ENVIRONMENT || 'sandbox').trim(),
-    baseUrl: (
-      process.env.MTN_MOMO_BASE_URL || 'https://sandbox.momodeveloper.mtn.com'
-    ).replace(/\/$/, ''),
-    callbackUrl: (process.env.MTN_MOMO_CALLBACK_URL || '').trim(),
-    /** Skip MTN HTTP; send users to local mock completion page */
-    mockRequest: process.env.MTN_MOMO_MOCK === 'true',
+    subscriptionKey: '',
+    apiUser: '',
+    apiKey: '',
+    targetEnvironment: '',
+    baseUrl: '',
+    callbackUrl: '',
+    mockRequest: false,
   },
   /**
    * Hotspot walled garden: allow billing + payment hosts before login.

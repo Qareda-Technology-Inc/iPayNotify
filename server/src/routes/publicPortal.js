@@ -135,8 +135,10 @@ publicPortalRouter.post(
   asyncHandler(async (req, res) => {
     const simOk =
       process.env.ALLOW_PAYMENT_SIMULATION === 'true' ||
-      process.env.MTN_MOMO_MOCK === 'true' ||
+      process.env.HUBTEL_MOCK === 'true' ||
+      process.env.PAYMENT_DRAFT_CHECKOUT === 'true' ||
       process.env.PAYMENT_DRAFT_MOMO === 'true' ||
+      process.env.MTN_MOMO_MOCK === 'true' ||
       process.env.NODE_ENV !== 'production';
     if (!simOk) {
       return res.status(403).json({ error: 'Simulation disabled in production' });

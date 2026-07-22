@@ -28,15 +28,12 @@ function billingFromOrg(o) {
   return {
     merchantDisplayName: String(b.merchantDisplayName || ''),
     smsBrandName: String(b.smsBrandName || ''),
-    useCustomMomo: Boolean(b.useCustomMomo),
-    mtnMomoSubscriptionKey: '',
-    mtnMomoApiUser: String(b.mtnMomoApiUser || ''),
-    mtnMomoApiKey: '',
-    mtnMomoBaseUrl: String(b.mtnMomoBaseUrl || ''),
-    mtnMomoTargetEnvironment: String(b.mtnMomoTargetEnvironment || ''),
-    mtnMomoCallbackUrl: String(b.mtnMomoCallbackUrl || ''),
-    mtnMomoSubscriptionKeySet: Boolean(b.mtnMomoSubscriptionKeySet),
-    mtnMomoApiKeySet: Boolean(b.mtnMomoApiKeySet),
+    useCustomHubtel: Boolean(b.useCustomHubtel),
+    hubtelMerchantAccount: String(b.hubtelMerchantAccount || ''),
+    hubtelClientId: String(b.hubtelClientId || ''),
+    hubtelClientSecret: '',
+    hubtelCallbackUrl: String(b.hubtelCallbackUrl || ''),
+    hubtelClientSecretSet: Boolean(b.hubtelClientSecretSet),
   };
 }
 
@@ -173,17 +170,13 @@ export function OrganizationSettingsPage() {
       const billing = {
         merchantDisplayName: bill.merchantDisplayName.trim(),
         smsBrandName: bill.smsBrandName.trim(),
-        useCustomMomo: bill.useCustomMomo,
-        mtnMomoApiUser: bill.mtnMomoApiUser.trim(),
-        mtnMomoBaseUrl: bill.mtnMomoBaseUrl.trim(),
-        mtnMomoTargetEnvironment: bill.mtnMomoTargetEnvironment.trim(),
-        mtnMomoCallbackUrl: bill.mtnMomoCallbackUrl.trim(),
+        useCustomHubtel: bill.useCustomHubtel,
+        hubtelMerchantAccount: bill.hubtelMerchantAccount.trim(),
+        hubtelClientId: bill.hubtelClientId.trim(),
+        hubtelCallbackUrl: bill.hubtelCallbackUrl.trim(),
       };
-      if (bill.mtnMomoSubscriptionKey.trim()) {
-        billing.mtnMomoSubscriptionKey = bill.mtnMomoSubscriptionKey.trim();
-      }
-      if (bill.mtnMomoApiKey.trim()) {
-        billing.mtnMomoApiKey = bill.mtnMomoApiKey.trim();
+      if (bill.hubtelClientSecret.trim()) {
+        billing.hubtelClientSecret = bill.hubtelClientSecret.trim();
       }
       body.billing = billing;
 
@@ -290,12 +283,12 @@ export function OrganizationSettingsPage() {
         <fieldset className="space-y-4 border-t border-slate-800 pt-8">
           <legend className="text-sm font-semibold text-white">Payments &amp; SMS branding</legend>
           <p className="text-xs text-slate-500">
-            <strong className="text-slate-400">Merchant name</strong> appears on MTN request-to-pay.{' '}
+            <strong className="text-slate-400">Merchant name</strong> appears on Hubtel checkout descriptions.{' '}
             <strong className="text-slate-400">SMS brand</strong> is used when a router has no site-specific SMS brand.
             Per-router overrides still win in Messages and payment SMS.
           </p>
           <label className="block text-sm text-slate-300">
-            Merchant display name (MoMo payee note)
+            Merchant display name
             <input
               value={bill.merchantDisplayName}
               onChange={(e) => setBill((b) => ({ ...b, merchantDisplayName: e.target.value }))}
@@ -316,76 +309,54 @@ export function OrganizationSettingsPage() {
           <label className="flex items-start gap-3 text-sm text-slate-300">
             <input
               type="checkbox"
-              checked={bill.useCustomMomo}
-              onChange={(e) => setBill((b) => ({ ...b, useCustomMomo: e.target.checked }))}
+              checked={bill.useCustomHubtel}
+              onChange={(e) => setBill((b) => ({ ...b, useCustomHubtel: e.target.checked }))}
               className="mt-1"
             />
             <span>
-              <strong className="text-white">Use organisation MTN MoMo credentials</strong>
+              <strong className="text-white">Use organisation Hubtel credentials</strong>
               <span className="mt-1 block text-xs font-normal text-slate-500">
-                When off, the platform <span className="font-mono">MTN_MOMO_*</span> environment keys are used. When
-                on, fill your Collections API user, keys, and optional sandbox URL. Callback can match the server&apos;s
-                global URL if MTN posts there for all tenants.
+                When off, the platform <span className="font-mono">HUBTEL_*</span> environment keys are used. When on,
+                fill merchant account, client ID, and client secret from your Hubtel business dashboard.
               </span>
             </span>
           </label>
 
-          {bill.useCustomMomo && (
-            <div className="ml-7 space-y-3 rounded-xl border border-amber-500/25 bg-amber-950/15 p-4">
-              <label className="block text-xs font-medium uppercase tracking-wide text-amber-200/90">
-                Ocp-Apim-Subscription-Key
+          {bill.useCustomHubtel && (
+            <div className="ml-7 space-y-3 rounded-xl border border-emerald-500/25 bg-emerald-950/15 p-4">
+              <label className="block text-xs font-medium uppercase tracking-wide text-emerald-200/90">
+                Merchant account number
+                <input
+                  value={bill.hubtelMerchantAccount}
+                  onChange={(e) => setBill((b) => ({ ...b, hubtelMerchantAccount: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
+                />
+              </label>
+              <label className="block text-xs font-medium uppercase tracking-wide text-emerald-200/90">
+                Client ID
+                <input
+                  value={bill.hubtelClientId}
+                  onChange={(e) => setBill((b) => ({ ...b, hubtelClientId: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
+                />
+              </label>
+              <label className="block text-xs font-medium uppercase tracking-wide text-emerald-200/90">
+                Client secret
                 <input
                   type="password"
                   autoComplete="off"
-                  value={bill.mtnMomoSubscriptionKey}
-                  onChange={(e) => setBill((b) => ({ ...b, mtnMomoSubscriptionKey: e.target.value }))}
-                  placeholder={bill.mtnMomoSubscriptionKeySet ? 'Leave blank to keep saved key' : 'Required'}
+                  value={bill.hubtelClientSecret}
+                  onChange={(e) => setBill((b) => ({ ...b, hubtelClientSecret: e.target.value }))}
+                  placeholder={bill.hubtelClientSecretSet ? 'Leave blank to keep saved secret' : 'Required'}
                   className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
                 />
               </label>
-              <label className="block text-xs font-medium uppercase tracking-wide text-amber-200/90">
-                API user (Collections)
+              <label className="block text-xs font-medium uppercase tracking-wide text-emerald-200/90">
+                Callback URL (optional if server has HUBTEL_CALLBACK_URL)
                 <input
-                  value={bill.mtnMomoApiUser}
-                  onChange={(e) => setBill((b) => ({ ...b, mtnMomoApiUser: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
-                />
-              </label>
-              <label className="block text-xs font-medium uppercase tracking-wide text-amber-200/90">
-                API key
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={bill.mtnMomoApiKey}
-                  onChange={(e) => setBill((b) => ({ ...b, mtnMomoApiKey: e.target.value }))}
-                  placeholder={bill.mtnMomoApiKeySet ? 'Leave blank to keep saved key' : 'Required'}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
-                />
-              </label>
-              <label className="block text-xs font-medium uppercase tracking-wide text-amber-200/90">
-                Base URL (optional)
-                <input
-                  value={bill.mtnMomoBaseUrl}
-                  onChange={(e) => setBill((b) => ({ ...b, mtnMomoBaseUrl: e.target.value }))}
-                  placeholder="https://sandbox.momodeveloper.mtn.com"
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
-                />
-              </label>
-              <label className="block text-xs font-medium uppercase tracking-wide text-amber-200/90">
-                Target environment (optional)
-                <input
-                  value={bill.mtnMomoTargetEnvironment}
-                  onChange={(e) => setBill((b) => ({ ...b, mtnMomoTargetEnvironment: e.target.value }))}
-                  placeholder="sandbox"
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
-                />
-              </label>
-              <label className="block text-xs font-medium uppercase tracking-wide text-amber-200/90">
-                Callback URL (optional if server has MTN_MOMO_CALLBACK_URL)
-                <input
-                  value={bill.mtnMomoCallbackUrl}
-                  onChange={(e) => setBill((b) => ({ ...b, mtnMomoCallbackUrl: e.target.value }))}
-                  placeholder="https://your-billing-host/api/payments/momo/callback"
+                  value={bill.hubtelCallbackUrl}
+                  onChange={(e) => setBill((b) => ({ ...b, hubtelCallbackUrl: e.target.value }))}
+                  placeholder="https://your-billing-host/api/payments/hubtel/callback"
                   className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
                 />
               </label>

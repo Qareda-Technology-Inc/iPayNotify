@@ -7,7 +7,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { publicPortalRouter } from './routes/publicPortal.js';
-import { momoPaymentsRouter } from './routes/momoPayments.js';
+import { hubtelPaymentsRouter } from './routes/hubtelPayments.js';
 import { protectedApiRouter } from './routes/protectedApi.js';
 import { superAdminApiRouter } from './routes/superAdminApi.js';
 import { startBillingScheduler } from './jobs/scheduler.js';
@@ -91,7 +91,9 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/public', publicPortalRouter);
-app.use('/api/payments/momo', momoPaymentsRouter);
+app.use('/api/payments/hubtel', hubtelPaymentsRouter);
+/** Legacy path kept so old MTN callback registrations still hit a handler if needed. */
+app.use('/api/payments/momo', hubtelPaymentsRouter);
 app.use('/api/super-admin', superAdminApiRouter);
 app.use('/api', protectedApiRouter);
 

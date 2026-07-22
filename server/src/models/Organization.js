@@ -2,18 +2,16 @@ import mongoose from 'mongoose';
 
 const organizationBillingSchema = new mongoose.Schema(
   {
-    /** Shown on MTN request-to-pay payee note and draft checkout when set. */
+    /** Shown on checkout description / draft UI when set. */
     merchantDisplayName: { type: String, trim: true, default: '' },
     /** Default SMS "brand" line when a router has no `smsBrandName`. */
     smsBrandName: { type: String, trim: true, default: '' },
-    /** When true, MTN Collections credentials below replace platform env (same callback server). */
-    useCustomMomo: { type: Boolean, default: false },
-    mtnMomoSubscriptionKey: { type: String, default: '' },
-    mtnMomoApiUser: { type: String, default: '' },
-    mtnMomoApiKey: { type: String, default: '' },
-    mtnMomoBaseUrl: { type: String, default: '' },
-    mtnMomoTargetEnvironment: { type: String, default: '' },
-    mtnMomoCallbackUrl: { type: String, default: '' },
+    /** When true, Hubtel credentials below replace platform env. */
+    useCustomHubtel: { type: Boolean, default: false },
+    hubtelMerchantAccount: { type: String, default: '' },
+    hubtelClientId: { type: String, default: '' },
+    hubtelClientSecret: { type: String, default: '' },
+    hubtelCallbackUrl: { type: String, default: '' },
   },
   { _id: false }
 );

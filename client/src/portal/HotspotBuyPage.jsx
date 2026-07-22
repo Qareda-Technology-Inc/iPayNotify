@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { publicFetch } from '../api.js';
 import { usePortalContext } from './usePortalContext.js';
-import { DraftMomoPrompt } from './DraftMomoPrompt.jsx';
+import { DraftCheckoutPrompt } from './DraftCheckoutPrompt.jsx';
+import { HubtelCheckout } from './HubtelCheckout.jsx';
 
 export function HotspotBuyPage() {
   const navigate = useNavigate();
@@ -16,7 +17,8 @@ export function HotspotBuyPage() {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [draftMomo, setDraftMomo] = useState(null);
+  const [draftCheckout, setDraftCheckout] = useState(null);
+  const [hubtelSession, setHubtelSession] = useState(null);
 
   useEffect(() => {
     Promise.all([
@@ -55,12 +57,16 @@ export function HotspotBuyPage() {
           customerName: name || undefined,
         }),
       });
-      if (data.mode === 'draft_momo') {
-        setDraftMomo(data);
+      if (data.mode === 'draft_hubtel' || data.mode === 'draft_momo') {
+        setDraftCheckout(data);
+        return;
+      }
+      if (data.mode === 'hubtel_checkout' && data.purchaseInfo && data.hubtelConfig) {
+        setHubtelSession(data);
         return;
       }
       if (!data.checkoutUrl) {
-        setError('No payment link returned. Try again or contact support.');
+        setError('No payment session returned. Try again or contact support.');
         return;
       }
       window.location.href = data.checkoutUrl;
@@ -73,17 +79,32 @@ export function HotspotBuyPage() {
 
   return (
     <div className="mx-auto max-w-md px-4 py-10">
-      <DraftMomoPrompt
-        open={!!draftMomo}
-        payload={draftMomo}
-        onClose={() => setDraftMomo(null)}
+      <DraftCheckoutPrompt
+        open={!!draftCheckout}
+        payload={draftCheckout}
+        onClose={() => setDraftCheckout(null)}
         onComplete={(ref) =>
           navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`)
         }
       />
+      <HubtelCheckout
+        open={!!hubtelSession}
+        purchaseInfo={hubtelSession?.purchaseInfo}
+        hubtelConfig={hubtelSession?.hubtelConfig}
+        onClose={() => setHubtelSession(null)}
+        onFailure={() => {
+          setError('Payment was not completed. You can try again.');
+          setHubtelSession(null);
+        }}
+        onSuccess={() => {
+          const ref = hubtelSession?.clientReference;
+          setHubtelSession(null);
+          if (ref) navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`);
+        }}
+      />
       <h1 className="text-xl font-semibold text-white">Buy hotspot access</h1>
       <p className="mt-2 text-sm text-slate-400">
-        Pay with mobile money. When payment completes, your voucher code appears on the next
+        Pay with Hubtel (mobile money or card). When payment completes, your voucher code appears on the next
         screen (and by SMS when configured).
       </p>
 

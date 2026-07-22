@@ -35,14 +35,17 @@ export function buildPaymentWalledGardenTargets() {
     /* ignore invalid PUBLIC_APP_URL */
   }
 
-  try {
-    const u = new URL(config.mtnMomo.baseUrl);
-    if (u.hostname) addHost(u.hostname);
-  } catch {
-    /* ignore */
+  for (const h of [
+    'pay.hubtel.com',
+    'unified-pay.hubtel.com',
+    'checkout.hubtel.com',
+    'api.hubtel.com',
+    'smsc.hubtel.com',
+  ]) {
+    addHost(h);
   }
 
-  const cb = String(config.mtnMomo.callbackUrl || '').trim();
+  const cb = String(config.hubtel?.callbackUrl || '').trim();
   if (cb) {
     try {
       const u = new URL(cb);

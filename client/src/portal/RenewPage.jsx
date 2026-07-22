@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { formatRemainingFromPaidUntil } from '../utils/remainingTime.js';
 import { publicFetch } from '../api.js';
 import { usePortalContext } from './usePortalContext.js';
-import { DraftMomoPrompt } from './DraftMomoPrompt.jsx';
+import { DraftCheckoutPrompt } from './DraftCheckoutPrompt.jsx';
+import { HubtelCheckout } from './HubtelCheckout.jsx';
 
 export function RenewPage() {
   const navigate = useNavigate();
@@ -18,7 +19,8 @@ export function RenewPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState('lookup');
-  const [draftMomo, setDraftMomo] = useState(null);
+  const [draftCheckout, setDraftCheckout] = useState(null);
+  const [hubtelSession, setHubtelSession] = useState(null);
 
   useEffect(() => {
     if (ctxLoading || !ctx?.resolved || !ctx.router?.id) return;
@@ -74,12 +76,16 @@ export function RenewPage() {
           customerName: name || undefined,
         }),
       });
-      if (data.mode === 'draft_momo') {
-        setDraftMomo(data);
+      if (data.mode === 'draft_hubtel' || data.mode === 'draft_momo') {
+        setDraftCheckout(data);
+        return;
+      }
+      if (data.mode === 'hubtel_checkout' && data.purchaseInfo && data.hubtelConfig) {
+        setHubtelSession(data);
         return;
       }
       if (!data.checkoutUrl) {
-        setError('No payment link returned. Try again or contact support.');
+        setError('No payment session returned. Try again or contact support.');
         return;
       }
       window.location.href = data.checkoutUrl;
@@ -92,17 +98,32 @@ export function RenewPage() {
 
   return (
     <div className="mx-auto max-w-md px-4 py-10">
-      <DraftMomoPrompt
-        open={!!draftMomo}
-        payload={draftMomo}
-        onClose={() => setDraftMomo(null)}
+      <DraftCheckoutPrompt
+        open={!!draftCheckout}
+        payload={draftCheckout}
+        onClose={() => setDraftCheckout(null)}
         onComplete={(ref) =>
           navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`)
         }
       />
+      <HubtelCheckout
+        open={!!hubtelSession}
+        purchaseInfo={hubtelSession?.purchaseInfo}
+        hubtelConfig={hubtelSession?.hubtelConfig}
+        onClose={() => setHubtelSession(null)}
+        onFailure={() => {
+          setError('Payment was not completed. You can try again.');
+          setHubtelSession(null);
+        }}
+        onSuccess={() => {
+          const ref = hubtelSession?.clientReference;
+          setHubtelSession(null);
+          if (ref) navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`);
+        }}
+      />
       <h1 className="text-xl font-semibold text-white">Renew your internet</h1>
       <p className="mt-2 text-sm text-slate-400">
-        Enter your PPPoE username (same as you use on the router). After mobile money payment
+        Enter your PPPoE username (same as you use on the router). After Hubtel payment
         succeeds, your line is extended automatically.
       </p>
 
@@ -252,7 +273,7 @@ export function RenewPage() {
             disabled={loading}
             className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {loading ? 'Starting payment…' : 'Pay with mobile money'}
+            {loading ? 'Starting payment…' : 'Pay with Hubtel'}
           </button>
           <button
             type="button"

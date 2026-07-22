@@ -5,7 +5,7 @@ import { normalizeGhanaMsisdn } from '../utils/phoneGhana.js';
 import { config } from '../config.js';
 import { syncPppoeAccountToRouter } from './pppoeService.js';
 import { generateVouchers } from './hotspotService.js';
-import { initiateMtnMomoRequestToPay } from '../integrations/mtnMomo.js';
+import { buildHubtelCheckoutSession } from '../integrations/hubtel.js';
 import { extendPaidUntilByPackage } from '../utils/duration.js';
 import { notifyTransactionPaidSms } from './paymentSmsService.js';
 import { resolveOrgBilling } from './orgBillingService.js';
@@ -23,13 +23,13 @@ function mergeTxMeta(tx, patch) {
   tx.meta = { ...prev, ...patch };
 }
 
-/** Pending tx + payload for in-app draft MoMo UI (test only). */
-async function finalizeDraftMomoCheckout(tx, draft) {
-  tx.providerReference = 'draft-momo';
-  mergeTxMeta(tx, { paymentUi: 'draft_momo' });
+/** Pending tx + payload for in-app draft checkout UI (test only). */
+async function finalizeDraftCheckout(tx, draft) {
+  tx.providerReference = 'draft-hubtel';
+  mergeTxMeta(tx, { paymentUi: 'draft_hubtel' });
   await tx.save();
   return {
-    mode: 'draft_momo',
+    mode: 'draft_hubtel',
     clientReference: tx.clientReference,
     amountGhs: draft.amountGhs,
     amountCents: draft.amountCents,
@@ -39,6 +39,23 @@ async function finalizeDraftMomoCheckout(tx, draft) {
     merchantName: draft.merchantName,
     customerMsisdn: draft.customerMsisdn,
     customerName: draft.customerName || '',
+  };
+}
+
+function checkoutResponseFromHubtel(tx, session, extras = {}) {
+  if (session.mock && session.checkoutUrl) {
+    return {
+      clientReference: tx.clientReference,
+      checkoutUrl: session.checkoutUrl,
+      ...extras,
+    };
+  }
+  return {
+    mode: 'hubtel_checkout',
+    clientReference: tx.clientReference,
+    purchaseInfo: session.purchaseInfo,
+    hubtelConfig: session.config,
+    ...extras,
   };
 }
 
@@ -127,7 +144,7 @@ export async function createPppoeRenewalCheckout({
     status: 'pending',
     kind: 'renewal',
     clientReference,
-    provider: 'mtn_momo',
+    provider: 'hubtel',
     customerPhone: customerMsisdn,
     customerName,
     meta: {
@@ -139,8 +156,8 @@ export async function createPppoeRenewalCheckout({
   const amountGhs = quote.amountCents / 100;
   const billing = await resolveOrgBilling(orgId);
 
-  if (config.paymentDraftMomo) {
-    return finalizeDraftMomoCheckout(tx, {
+  if (config.paymentDraftCheckout) {
+    return finalizeDraftCheckout(tx, {
       amountGhs,
       amountCents: quote.amountCents,
       currency: quote.currency,
@@ -152,34 +169,29 @@ export async function createPppoeRenewalCheckout({
     });
   }
 
-  const mtn = await initiateMtnMomoRequestToPay({
+  const session = buildHubtelCheckoutSession({
     amountGhs,
-    currency: quote.currency,
-    clientReference,
-    description: `PPPoE renewal — ${account.secretName}`,
+    description: `${billing.merchantDisplayName}: PPPoE renewal — ${account.secretName}`,
     customerMsisdn,
-    merchantName: billing.merchantDisplayName,
+    clientReference,
+    hubtel: billing.hubtel,
     publicAppBaseUrl: publicBase(),
-    mtnMomo: billing.mtnMomo,
   });
-  if (!mtn.ok) {
+  if (!session.ok) {
     tx.status = 'failed';
-    mergeTxMeta(tx, { mtnError: mtn.error, raw: mtn.raw });
+    mergeTxMeta(tx, { hubtelError: session.error });
     await tx.save();
-    const err = new Error(mtn.error || 'Could not start payment');
+    const err = new Error(session.error || 'Could not start payment');
     err.status = 502;
     throw err;
   }
-  tx.providerReference = mtn.mtnReferenceId;
-  mergeTxMeta(tx, { mtnReferenceId: mtn.mtnReferenceId, requestToPay: mtn.raw });
+  mergeTxMeta(tx, { hubtelCheckout: true });
   await tx.save();
-  return {
-    clientReference,
-    checkoutUrl: mtn.checkoutUrl,
+  return checkoutResponseFromHubtel(tx, session, {
     amountCents: quote.amountCents,
     currency: quote.currency,
     packageName: quote.packageName,
-  };
+  });
 }
 
 export async function createHotspotPurchaseCheckout({
@@ -215,7 +227,7 @@ export async function createHotspotPurchaseCheckout({
     status: 'pending',
     kind: 'voucher',
     clientReference,
-    provider: 'mtn_momo',
+    provider: 'hubtel',
     customerPhone: customerMsisdn,
     customerName,
     meta: {
@@ -241,8 +253,8 @@ export async function createHotspotPurchaseCheckout({
   const amountGhs = amountCents / 100;
   const billing = await resolveOrgBilling(orgId);
 
-  if (config.paymentDraftMomo) {
-    return finalizeDraftMomoCheckout(tx, {
+  if (config.paymentDraftCheckout) {
+    return finalizeDraftCheckout(tx, {
       amountGhs,
       amountCents,
       currency: tx.currency,
@@ -254,34 +266,29 @@ export async function createHotspotPurchaseCheckout({
     });
   }
 
-  const mtn = await initiateMtnMomoRequestToPay({
+  const session = buildHubtelCheckoutSession({
     amountGhs,
-    currency: tx.currency,
-    clientReference,
-    description: `Hotspot — ${pkg.name}`,
+    description: `${billing.merchantDisplayName}: Hotspot — ${pkg.name}`,
     customerMsisdn,
-    merchantName: billing.merchantDisplayName,
+    clientReference,
+    hubtel: billing.hubtel,
     publicAppBaseUrl: publicBase(),
-    mtnMomo: billing.mtnMomo,
   });
-  if (!mtn.ok) {
+  if (!session.ok) {
     tx.status = 'failed';
-    mergeTxMeta(tx, { mtnError: mtn.error, raw: mtn.raw });
+    mergeTxMeta(tx, { hubtelError: session.error });
     await tx.save();
-    const err = new Error(mtn.error || 'Could not start payment');
+    const err = new Error(session.error || 'Could not start payment');
     err.status = 502;
     throw err;
   }
-  tx.providerReference = mtn.mtnReferenceId;
-  mergeTxMeta(tx, { mtnReferenceId: mtn.mtnReferenceId, requestToPay: mtn.raw });
+  mergeTxMeta(tx, { hubtelCheckout: true });
   await tx.save();
-  return {
-    clientReference,
-    checkoutUrl: mtn.checkoutUrl,
+  return checkoutResponseFromHubtel(tx, session, {
     amountCents,
     currency: tx.currency,
     packageName: pkg.name,
-  };
+  });
 }
 
 export async function getTransactionByReference(clientReference) {
@@ -381,10 +388,11 @@ export async function markTransactionPaidByReference(clientReference, providerDa
   tx.providerReference =
     providerData.financialTransactionId ||
     providerData.FinancialTransactionId ||
+    providerData.TransactionId ||
+    providerData.transactionId ||
     providerData.ProviderRef ||
     providerData.providerRef ||
     tx.providerReference ||
-    providerData.TransactionId ||
     '';
   mergeTxMeta(tx, { callback: providerData });
   await tx.save();
