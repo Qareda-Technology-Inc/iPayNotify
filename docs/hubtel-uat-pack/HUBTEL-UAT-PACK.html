@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hubtel UAT — iPay Integration Pack</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: "Segoe UI", system-ui, sans-serif; line-height: 1.45; color: #0f172a; max-width: 820px; margin: 0 auto; padding: 32px 24px 64px; }
+    h1 { font-size: 1.6rem; margin: 0 0 8px; }
+    h2 { font-size: 1.2rem; margin-top: 2rem; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; }
+    h3 { font-size: 1.05rem; margin-top: 1.4rem; }
+    .muted { color: #64748b; font-size: 0.95rem; }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0 20px; font-size: 0.95rem; }
+    th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.84rem; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 8px; overflow-x: auto; }
+    .box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
+    .page-break { page-break-before: always; }
+    @media print {
+      body { padding: 0; }
+      a { color: inherit; text-decoration: none; }
+      pre { white-space: pre-wrap; }
+    }
+  </style>
+</head>
+<body>
+  <p class="muted">Ready to send to Hubtel · Online Checkout (External) · Qaretech Innovative / iPay</p>
+  <h1>UAT submission pack</h1>
+  <p>This document covers Hubtel UAT requirements: end-user test plan, sample callbacks, sample status-check responses, live links, and integration flow.</p>
+
+  <div class="box">
+    <strong>Live links</strong>
+    <table>
+      <tr><th>Item</th><th>URL</th></tr>
+      <tr><td>Customer app</td><td>https://ipaysub.vercel.app</td></tr>
+      <tr><td>Renew (demo)</td><td>https://ipaysub.vercel.app/portal/renew</td></tr>
+      <tr><td>API</td><td>https://ipaynotifyserver.onrender.com</td></tr>
+      <tr><td>Callback</td><td>https://ipaynotifyserver.onrender.com/api/payments/hubtel/callback</td></tr>
+    </table>
+  </div>
+
+  <h2>1. End-user UAT meeting</h2>
+  <ol>
+    <li>Open https://ipaysub.vercel.app/portal/renew</li>
+    <li>Enter PPPoE username → look up account (package, amount, expiry)</li>
+    <li>Proceed to checkout → complete payment in Hubtel modal</li>
+    <li>Confirm service extended on merchant side</li>
+  </ol>
+
+  <h2>2. Integration flow</h2>
+  <pre>Customer → iPay API (quote + unique clientReference)
+        → Hubtel CheckoutSdk.openModal(purchaseInfo, config)
+        → Customer pays
+        → Hubtel callback → iPay /api/payments/hubtel/callback
+        → Fulfill PPPoE / voucher
+        → (fallback) Hubtel Transaction Status Check</pre>
+
+  <h3>Pre-checkout payload (to SDK)</h3>
+  <pre>{
+  "purchaseInfo": {
+    "amount": 1.0,
+    "purchaseDescription": "QareFi Billing: PPPoE renewal — demo-user",
+    "customerPhoneNumber": "233XXXXXXXXX",
+    "clientReference": "QF-……………………"
+  },
+  "config": {
+    "branding": "enabled",
+    "callbackUrl": "https://ipaynotifyserver.onrender.com/api/payments/hubtel/callback",
+    "merchantAccount": 1234567,
+    "basicAuth": "&lt;base64(clientId:clientSecret)&gt;",
+    "integrationType": "External"
+  }
+}</pre>
+
+  <div class="page-break"></div>
+
+  <h2>3. Sample callback — success</h2>
+  <pre>{
+  "ResponseCode": "0000",
+  "Status": "Success",
+  "Message": "Transaction successful",
+  "Data": {
+    "ClientReference": "QF-f13b21d32ea0c37a438c648c",
+    "TransactionId": "7fd01221faeb41469daec7b3561bddc5",
+    "ExternalTransactionId": "0000006824852622",
+    "Amount": 1.0,
+    "PaymentMethod": "mobilemoney",
+    "CustomerPhoneNumber": "233200000000"
+  },
+  "ClientReference": "QF-f13b21d32ea0c37a438c648c"
+}</pre>
+
+  <h2>4. Sample callback — failed</h2>
+  <pre>{
+  "ResponseCode": "2001",
+  "Status": "Failed",
+  "Message": "Transaction failed due to an error with the Payment Processor",
+  "Data": {
+    "ClientReference": "QF-4158bc782798436d23a56bc6",
+    "Amount": 1.0,
+    "PaymentMethod": "mobilemoney"
+  },
+  "ClientReference": "QF-4158bc782798436d23a56bc6"
+}</pre>
+
+  <h2>5. Sample Transaction Status Check — Paid</h2>
+  <p class="muted">GET https://api-txnstatus.hubtel.com/transactions/{Collection_Account_Number}/status?clientReference=…</p>
+  <pre>{
+  "message": "Successful",
+  "responseCode": "0000",
+  "data": {
+    "status": "Paid",
+    "transactionId": "7fd01221faeb41469daec7b3561bddc5",
+    "externalTransactionId": "0000006824852622",
+    "paymentMethod": "mobilemoney",
+    "clientReference": "QF-f13b21d32ea0c37a438c648c",
+    "amount": 1.0,
+    "charges": 0.02,
+    "amountAfterCharges": 0.98
+  }
+}</pre>
+
+  <h2>6. Sample Transaction Status Check — Unpaid</h2>
+  <pre>{
+  "message": "Successful",
+  "responseCode": "0000",
+  "data": {
+    "status": "Unpaid",
+    "clientReference": "QF-8facb922a9867c8aab317799",
+    "amount": 1.0
+  }
+}</pre>
+
+  <h2>7. IP whitelist request</h2>
+  <p>Status Check currently returns <strong>403 Forbidden</strong> until our production egress IP is whitelisted. Please whitelist the Render outbound IP for <code>ipaynotifyserver.onrender.com</code> (and optionally our office IP). We will attach live Status Check captures immediately after whitelist.</p>
+
+  <p class="muted" style="margin-top:2rem;">Qaretech Innovative · iPay · Hubtel Online Checkout (External)</p>
+</body>
+</html>

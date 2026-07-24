@@ -248,6 +248,9 @@ export async function createHotspotPurchaseCheckout({
     routerDoc?.organizationId ||
     pkg.organizationId ||
     (await resolveDefaultOrganizationId());
+  const resolvedPhone =
+    normalizeGhanaMsisdn(customerMsisdn) || String(customerMsisdn || '').trim() || '';
+  const resolvedName = String(customerName || '').trim() || undefined;
   const tx = await Transaction.create({
     ...(orgId ? { organizationId: orgId } : {}),
     packageId: pkg._id,
@@ -257,26 +260,24 @@ export async function createHotspotPurchaseCheckout({
     kind: 'voucher',
     clientReference,
     provider: 'hubtel',
-    customerPhone: customerMsisdn,
-    customerName,
+    customerPhone: resolvedPhone || undefined,
+    customerName: resolvedName,
     meta: {
       routerId: String(routerId),
       fulfillment: 'pending',
     },
   });
 
-  const norm = normalizeGhanaMsisdn(customerMsisdn);
-  const phoneOr = [{ phone: customerMsisdn }];
-  if (norm) {
-    phoneOr.push({ phone: norm });
-    if (norm.startsWith('233') && norm.length >= 12) {
-      phoneOr.push({ phone: `0${norm.slice(3)}` });
+  if (resolvedPhone) {
+    const phoneOr = [{ phone: resolvedPhone }];
+    if (resolvedPhone.startsWith('233') && resolvedPhone.length >= 12) {
+      phoneOr.push({ phone: `0${resolvedPhone.slice(3)}` });
     }
-  }
-  const linkedUser = await User.findOne({ $or: phoneOr }).select('_id').lean();
-  if (linkedUser) {
-    tx.userId = linkedUser._id;
-    await tx.save();
+    const linkedUser = await User.findOne({ $or: phoneOr }).select('_id').lean();
+    if (linkedUser) {
+      tx.userId = linkedUser._id;
+      await tx.save();
+    }
   }
 
   const amountGhs = amountCents / 100;
@@ -290,15 +291,15 @@ export async function createHotspotPurchaseCheckout({
       description: `Hotspot — ${pkg.name}`,
       packageName: pkg.name,
       merchantName: billing.merchantDisplayName,
-      customerMsisdn: customerMsisdn,
-      customerName,
+      customerMsisdn: resolvedPhone,
+      customerName: resolvedName,
     });
   }
 
   const session = buildHubtelCheckoutSession({
     amountGhs,
     description: `${billing.merchantDisplayName}: Hotspot — ${pkg.name}`,
-    customerMsisdn,
+    customerMsisdn: resolvedPhone,
     clientReference,
     hubtel: billing.hubtel,
     publicAppBaseUrl: publicBase(),

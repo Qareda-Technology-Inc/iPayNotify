@@ -1,0 +1,16 @@
+{
+  "_comment": "Representative Hubtel Checkout callback (failed / declined) as processed by iPay.",
+  "ResponseCode": "2001",
+  "Status": "Failed",
+  "Message": "Transaction failed due to an error with the Payment Processor",
+  "Data": {
+    "ClientReference": "QF-4158bc782798436d23a56bc6",
+    "TransactionId": "a1b2c3d4e5f6478890abcdef12345678",
+    "Amount": 1.0,
+    "PaymentMethod": "mobilemoney",
+    "CustomerPhoneNumber": "233200000000",
+    "Description": "QareFi Billing: PPPoE renewal — demo-user",
+    "Date": "2026-07-24T10:55:00.000Z"
+  },
+  "ClientReference": "QF-4158bc782798436d23a56bc6"
+}

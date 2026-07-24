@@ -98,16 +98,32 @@ publicPortalRouter.post(
 publicPortalRouter.post(
   '/hotspot/checkout',
   asyncHandler(async (req, res) => {
-    const { packageId, routerId, customerMsisdn, customerName } = req.body;
-    if (!packageId || !routerId || !customerMsisdn) {
+    const { packageId, customerMsisdn, customerName, portalSlug } = req.body;
+    if (!packageId) {
+      return res.status(400).json({ error: 'packageId is required' });
+    }
+
+    /**
+     * Site is resolved only from captive/QR slug or the client's public IP.
+     * Clients cannot pick an arbitrary router.
+     */
+    const slug =
+      portalSlug != null && String(portalSlug).trim()
+        ? String(portalSlug).trim()
+        : req.query.r ?? req.query.router ?? req.query.site;
+    const ctx = await resolvePortalRouter(req, slug);
+    if (!ctx.resolved || !ctx.router?.id) {
       return res.status(400).json({
-        error: 'packageId, routerId, and customerMsisdn are required',
+        error:
+          'Could not determine this venue. Connect to the site Wi‑Fi or open the buy link from the login page (?r=site).',
+        reason: ctx.reason || 'unresolved',
       });
     }
+
     const out = await createHotspotPurchaseCheckout({
       packageId,
-      routerId,
-      customerMsisdn: String(customerMsisdn).replace(/\s/g, ''),
+      routerId: ctx.router.id,
+      customerMsisdn: customerMsisdn ? String(customerMsisdn).replace(/\s/g, '') : undefined,
       customerName,
     });
     res.json(out);
