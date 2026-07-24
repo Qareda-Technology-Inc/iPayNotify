@@ -8,6 +8,7 @@ import { generateVouchers } from './hotspotService.js';
 import { buildHubtelCheckoutSession } from '../integrations/hubtel.js';
 import { extendPaidUntilByPackage } from '../utils/duration.js';
 import { notifyTransactionPaidSms } from './paymentSmsService.js';
+import { notifyTransactionPaidAdminEmail } from './paymentAdminNotifyService.js';
 import { resolveOrgBilling } from './orgBillingService.js';
 
 function newClientReference() {
@@ -295,11 +296,75 @@ export async function getTransactionByReference(clientReference) {
   return Transaction.findOne({ clientReference }).lean();
 }
 
+async function notifyPaidChannels(tx, context) {
+  try {
+    await notifyTransactionPaidSms(tx, context);
+  } catch (e) {
+    mergeTxMeta(tx, {
+      smsNotification: {
+        status: 'failed',
+        at: new Date().toISOString(),
+        error: e?.message || 'sms_threw',
+      },
+    });
+  }
+  try {
+    await notifyTransactionPaidAdminEmail(tx, context);
+  } catch (e) {
+    mergeTxMeta(tx, {
+      adminEmailNotification: {
+        status: 'failed',
+        at: new Date().toISOString(),
+        error: e?.message || 'email_threw',
+      },
+    });
+  }
+}
+
+function needsPaidNotifications(tx) {
+  const sms = tx.meta?.smsNotification?.status;
+  const email = tx.meta?.adminEmailNotification?.status;
+  return sms !== 'sent' || email !== 'sent';
+}
+
 export async function fulfillPaidTransaction(txDoc) {
   const tx =
     txDoc instanceof Transaction ? txDoc : await Transaction.findById(txDoc._id || txDoc);
   if (!tx || tx.status !== 'paid') return { ok: false, reason: 'not_paid' };
-  if (tx.meta?.fulfillment === 'done') return { ok: true, already: true };
+
+  /** Already fulfilled: still retry SMS / admin email if they never succeeded. */
+  if (tx.meta?.fulfillment === 'done') {
+    if (needsPaidNotifications(tx)) {
+      const notifyCtx = {
+        kind: tx.kind,
+        packageName: undefined,
+        secretName: tx.meta?.secretName,
+        paidUntil: tx.meta?.renewedUntil,
+        voucherCode: tx.meta?.voucherCode,
+        code: tx.meta?.voucherCode,
+        validUntil: undefined,
+        routerId: tx.meta?.routerId,
+        customerName: tx.customerName,
+      };
+      if (tx.kind === 'renewal' && tx.pppoeAccountId) {
+        const acc = await PppoeAccount.findById(tx.pppoeAccountId).lean();
+        const pkg = tx.packageId ? await PlanPackage.findById(tx.packageId).lean() : null;
+        notifyCtx.paidUntil = acc?.paidUntil || notifyCtx.paidUntil;
+        notifyCtx.secretName = acc?.secretName || notifyCtx.secretName;
+        notifyCtx.routerId = acc?.routerId || notifyCtx.routerId;
+        notifyCtx.packageDoc = pkg;
+        notifyCtx.packageName = pkg?.name;
+        notifyCtx.renewalType = 'pppoe';
+      } else if (tx.kind === 'voucher') {
+        const pkg = tx.packageId ? await PlanPackage.findById(tx.packageId).lean() : null;
+        notifyCtx.packageName = pkg?.name;
+        notifyCtx.code = notifyCtx.voucherCode;
+      }
+      await notifyPaidChannels(tx, notifyCtx);
+      await tx.save();
+    }
+    return { ok: true, already: true };
+  }
 
   if (tx.kind === 'renewal' && tx.pppoeAccountId) {
     const acc = await PppoeAccount.findById(tx.pppoeAccountId);
@@ -325,7 +390,7 @@ export async function fulfillPaidTransaction(txDoc) {
       const u = await User.findById(tx.userId).select('fullName').lean();
       customerNameForSms = u?.fullName;
     }
-    await notifyTransactionPaidSms(tx, {
+    await notifyPaidChannels(tx, {
       kind: 'renewal',
       renewalType: 'pppoe',
       paidUntil: acc.paidUntil,
@@ -350,9 +415,10 @@ export async function fulfillPaidTransaction(txDoc) {
     tx.hotspotVoucherId = v._id;
     const pkg = await PlanPackage.findById(tx.packageId);
     mergeTxMeta(tx, { fulfillment: 'done', voucherCode: v.code });
-    await notifyTransactionPaidSms(tx, {
+    await notifyPaidChannels(tx, {
       kind: 'voucher',
       code: v.code,
+      voucherCode: v.code,
       validUntil: v.validUntil,
       packageName: pkg?.name,
     });

@@ -118,7 +118,7 @@ export const config = {
    * At least one channel must be available: SMTP configured, or admin has a normalised Ghana phone and Arkesel is ready/mock.
    */
   adminLoginVerify: process.env.ADMIN_LOGIN_VERIFY === 'true',
-  /** Nodemailer SMTP — used for admin login verification and future transactional mail */
+  /** Nodemailer SMTP — used for admin login verification and payment success alerts */
   smtp: {
     host: (process.env.SMTP_HOST || '').trim(),
     port: Number(process.env.SMTP_PORT) || 587,
@@ -129,4 +129,9 @@ export const config = {
     /** Log messages only; no SMTP connection */
     mock: process.env.SMTP_MOCK === 'true',
   },
+  /**
+   * Extra admin inbox(es) for payment-success email (comma/space separated).
+   * Org admins for the paying tenant are always included when present.
+   */
+  paymentAdminNotifyEmails: (process.env.PAYMENT_ADMIN_NOTIFY_EMAIL || '').trim(),
 };

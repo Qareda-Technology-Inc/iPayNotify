@@ -83,3 +83,84 @@ export function buildSmtpTestEmail(p) {
 
   return { subject, text, html };
 }
+
+/**
+ * Admin alert after a customer payment is fulfilled (renewal / voucher).
+ * @param {{
+ *   brand: string,
+ *   kind: string,
+ *   amountLabel: string,
+ *   customerPhone?: string,
+ *   customerName?: string,
+ *   packageName?: string,
+ *   secretName?: string,
+ *   voucherCode?: string,
+ *   paidUntilLabel?: string,
+ *   clientReference?: string,
+ *   providerReference?: string,
+ *   appUrl?: string,
+ * }} p
+ */
+export function buildPaymentSuccessAdminEmail(p) {
+  const brand = String(p.brand || 'QareFi Billing').trim();
+  const kind = String(p.kind || 'payment').trim();
+  const kindLabel = kind === 'voucher' ? 'Hotspot voucher' : kind === 'renewal' ? 'PPPoE renewal' : 'Payment';
+  const amountLabel = String(p.amountLabel || '').trim() || '—';
+  const customerPhone = String(p.customerPhone || '').trim() || '—';
+  const customerName = String(p.customerName || '').trim() || '—';
+  const packageName = String(p.packageName || '').trim() || '—';
+  const secretName = String(p.secretName || '').trim();
+  const voucherCode = String(p.voucherCode || '').trim();
+  const paidUntilLabel = String(p.paidUntilLabel || '').trim();
+  const clientReference = String(p.clientReference || '').trim() || '—';
+  const providerReference = String(p.providerReference || '').trim();
+  const appUrl = String(p.appUrl || '').trim();
+
+  const subject = `${brand} — ${kindLabel} paid (${amountLabel})`;
+
+  const detailLines = [
+    `Type: ${kindLabel}`,
+    `Amount: ${amountLabel}`,
+    `Customer: ${customerName}`,
+    `Phone: ${customerPhone}`,
+    `Package: ${packageName}`,
+    secretName ? `PPPoE username: ${secretName}` : null,
+    voucherCode ? `Voucher code: ${voucherCode}` : null,
+    paidUntilLabel ? `Paid until: ${paidUntilLabel}` : null,
+    `Client reference: ${clientReference}`,
+    providerReference ? `Provider reference: ${providerReference}` : null,
+  ].filter(Boolean);
+
+  const text = [`${brand}`, '', 'Payment received and fulfilled.', '', ...detailLines, appUrl ? `\nDashboard: ${appUrl}` : '']
+    .filter(Boolean)
+    .join('\n');
+
+  const row = (label, value) =>
+    `<tr><td style="padding:6px 0;color:#94a3b8;width:42%;vertical-align:top;">${escapeHtml(label)}</td><td style="padding:6px 0;color:#e2e8f0;font-weight:500;">${escapeHtml(value)}</td></tr>`;
+
+  const innerHtml = `
+    <p style="margin:0 0 16px;">A customer payment was received and fulfilled.</p>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:14px;">
+      ${row('Type', kindLabel)}
+      ${row('Amount', amountLabel)}
+      ${row('Customer', customerName)}
+      ${row('Phone', customerPhone)}
+      ${row('Package', packageName)}
+      ${secretName ? row('PPPoE username', secretName) : ''}
+      ${voucherCode ? row('Voucher code', voucherCode) : ''}
+      ${paidUntilLabel ? row('Paid until', paidUntilLabel) : ''}
+      ${row('Client reference', clientReference)}
+      ${providerReference ? row('Provider reference', providerReference) : ''}
+    </table>
+  `.trim();
+
+  const html = wrapTransactionalHtml({
+    brand,
+    title: `${kindLabel} paid`,
+    preheader: `${amountLabel} · ${customerPhone}`,
+    innerHtml,
+    footerText: appUrl ? `Dashboard: ${appUrl}` : '',
+  });
+
+  return { subject, text, html };
+}
