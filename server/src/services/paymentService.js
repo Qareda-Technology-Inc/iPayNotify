@@ -63,7 +63,10 @@ function checkoutResponseFromHubtel(tx, session, extras = {}) {
 export async function findPppoeForRenewal(secretName, routerId) {
   const q = { secretName: String(secretName).trim() };
   if (routerId) q.routerId = routerId;
-  return PppoeAccount.find(q).populate('packageId').populate('routerId');
+  return PppoeAccount.find(q)
+    .populate('packageId')
+    .populate('routerId')
+    .populate('userId', 'fullName phone');
 }
 
 export async function quotePppoeRenewal(secretName, routerId) {
@@ -85,9 +88,16 @@ export async function quotePppoeRenewal(secretName, routerId) {
   }
   const account = matches[0];
   const pkg = account.packageId
-    ? await PlanPackage.findById(account.packageId)
+    ? account.packageId.priceCents != null
+      ? account.packageId
+      : await PlanPackage.findById(account.packageId)
     : null;
   const amountCents = pkg?.priceCents ?? 0;
+  const linkedUser =
+    account.userId && typeof account.userId === 'object' ? account.userId : null;
+  const customerName = String(linkedUser?.fullName || '').trim();
+  const customerPhone =
+    normalizeGhanaMsisdn(linkedUser?.phone) || String(linkedUser?.phone || '').trim() || '';
   return {
     needRouterSelection: false,
     secretName: account.secretName,
@@ -98,6 +108,9 @@ export async function quotePppoeRenewal(secretName, routerId) {
     routerName: account.routerId?.name,
     paidUntil: account.paidUntil,
     needsPrice: amountCents <= 0,
+    customerName: customerName || null,
+    customerPhone: customerPhone || null,
+    hasLinkedCustomer: Boolean(linkedUser),
   };
 }
 
@@ -125,8 +138,23 @@ export async function createPppoeRenewalCheckout({
   const matches = await findPppoeForRenewal(secretName, routerId);
   const account = matches[0];
   const pkg = account.packageId
-    ? await PlanPackage.findById(account.packageId)
+    ? account.packageId.priceCents != null
+      ? account.packageId
+      : await PlanPackage.findById(account.packageId)
     : null;
+
+  const linkedUser =
+    account.userId && typeof account.userId === 'object' ? account.userId : null;
+  const resolvedPhone =
+    normalizeGhanaMsisdn(customerMsisdn) ||
+    normalizeGhanaMsisdn(quote.customerPhone) ||
+    normalizeGhanaMsisdn(linkedUser?.phone) ||
+    '';
+  const resolvedName =
+    String(customerName || '').trim() ||
+    String(quote.customerName || '').trim() ||
+    String(linkedUser?.fullName || '').trim() ||
+    '';
 
   const clientReference = newClientReference();
   const orgId =
@@ -137,7 +165,7 @@ export async function createPppoeRenewalCheckout({
     (await resolveDefaultOrganizationId());
   const tx = await Transaction.create({
     ...(orgId ? { organizationId: orgId } : {}),
-    userId: account.userId,
+    userId: account.userId?._id || account.userId,
     packageId: pkg?._id,
     pppoeAccountId: account._id,
     amountCents: quote.amountCents,
@@ -146,8 +174,8 @@ export async function createPppoeRenewalCheckout({
     kind: 'renewal',
     clientReference,
     provider: 'hubtel',
-    customerPhone: customerMsisdn,
-    customerName,
+    customerPhone: resolvedPhone,
+    customerName: resolvedName || undefined,
     meta: {
       secretName: account.secretName,
       fulfillment: 'pending',
@@ -165,15 +193,15 @@ export async function createPppoeRenewalCheckout({
       description: `PPPoE renewal — ${account.secretName}`,
       packageName: quote.packageName,
       merchantName: billing.merchantDisplayName,
-      customerMsisdn: customerMsisdn,
-      customerName,
+      customerMsisdn: resolvedPhone,
+      customerName: resolvedName,
     });
   }
 
   const session = buildHubtelCheckoutSession({
     amountGhs,
     description: `${billing.merchantDisplayName}: PPPoE renewal — ${account.secretName}`,
-    customerMsisdn,
+    customerMsisdn: resolvedPhone,
     clientReference,
     hubtel: billing.hubtel,
     publicAppBaseUrl: publicBase(),

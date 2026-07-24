@@ -113,6 +113,13 @@ export function ActiveUsersPage() {
                     {r.error}
                   </p>
                 )}
+                {!r.error &&
+                  (r.hotspotActive?.length ?? 0) === 0 &&
+                  (r.pppActive?.length ?? 0) === 0 && (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Router reachable — no live Hotspot or PPP sessions right now.
+                    </p>
+                  )}
               </div>
 
               <div className="grid gap-6 p-5 lg:grid-cols-2">

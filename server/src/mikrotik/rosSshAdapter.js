@@ -1,4 +1,5 @@
 import {
+  apiPathToCliVerb,
   buildExecFromWriteArgs,
   connectSsh,
   execRos,
@@ -51,7 +52,20 @@ export class SshRosAdapter {
       if (isActiveSessionsListPrint(cmd)) {
         const asRows = parseAsValuePrintOutput(out);
         if (asRows.length > 0) return asRows;
-        return parseDetailPrintOutput(out);
+        const looksLikeEmptyList = /flags:/i.test(out) && !/=/.test(out);
+        if (looksLikeEmptyList || !String(out || '').trim()) {
+          if (looksLikeEmptyList) return [];
+          /* Empty stdout: retry detail (some ROS builds mishandle as-value). */
+        } else if (/=/.test(out)) {
+          return parseDetailPrintOutput(out);
+        }
+        const verb = apiPathToCliVerb(cmd.replace(/\/print$/, ''));
+        try {
+          const detailOut = await execRos(this.conn, `${verb} print detail without-paging`);
+          return parseDetailPrintOutput(detailOut);
+        } catch {
+          return parseDetailPrintOutput(out);
+        }
       }
       return parseDetailPrintOutput(out);
     }

@@ -71,6 +71,9 @@ publicPortalRouter.post(
       routerName: quote.routerName,
       paidUntil: quote.paidUntil,
       needsPrice: quote.needsPrice,
+      customerName: quote.customerName,
+      customerPhone: quote.customerPhone,
+      hasLinkedCustomer: quote.hasLinkedCustomer,
     });
   })
 );
@@ -79,15 +82,13 @@ publicPortalRouter.post(
   '/renew/checkout',
   asyncHandler(async (req, res) => {
     const { secretName, routerId, customerMsisdn, customerName } = req.body;
-    if (!secretName || !customerMsisdn) {
-      return res
-        .status(400)
-        .json({ error: 'secretName and customerMsisdn (mobile money number) are required' });
+    if (!secretName) {
+      return res.status(400).json({ error: 'secretName is required' });
     }
     const out = await createPppoeRenewalCheckout({
       secretName,
       routerId: routerId || undefined,
-      customerMsisdn: String(customerMsisdn).replace(/\s/g, ''),
+      customerMsisdn: customerMsisdn ? String(customerMsisdn).replace(/\s/g, '') : undefined,
       customerName,
     });
     res.json(out);

@@ -6,16 +6,23 @@ import { usePortalContext } from './usePortalContext.js';
 import { DraftCheckoutPrompt } from './DraftCheckoutPrompt.jsx';
 import { HubtelCheckout } from './HubtelCheckout.jsx';
 
+function DetailRow({ label, children }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-slate-800/80 py-2.5 last:border-0">
+      <span className="shrink-0 text-slate-500">{label}</span>
+      <span className="text-right text-slate-100">{children}</span>
+    </div>
+  );
+}
+
 export function RenewPage() {
   const navigate = useNavigate();
-  const { ctx, loading: ctxLoading, error: ctxError, slug } = usePortalContext();
+  const { ctx, loading: ctxLoading, error: ctxError } = usePortalContext();
   const [secretName, setSecretName] = useState('');
   const [routerId, setRouterId] = useState('');
   const [hintRouterId, setHintRouterId] = useState('');
   const [routers, setRouters] = useState([]);
   const [quote, setQuote] = useState(null);
-  const [phone, setPhone] = useState('');
-  const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState('lookup');
@@ -28,6 +35,11 @@ export function RenewPage() {
     setHintRouterId(id);
     setRouterId(id);
   }, [ctx, ctxLoading]);
+
+  function applyQuote(data) {
+    setQuote(data);
+    setStep('review');
+  }
 
   async function doQuote(e) {
     e.preventDefault();
@@ -53,8 +65,7 @@ export function RenewPage() {
         );
         return;
       }
-      setQuote(data);
-      setStep('pay');
+      applyQuote(data);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -62,7 +73,7 @@ export function RenewPage() {
     }
   }
 
-  async function doPay(e) {
+  async function doCheckout(e) {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -72,8 +83,8 @@ export function RenewPage() {
         body: JSON.stringify({
           secretName: secretName.trim(),
           routerId: quote?.routerId || hintRouterId || routerId || undefined,
-          customerMsisdn: phone.replace(/\s/g, ''),
-          customerName: name || undefined,
+          customerMsisdn: quote?.customerPhone || undefined,
+          customerName: quote?.customerName || undefined,
         }),
       });
       if (data.mode === 'draft_hubtel' || data.mode === 'draft_momo') {
@@ -121,23 +132,14 @@ export function RenewPage() {
           if (ref) navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`);
         }}
       />
-      <h1 className="text-xl font-semibold text-white">Renew your internet</h1>
-      <p className="mt-2 text-sm text-slate-400">
-        Enter your PPPoE username (same as you use on the router). After Hubtel payment
-        succeeds, your line is extended automatically.
-      </p>
+      <h1 className="text-xl font-semibold text-white">Renew service</h1>
+      {step === 'lookup' && (
+        <p className="mt-2 text-sm text-slate-400">Enter your PPPoE username to continue.</p>
+      )}
 
       {ctxError && (
         <p className="mt-4 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
           {ctxError}
-        </p>
-      )}
-      {ctx?.resolved && (
-        <p className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-200">
-          Site: <strong>{ctx.router?.name}</strong>
-          {ctx.match === 'slug' && slug && (
-            <span className="block text-xs text-emerald-400/90">?r={slug}</span>
-          )}
         </p>
       )}
 
@@ -162,7 +164,7 @@ export function RenewPage() {
             disabled={loading}
             className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {loading ? 'Checking…' : 'Continue'}
+            {loading ? 'Looking up…' : 'Look up account'}
           </button>
         </form>
       )}
@@ -206,8 +208,7 @@ export function RenewPage() {
                   setError('No renewal price configured for this account.');
                   return;
                 }
-                setQuote(data);
-                setStep('pay');
+                applyQuote(data);
               } catch (err) {
                 setError(err.message);
               } finally {
@@ -216,53 +217,38 @@ export function RenewPage() {
             }}
             className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {loading ? 'Checking…' : 'Continue'}
+            {loading ? 'Looking up…' : 'Continue'}
           </button>
         </div>
       )}
 
-      {step === 'pay' && quote && (
-        <form onSubmit={doPay} className="mt-8 space-y-4">
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-sm">
-            <p>
-              <span className="text-slate-500">Package</span>{' '}
-              <span className="text-white">{quote.packageName}</span>
-            </p>
-            <p className="mt-2">
-              <span className="text-slate-500">Amount</span>{' '}
+      {step === 'review' && quote && (
+        <form onSubmit={doCheckout} className="mt-8 space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-1 text-sm">
+            <DetailRow label="PPPoE username">
+              <span className="font-mono">{quote.secretName}</span>
+            </DetailRow>
+            {quote.customerName ? (
+              <DetailRow label="Customer">{quote.customerName}</DetailRow>
+            ) : null}
+            <DetailRow label="Package">{quote.packageName}</DetailRow>
+            <DetailRow label="Amount">
               <span className="text-lg font-semibold text-emerald-400">
                 {(quote.amountCents / 100).toFixed(2)} {quote.currency}
               </span>
-            </p>
-            {quote.paidUntil && (
+            </DetailRow>
+            {quote.paidUntil ? (
               <>
-                <p className="mt-2 text-slate-500">
-                  Current valid until: {new Date(quote.paidUntil).toLocaleString()}
-                </p>
-                <p className="mt-1 text-slate-400">
+                <DetailRow label="Expires">
+                  {new Date(quote.paidUntil).toLocaleString()}
+                </DetailRow>
+                <DetailRow label="Time left">
                   {formatRemainingFromPaidUntil(quote.paidUntil)}
-                </p>
+                </DetailRow>
               </>
-            )}
+            ) : null}
           </div>
-          <label className="block text-sm">
-            <span className="text-slate-300">Mobile money number</span>
-            <input
-              required
-              placeholder="e.g. 024xxxxxxx"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 outline-none ring-emerald-500/40 focus:ring-2"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-slate-300">Your name (optional)</span>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 outline-none ring-emerald-500/40 focus:ring-2"
-            />
-          </label>
+
           {error && (
             <p className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
               {error}
@@ -273,13 +259,14 @@ export function RenewPage() {
             disabled={loading}
             className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {loading ? 'Starting payment…' : 'Pay with Hubtel'}
+            {loading ? 'Please wait…' : 'Proceed to checkout'}
           </button>
           <button
             type="button"
             onClick={() => {
               setStep('lookup');
               setQuote(null);
+              setError('');
             }}
             className="w-full text-sm text-slate-500"
           >

@@ -184,6 +184,32 @@ export async function getRouterPppActive(routerId, organizationId) {
   });
 }
 
+/** Hotspot + PPP on one SSH/API session (avoids two handshakes per router). */
+async function readActiveSessionsOnRouter(router) {
+  return withRouterMikrotik(router, async (api) => {
+    let hotspotActive = [];
+    let pppActive = [];
+    const errs = [];
+    try {
+      const rows = await hs.printHotspotActive(api);
+      hotspotActive = rows.map(mapHotspotActiveRow).filter(Boolean);
+    } catch (e) {
+      errs.push(`Hotspot: ${String(e.message || e)}`);
+    }
+    try {
+      const rows = await ppp.printPppActive(api);
+      pppActive = rows.map(mapPppActiveRow).filter(Boolean);
+    } catch (e) {
+      errs.push(`PPP: ${String(e.message || e)}`);
+    }
+    return {
+      hotspotActive,
+      pppActive,
+      error: errs.length ? errs.join(' ') : null,
+    };
+  });
+}
+
 /**
  * Hotspot + PPP active sessions for every router (best-effort; errors per router).
  * Routers are queried in parallel for faster dashboard refresh.
@@ -195,34 +221,35 @@ export async function listActiveSessionsAllRouters(organizationId) {
     mongoose.isValidObjectId(String(organizationId).trim())
       ? { organizationId: String(organizationId).trim() }
       : {};
-  const routers = await Router.find(q).sort({ createdAt: 1 }).lean();
+  const routers = await Router.find(q).sort({ createdAt: 1 });
   const at = new Date().toISOString();
 
   const rows = await Promise.all(
     routers.map(async (r) => {
       const id = String(r._id);
       const label = routerDisplayName(r) || r.name || r.host || id;
-      let hotspotActive = [];
-      let pppActive = [];
-      const errs = [];
       try {
-        hotspotActive = await getRouterHotspotActive(id, organizationId);
+        const session = await readActiveSessionsOnRouter(r);
+        return {
+          routerId: id,
+          routerName: label,
+          host: r.host,
+          reachable: !session.error || session.hotspotActive.length > 0 || session.pppActive.length > 0,
+          hotspotActive: session.hotspotActive,
+          pppActive: session.pppActive,
+          error: session.error,
+        };
       } catch (e) {
-        errs.push(`Hotspot: ${String(e.message || e)}`);
+        return {
+          routerId: id,
+          routerName: label,
+          host: r.host,
+          reachable: false,
+          hotspotActive: [],
+          pppActive: [],
+          error: String(e.message || e),
+        };
       }
-      try {
-        pppActive = await getRouterPppActive(id, organizationId);
-      } catch (e) {
-        errs.push(`PPP: ${String(e.message || e)}`);
-      }
-      return {
-        routerId: id,
-        routerName: label,
-        host: r.host,
-        hotspotActive,
-        pppActive,
-        error: errs.length ? errs.join(' ') : null,
-      };
     })
   );
 

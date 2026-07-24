@@ -37,9 +37,7 @@ export function buildHubtelCheckoutSession({
   if (!Number.isFinite(amount) || amount <= 0) {
     return { ok: false, error: 'Invalid amount' };
   }
-  if (!phone) {
-    return { ok: false, error: 'Invalid customer phone' };
-  }
+  /** Phone may be empty — Hubtel checkout collects MoMo number in its own UI. */
 
   if (h.mock) {
     const base = String(publicAppBaseUrl || config.publicAppUrl || '').replace(/\/$/, '');
@@ -82,7 +80,7 @@ export function buildHubtelCheckoutSession({
     purchaseInfo: {
       amount,
       purchaseDescription,
-      customerPhoneNumber: phone,
+      ...(phone ? { customerPhoneNumber: phone } : {}),
       clientReference: String(clientReference),
     },
     config: {
