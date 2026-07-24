@@ -47,8 +47,33 @@ export function normalizeRouterForSsh(router) {
   return { host, port, username, password };
 }
 
+/** Algorithms many RouterOS builds still negotiate (ssh2 defaults dropped some). */
+const MIKROTIK_SSH_ALGORITHMS = {
+  serverHostKey: [
+    'ssh-rsa',
+    'ssh-dss',
+    'ecdsa-sha2-nistp256',
+    'ecdsa-sha2-nistp384',
+    'ecdsa-sha2-nistp521',
+    'rsa-sha2-512',
+    'rsa-sha2-256',
+  ],
+  kex: [
+    'curve25519-sha256',
+    'ecdh-sha2-nistp256',
+    'diffie-hellman-group14-sha256',
+    'diffie-hellman-group14-sha1',
+    'diffie-hellman-group-exchange-sha256',
+    'diffie-hellman-group-exchange-sha1',
+    'diffie-hellman-group1-sha1',
+  ],
+  cipher: ['aes128-ctr', 'aes192-ctr', 'aes256-ctr', 'aes128-cbc', 'aes256-cbc', '3des-cbc'],
+  hmac: ['hmac-sha2-256', 'hmac-sha1', 'hmac-sha2-512'],
+};
+
 export function connectSsh(creds) {
   const { host, port, username, password } = creds;
+  const endpoint = `${host}:${port}`;
   return new Promise((resolve, reject) => {
     const conn = new Client();
     const t = setTimeout(() => {
@@ -57,7 +82,11 @@ export function connectSsh(creds) {
       } catch {
         /* ignore */
       }
-      reject(new Error('SSH connection timed out'));
+      const err = new Error(
+        `SSH connection timed out to ${endpoint}. Check host/port, firewall, and that this port is MikroTik SSH (IP → Services → ssh), not Winbox/API.`
+      );
+      err.status = 502;
+      reject(err);
     }, 35000);
     conn.on('keyboard-interactive', (_name, _instr, _lang, prompts, finish) => {
       if (prompts?.length && /password/i.test(String(prompts[0].prompt))) {
@@ -73,7 +102,20 @@ export function connectSsh(creds) {
       })
       .on('error', (e) => {
         clearTimeout(t);
-        reject(e);
+        const msg = String(e?.message || e);
+        let hint = msg;
+        if (/handshake|timed out while waiting/i.test(msg)) {
+          hint =
+            `SSH handshake failed for ${endpoint} (${msg}). ` +
+            `TCP may be open but the service is not speaking SSH — confirm the public port forwards to RouterOS ssh (usually 22), ` +
+            `or switch this router to transport "api" and use the api service port (usually 8728).`;
+        } else if (/ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT/i.test(msg)) {
+          hint = `Cannot reach MikroTik SSH at ${endpoint}: ${msg}`;
+        }
+        const err = new Error(hint);
+        err.status = 502;
+        err.cause = e;
+        reject(err);
       })
       .connect({
         host,
@@ -85,6 +127,7 @@ export function connectSsh(creds) {
         keepaliveInterval: 15000,
         /* MikroTik is not OpenSSH; relax vendor quirks for KEX/handshake */
         strictVendor: false,
+        algorithms: MIKROTIK_SSH_ALGORITHMS,
       });
   });
 }

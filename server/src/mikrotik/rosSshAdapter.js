@@ -85,6 +85,7 @@ export async function withRouterSsh(router, fn) {
     conn = await connectSsh(creds);
   } catch (e) {
     if (isSshAuthFailure(e)) throw sshLoginRejectedError(creds);
+    if (!e.status) e.status = 502;
     throw e;
   }
   const adapter = new SshRosAdapter(conn);

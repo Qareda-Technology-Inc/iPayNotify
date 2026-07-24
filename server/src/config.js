@@ -1,6 +1,9 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
-dotenv.config();
+/** Always load `server/.env` (not cwd), so Hubtel/etc. work even if the process is started from the repo root. */
+dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.env') });
 
 export const config = {
   port: Number(process.env.PORT) || 4000,

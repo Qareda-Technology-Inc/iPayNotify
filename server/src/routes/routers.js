@@ -124,25 +124,36 @@ routersApi.post(
     const commentTrim =
       comment != null && String(comment).trim() ? String(comment).trim() : '';
     const displayName = commentTrim || String(name ?? '').trim() || h;
-    const doc = await MikrotikRouter.create({
-      organizationId: req.organizationId,
-      name: displayName || 'Router',
-      ...(commentTrim ? { comment: commentTrim } : {}),
-      host: h,
-      transport: t,
-      apiPort: finalApiPort,
-      sshPort: finalSshPort,
-      sshUser: sshUser != null ? String(sshUser).trim() : '',
-      ...(sshPassword != null && String(sshPassword).length > 0
-        ? { sshPassword: String(sshPassword) }
-        : {}),
-      apiUser: u,
-      apiPassword: p,
-      defaultPppProfile: defaultPppProfile ?? 'default',
-      expiredPppProfile: expiredPppProfile ?? 'nonpayment',
-      ...(siteIp ? { sitePublicIp: siteIp } : {}),
-      ...(slug ? { portalSlug: slug } : {}),
-    });
+    let doc;
+    try {
+      doc = await MikrotikRouter.create({
+        organizationId: req.organizationId,
+        name: displayName || 'Router',
+        ...(commentTrim ? { comment: commentTrim } : {}),
+        host: h,
+        transport: t,
+        apiPort: finalApiPort,
+        sshPort: finalSshPort,
+        sshUser: sshUser != null ? String(sshUser).trim() : '',
+        ...(sshPassword != null && String(sshPassword).length > 0
+          ? { sshPassword: String(sshPassword) }
+          : {}),
+        apiUser: u,
+        apiPassword: p,
+        defaultPppProfile: defaultPppProfile ?? 'default',
+        expiredPppProfile: expiredPppProfile ?? 'nonpayment',
+        ...(siteIp ? { sitePublicIp: siteIp } : {}),
+        ...(slug ? { portalSlug: slug } : {}),
+      });
+    } catch (e) {
+      if (e?.code === 11000) {
+        return res.status(400).json({
+          error:
+            'A router with this portal slug or site public IP already exists. Clear those fields or use unique values.',
+        });
+      }
+      throw e;
+    }
     void logOrgAudit({
       organizationId: req.organizationId,
       actorEmail: req.admin?.email,

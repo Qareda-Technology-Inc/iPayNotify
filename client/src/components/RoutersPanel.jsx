@@ -382,7 +382,9 @@ export function RoutersPanel() {
         <p className="mt-1 text-xs text-slate-500">
           <strong>Comment</strong> is the router name everywhere (lists, customer portal). If you
           skip it, the hostname is used. Add <span className="font-mono">:port</span> when SSH is not
-          on port 22.
+          on port 22 (e.g. <span className="font-mono">52.x.x.x:28748</span>). Saving only stores the
+          router in the database — use <strong>Test connection</strong> to verify MikroTik SSH/API
+          before PPPoE sync will work.
         </p>
         <form onSubmit={addRouter} className="mt-4 max-w-md space-y-4">
           <label className="block text-sm text-slate-300">

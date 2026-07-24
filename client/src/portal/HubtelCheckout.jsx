@@ -1,40 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-
-const HUBTEL_CDN = 'https://unified-pay.hubtel.com/js/v1/checkout.js';
-
-let scriptPromise = null;
-
-function loadHubtelSdk() {
-  if (typeof window === 'undefined') {
-    return Promise.reject(new Error('Hubtel checkout requires a browser'));
-  }
-  if (window.CheckoutSdk || window.HubtelCheckout) {
-    return Promise.resolve(window.CheckoutSdk || window.HubtelCheckout);
-  }
-  if (scriptPromise) return scriptPromise;
-  scriptPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${HUBTEL_CDN}"]`);
-    if (existing) {
-      existing.addEventListener('load', () => resolve(window.CheckoutSdk || window.HubtelCheckout));
-      existing.addEventListener('error', () => reject(new Error('Failed to load Hubtel checkout')));
-      return;
-    }
-    const s = document.createElement('script');
-    s.src = HUBTEL_CDN;
-    s.async = true;
-    s.onload = () => {
-      const Ctor = window.CheckoutSdk || window.HubtelCheckout;
-      if (!Ctor) {
-        reject(new Error('Hubtel CheckoutSdk not found on window'));
-        return;
-      }
-      resolve(Ctor);
-    };
-    s.onerror = () => reject(new Error('Failed to load Hubtel checkout script'));
-    document.head.appendChild(s);
-  });
-  return scriptPromise;
-}
+import CheckoutSdk from '@hubteljs/checkout';
 
 function parsePaymentData(raw) {
   if (raw == null) return {};
@@ -47,11 +12,13 @@ function parsePaymentData(raw) {
 }
 
 /**
- * Opens Hubtel Online Checkout as a modal (preferred) with iframe fallback container.
+ * Opens Hubtel Online Checkout via the official `@hubteljs/checkout` SDK (modal, iframe fallback).
+ * @see https://developers.hubtel.com — External Checkout SDK
  */
 export function HubtelCheckout({ open, purchaseInfo, hubtelConfig, onSuccess, onFailure, onClose }) {
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
+  const [useIframe, setUseIframe] = useState(false);
   const started = useRef(false);
   const checkoutRef = useRef(null);
   const onSuccessRef = useRef(onSuccess);
@@ -66,6 +33,7 @@ export function HubtelCheckout({ open, purchaseInfo, hubtelConfig, onSuccess, on
       started.current = false;
       setErr('');
       setLoading(false);
+      setUseIframe(false);
       return undefined;
     }
     if (!purchaseInfo || !hubtelConfig) {
@@ -80,12 +48,17 @@ export function HubtelCheckout({ open, purchaseInfo, hubtelConfig, onSuccess, on
       setLoading(true);
       setErr('');
       try {
-        const CheckoutCtor = await loadHubtelSdk();
+        const checkout = new CheckoutSdk();
         if (cancelled) return;
-        const checkout = typeof CheckoutCtor === 'function' ? new CheckoutCtor() : CheckoutCtor;
         checkoutRef.current = checkout;
 
         const callBacks = {
+          onInit: () => {
+            if (!cancelled) setLoading(false);
+          },
+          onLoad: () => {
+            if (!cancelled) setLoading(false);
+          },
           onPaymentSuccess: (response) => {
             const data = parsePaymentData(response?.data ?? response);
             try {
@@ -110,7 +83,12 @@ export function HubtelCheckout({ open, purchaseInfo, hubtelConfig, onSuccess, on
             config: hubtelConfig,
             callBacks,
           });
+          if (!cancelled) setLoading(false);
         } else if (typeof checkout.initIframe === 'function') {
+          setUseIframe(true);
+          // Wait a tick so the iframe container is in the DOM.
+          await new Promise((r) => requestAnimationFrame(() => r()));
+          if (cancelled) return;
           checkout.initIframe({
             purchaseInfo,
             config: hubtelConfig,
@@ -133,6 +111,29 @@ export function HubtelCheckout({ open, purchaseInfo, hubtelConfig, onSuccess, on
   }, [open, purchaseInfo, hubtelConfig]);
 
   if (!open) return null;
+
+  // Modal path: Hubtel draws its own popup; we only show status/errors + a Close control.
+  if (!useIframe) {
+    return (
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex justify-center p-3 sm:p-4">
+        {(loading || err) && (
+          <div className="pointer-events-auto w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 shadow-xl">
+            {loading && <p className="text-sm text-slate-300">Opening Hubtel checkout…</p>}
+            {err && <p className="text-sm text-red-200">{err}</p>}
+            {err && (
+              <button
+                type="button"
+                className="mt-2 rounded-lg border border-slate-600 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                onClick={() => onClose?.()}
+              >
+                Close
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-slate-950/90 p-3 sm:p-6" role="dialog" aria-modal="true">

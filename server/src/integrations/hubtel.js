@@ -54,10 +54,17 @@ export function buildHubtelCheckoutSession({
   const merchantAccount = Number(String(h.merchantAccount || '').trim());
   const basicAuth = hubtelBasicAuth(h.clientId, h.clientSecret);
   if (!Number.isFinite(merchantAccount) || merchantAccount <= 0 || !basicAuth) {
+    const missing = [];
+    if (!String(h.merchantAccount || '').trim() || !Number.isFinite(merchantAccount) || merchantAccount <= 0) {
+      missing.push('HUBTEL_MERCHANT_ACCOUNT (numeric merchant id)');
+    }
+    if (!String(h.clientId || '').trim()) missing.push('HUBTEL_CLIENT_ID');
+    if (!String(h.clientSecret || '').trim()) missing.push('HUBTEL_CLIENT_SECRET');
     return {
       ok: false,
       error:
-        'Hubtel is not configured. Set HUBTEL_MERCHANT_ACCOUNT, HUBTEL_CLIENT_ID, and HUBTEL_CLIENT_SECRET (or org Hubtel credentials).',
+        `Hubtel is not configured (${missing.join(', ') || 'invalid credentials'}). ` +
+        `Set them in server .env (or org Hubtel credentials) and restart the API process so env changes load.`,
     };
   }
 

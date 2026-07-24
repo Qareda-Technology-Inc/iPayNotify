@@ -1,12 +1,16 @@
 /**
  * Parse MikroTicket / RouterOS "connect" string: `hostname`, `1.2.3.4`, or `host:port`.
- * Also accepts SSH copy-paste suffix ` -p 10864` / ` -P 10864` (otherwise that whole string is
- * wrongly passed to DNS and causes ENOTFOUND).
+ * Also accepts SSH copy-paste forms:
+ * - `host -p 10864` / `-P 10864`
+ * - `ssh user@host -p 10864` / `user@host`
  * Does not support bracketed IPv6.
  */
 export function parseRouterConnectString(raw, defaultPort = 8728) {
   let s = String(raw ?? '').trim();
   if (!s) return { host: '', port: defaultPort };
+
+  /* Drop leading `ssh` / `ssh -p N` noise from terminal copy-paste. */
+  s = s.replace(/^ssh\s+/i, '').trim();
 
   let forcedPort = null;
   const dashP = s.match(/\s+-[pP]\s+(\d{1,5})\s*$/);
@@ -16,6 +20,12 @@ export function parseRouterConnectString(raw, defaultPort = 8728) {
       forcedPort = n;
       s = s.slice(0, dashP.index).trim();
     }
+  }
+
+  /* `user@host` or `user@host:port` — ignore login (credentials come from form fields). */
+  const at = s.lastIndexOf('@');
+  if (at >= 0) {
+    s = s.slice(at + 1).trim();
   }
 
   const lastColon = s.lastIndexOf(':');
