@@ -1,7 +1,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
-import { Admin, Organization, Router } from '../models/index.js';
+import { Admin, Organization, Router, WithdrawalRequest } from '../models/index.js';
 import { normalizeGhanaMsisdn } from '../utils/phoneGhana.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireSuperAdmin } from '../middleware/requireSuperAdmin.js';
@@ -9,6 +9,13 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { config } from '../config.js';
 import { sendSmtpMail, smtpReadyForSend } from '../integrations/mail.js';
 import { buildAdminSignInOtpEmail, buildSmtpTestEmail } from '../templates/email/index.js';
+import { issueAdminInvite } from '../services/adminInviteService.js';
+import {
+  markWithdrawalPaid,
+  rejectWithdrawal,
+  getWalletSummary,
+} from '../services/orgWalletService.js';
+import { sanitizeBillingForClient } from '../services/orgBillingService.js';
 
 const SALT = 10;
 
@@ -20,7 +27,13 @@ router.get(
   '/organizations',
   asyncHandler(async (_req, res) => {
     const list = await Organization.find().sort({ name: 1 }).lean();
-    res.json(list);
+    res.json(
+      list.map((o) => ({
+        ...o,
+        walletBalanceCents: Number(o.walletBalanceCents) || 0,
+        billing: sanitizeBillingForClient(o.billing),
+      }))
+    );
   })
 );
 
@@ -132,13 +145,14 @@ router.get(
       organizationId: req.params.orgId,
       role: { $in: ORG_SCOPED_ADMIN_ROLES },
     })
-      .select('email phone fullName role organizationId createdAt updatedAt')
+      .select('email phone fullName role status organizationId inviteExpiresAt createdAt updatedAt')
       .sort({ email: 1 })
       .lean();
     res.json(list);
   })
 );
 
+/** Invite org-scoped admin by email (they set their own password). */
 router.post(
   '/organizations/:orgId/admins',
   asyncHandler(async (req, res) => {
@@ -150,7 +164,6 @@ router.post(
     const email = String(req.body?.email || '')
       .toLowerCase()
       .trim();
-    const password = req.body?.password;
     const role = ORG_SCOPED_ADMIN_ROLES.includes(String(req.body?.role || '').trim())
       ? String(req.body.role).trim()
       : 'org_admin';
@@ -170,30 +183,59 @@ router.post(
     if (!fullName) {
       return res.status(400).json({ error: 'fullName is required' });
     }
-    if (!password || String(password).length < 8) {
-      return res.status(400).json({ error: 'password must be at least 8 characters' });
-    }
     const existing = await Admin.findOne({ email });
     if (existing) {
       return res.status(400).json({ error: 'An administrator with this email already exists' });
     }
-    const passwordHash = await bcrypt.hash(String(password), SALT);
     const doc = await Admin.create({
       email,
       fullName,
       phone,
-      passwordHash,
+      passwordHash: '',
       role,
       organizationId: org._id,
+      status: 'invited',
     });
+    const { emailSent } = await issueAdminInvite(doc, { orgName: org.name });
     res.status(201).json({
       _id: doc._id,
       email: doc.email,
       fullName: doc.fullName || '',
       phone: doc.phone || '',
       role: doc.role,
+      status: doc.status,
       organizationId: doc.organizationId,
+      inviteExpiresAt: doc.inviteExpiresAt,
+      emailSent,
       createdAt: doc.createdAt,
+    });
+  })
+);
+
+router.post(
+  '/organizations/:orgId/admins/:adminId/resend-invite',
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.orgId) || !mongoose.isValidObjectId(req.params.adminId)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    const org = await Organization.findById(req.params.orgId).lean();
+    if (!org) return res.status(404).json({ error: 'Organisation not found' });
+    const doc = await Admin.findOne({
+      _id: req.params.adminId,
+      organizationId: req.params.orgId,
+      role: { $in: ORG_SCOPED_ADMIN_ROLES },
+    });
+    if (!doc) return res.status(404).json({ error: 'Administrator not found' });
+    if (doc.status !== 'invited') {
+      return res.status(400).json({ error: 'Only invited (pending) admins can be re-invited' });
+    }
+    const { emailSent } = await issueAdminInvite(doc, { orgName: org.name });
+    res.json({
+      _id: doc._id,
+      email: doc.email,
+      status: doc.status,
+      inviteExpiresAt: doc.inviteExpiresAt,
+      emailSent,
     });
   })
 );
@@ -229,6 +271,9 @@ router.patch(
         return res.status(400).json({ error: 'password must be at least 8 characters' });
       }
       doc.passwordHash = await bcrypt.hash(String(req.body.password), SALT);
+      doc.status = 'active';
+      doc.inviteTokenHash = '';
+      doc.inviteExpiresAt = null;
     }
     if (req.body.phone !== undefined) {
       const raw = req.body.phone;
@@ -320,6 +365,134 @@ router.delete(
     });
     if (!r) return res.status(404).json({ error: 'Administrator not found' });
     res.status(204).end();
+  })
+);
+
+router.get(
+  '/organizations/:orgId/wallet',
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.orgId)) {
+      return res.status(400).json({ error: 'Invalid organisation id' });
+    }
+    res.json(await getWalletSummary(req.params.orgId));
+  })
+);
+
+router.patch(
+  '/organizations/:orgId/billing',
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.orgId)) {
+      return res.status(400).json({ error: 'Invalid organisation id' });
+    }
+    const doc = await Organization.findById(req.params.orgId);
+    if (!doc) return res.status(404).json({ error: 'Organisation not found' });
+    if (!doc.billing) doc.billing = {};
+    const b = req.body || {};
+    if (b.platformFeeBps !== undefined) {
+      if (b.platformFeeBps === null || b.platformFeeBps === '') {
+        doc.billing.platformFeeBps = null;
+      } else {
+        const n = Math.round(Number(b.platformFeeBps));
+        if (!Number.isFinite(n) || n < 0 || n > 10_000) {
+          return res.status(400).json({ error: 'platformFeeBps must be 0–10000' });
+        }
+        doc.billing.platformFeeBps = n;
+      }
+    }
+    doc.markModified('billing');
+    await doc.save();
+    res.json({
+      _id: doc._id,
+      billing: sanitizeBillingForClient(doc.billing),
+      walletBalanceCents: Number(doc.walletBalanceCents) || 0,
+    });
+  })
+);
+
+router.get(
+  '/withdrawals',
+  asyncHandler(async (req, res) => {
+    const status = String(req.query.status || 'pending').trim().toLowerCase();
+    const q = {};
+    if (status && status !== 'all') q.status = status;
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const rows = await WithdrawalRequest.find(q)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate('organizationId', 'name slug')
+      .lean();
+    res.json(
+      rows.map((w) => ({
+        id: String(w._id),
+        amountCents: w.amountCents,
+        status: w.status,
+        destinationNote: w.destinationNote || '',
+        processNote: w.processNote || '',
+        createdAt: w.createdAt,
+        processedAt: w.processedAt || null,
+        organization: w.organizationId
+          ? {
+              id: String(w.organizationId._id || w.organizationId),
+              name: w.organizationId.name || '',
+              slug: w.organizationId.slug || '',
+            }
+          : null,
+      }))
+    );
+  })
+);
+
+router.post(
+  '/withdrawals/:id/pay',
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    try {
+      const result = await markWithdrawalPaid(req.params.id, {
+        processedByAdminId: req.admin?.id,
+        processNote: req.body?.processNote,
+      });
+      res.json({
+        ok: true,
+        duplicate: Boolean(result.duplicate),
+        withdrawal: {
+          id: String(result.withdrawal._id),
+          status: result.withdrawal.status,
+          amountCents: result.withdrawal.amountCents,
+        },
+      });
+    } catch (e) {
+      const status = e.status && Number(e.status) >= 400 ? e.status : 500;
+      return res.status(status).json({ error: e.message || 'Pay failed' });
+    }
+  })
+);
+
+router.post(
+  '/withdrawals/:id/reject',
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    try {
+      const result = await rejectWithdrawal(req.params.id, {
+        processedByAdminId: req.admin?.id,
+        processNote: req.body?.processNote,
+      });
+      res.json({
+        ok: true,
+        duplicate: Boolean(result.duplicate),
+        withdrawal: {
+          id: String(result.withdrawal._id),
+          status: result.withdrawal.status,
+          amountCents: result.withdrawal.amountCents,
+        },
+      });
+    } catch (e) {
+      const status = e.status && Number(e.status) >= 400 ? e.status : 500;
+      return res.status(status).json({ error: e.message || 'Reject failed' });
+    }
   })
 );
 

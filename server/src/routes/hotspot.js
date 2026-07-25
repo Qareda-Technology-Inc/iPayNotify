@@ -6,8 +6,11 @@ import {
   syncVoucherToRouter,
 } from '../services/hotspotService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { requireRoles } from '../middleware/requireRoles.js';
 
 export const hotspotRouter = express.Router();
+
+hotspotRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
 
 hotspotRouter.get(
   '/vouchers',

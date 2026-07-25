@@ -8,6 +8,7 @@ export const jobsRouter = express.Router();
 
 jobsRouter.post(
   '/billing/run',
+  requireRoles('super_admin'),
   asyncHandler(async (req, res) => {
     const summary = await runMidnightBillingJob();
     res.json(summary);

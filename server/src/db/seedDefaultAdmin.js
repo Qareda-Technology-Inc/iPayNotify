@@ -15,6 +15,7 @@ export async function seedDefaultAdmin() {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
+  // status defaults to active on Admin model
   let phoneNorm = '';
   if (phone && String(phone).trim()) {
     const n = normalizeGhanaMsisdn(String(phone).trim());

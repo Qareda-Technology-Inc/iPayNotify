@@ -13,6 +13,7 @@ import {
 import { resolveRouter } from './routerResolver.js';
 import { organizationIdForRouter } from '../db/defaultOrganizationId.js';
 import { notifyTransactionPaidSms } from './paymentSmsService.js';
+import { allocateUniqueRenewCode } from '../utils/renewCode.js';
 
 function randomSecret(len = 12) {
   return crypto.randomBytes(len).toString('base64url').slice(0, len);
@@ -257,6 +258,7 @@ export async function createPppoeAccount({
     throw e;
   }
 
+  const renewCode = await allocateUniqueRenewCode();
   const doc = await PppoeAccount.create({
     organizationId: await organizationIdForRouter(router),
     ...(userId ? { userId } : {}),
@@ -264,6 +266,7 @@ export async function createPppoeAccount({
     routerId: router._id,
     secretName,
     secretPassword: secretPassword || randomSecret(14),
+    renewCode,
     service: 'pppoe',
     activeProfile,
     expiredProfile,

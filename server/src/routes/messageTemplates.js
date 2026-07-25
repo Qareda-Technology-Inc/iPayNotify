@@ -8,8 +8,11 @@ import {
 } from '../services/messageTemplateService.js';
 import { MESSAGE_TEMPLATE_CATEGORIES } from '../models/MessageTemplate.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { requireRoles } from '../middleware/requireRoles.js';
 
 export const messageTemplatesRouter = express.Router();
+
+messageTemplatesRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
 
 messageTemplatesRouter.get(
   '/categories',
@@ -29,6 +32,8 @@ messageTemplatesRouter.get(
         '{{paidUntil}}',
         '{{package}}',
         '{{secret}}',
+        '{{renew_code}}',
+        '{{renew_url}}',
         '{{service_type}}',
         '{{days_left}}',
         '{{days_before}}',
@@ -37,7 +42,7 @@ messageTemplatesRouter.get(
         'When sending a broadcast, you can pass send-time fields (date, time window, short note). Use matching placeholders in your template body.',
       audienceHelp: {
         pppoe:
-          'Billing customers who are linked to a PPPoE line (Network → PPPoE → link customer) and have a phone on the customer profile. A PPP secret alone is not messaged — link the line and save a phone under Customers.',
+          'Billing customers who are linked to a PPPoE line (Network → PPPoE → link customer) and have a phone on the customer profile. Each SMS can include that line’s {{renew_code}} and {{renew_url}} for online renew. A PPP secret alone is not messaged — link the line and save a phone under Customers.',
         remote: 'All active remote-access subscriptions (uses the phone on each subscription).',
         hotspot:
           'Customers who have a billing user account linked to a paid hotspot voucher purchase. Anonymous voucher buyers (no user account) are never messaged.',

@@ -37,7 +37,7 @@ export async function getDashboardSummary(organizationId) {
     mongoose.isValidObjectId(String(organizationId).trim())
   ) {
     organization = await Organization.findById(String(organizationId).trim())
-      .select('name slug status')
+      .select('name slug status walletBalanceCents')
       .lean();
   }
   const now = new Date();
@@ -71,7 +71,12 @@ export async function getDashboardSummary(organizationId) {
   ]);
 
   return {
-    organization,
+    organization: organization
+      ? {
+          ...organization,
+          walletBalanceCents: Number(organization.walletBalanceCents) || 0,
+        }
+      : null,
     counts: {
       routers,
       packages,
@@ -86,6 +91,7 @@ export async function getDashboardSummary(organizationId) {
       week: revenueWeekCents,
       month: revenueMonthCents,
     },
+    walletBalanceCents: Number(organization?.walletBalanceCents) || 0,
     currency: 'GHS',
   };
 }

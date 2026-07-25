@@ -6,12 +6,21 @@ const organizationBillingSchema = new mongoose.Schema(
     merchantDisplayName: { type: String, trim: true, default: '' },
     /** Default SMS "brand" line when a router has no `smsBrandName`. */
     smsBrandName: { type: String, trim: true, default: '' },
-    /** When true, Hubtel credentials below replace platform env. */
+    /**
+     * @deprecated Platform Hubtel always collects. Kept for legacy docs only.
+     */
     useCustomHubtel: { type: Boolean, default: false },
     hubtelMerchantAccount: { type: String, default: '' },
     hubtelClientId: { type: String, default: '' },
     hubtelClientSecret: { type: String, default: '' },
     hubtelCallbackUrl: { type: String, default: '' },
+    /**
+     * Platform take-rate in basis points (500 = 5%). Empty/null → env PLATFORM_FEE_BPS.
+     */
+    platformFeeBps: { type: Number, default: null },
+    /** Optional MoMo / bank hint for super-admin payouts. */
+    payoutMomoNumber: { type: String, trim: true, default: '' },
+    payoutNote: { type: String, trim: true, default: '' },
   },
   { _id: false }
 );
@@ -28,6 +37,8 @@ const organizationSchema = new mongoose.Schema(
       default: 'active',
     },
     billing: { type: organizationBillingSchema, default: () => ({}) },
+    /** Cached available wallet balance (cents). Updated with each ledger entry. */
+    walletBalanceCents: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

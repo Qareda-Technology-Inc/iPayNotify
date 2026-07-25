@@ -13,6 +13,7 @@ import {
   verifyLoginChallenge,
   smsOtpGloballyAvailable,
 } from '../services/adminLoginVerification.js';
+import { acceptAdminInvite, getInvitePreview } from '../services/adminInviteService.js';
 
 export const authRouter = express.Router();
 
@@ -94,12 +95,52 @@ authRouter.post(
       phone,
       role: 'super_admin',
       organizationId: null,
+      status: 'active',
     });
     const token = signToken(admin);
     res.status(201).json({
       token,
       admin: { id: admin._id, email: admin.email, fullName: admin.fullName || '', role: admin.role },
     });
+  })
+);
+
+authRouter.get(
+  '/invite/:token',
+  asyncHandler(async (req, res) => {
+    const preview = await getInvitePreview(String(req.params.token || '').trim());
+    if (!preview) {
+      return res.status(400).json({ error: 'Invite link is invalid or has expired' });
+    }
+    res.json(preview);
+  })
+);
+
+authRouter.post(
+  '/invite/accept',
+  asyncHandler(async (req, res) => {
+    const token = String(req.body?.token || '').trim();
+    const password = req.body?.password;
+    if (!token) {
+      return res.status(400).json({ error: 'token is required' });
+    }
+    try {
+      const admin = await acceptAdminInvite({ token, password });
+      const jwtToken = signToken(admin);
+      res.json({
+        token: jwtToken,
+        admin: {
+          id: admin._id,
+          email: admin.email,
+          fullName: admin.fullName || '',
+          role: admin.role || 'org_admin',
+          organizationId: admin.organizationId || null,
+        },
+      });
+    } catch (e) {
+      const status = e.status && Number(e.status) >= 400 ? e.status : 500;
+      return res.status(status).json({ error: e.message || 'Could not accept invite' });
+    }
   })
 );
 
@@ -115,6 +156,11 @@ authRouter.post(
     });
     if (!admin) {
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    if (admin.status === 'invited' || !admin.passwordHash) {
+      return res.status(403).json({
+        error: 'Accept your email invite and set a password before signing in',
+      });
     }
     const ok = await bcrypt.compare(String(password), admin.passwordHash);
     if (!ok) {

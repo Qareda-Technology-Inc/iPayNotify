@@ -35,6 +35,14 @@ export const config = {
   merchant: {
     displayName: (process.env.MERCHANT_DISPLAY_NAME || 'QareFi Billing').trim(),
   },
+  /**
+   * Platform take-rate on Hubtel GMV in basis points (500 = 5%).
+   * Overridable per org via Organization.billing.platformFeeBps.
+   */
+  platformFeeBps: Math.max(
+    0,
+    Math.min(10_000, Number(process.env.PLATFORM_FEE_BPS) || 500)
+  ),
   /** Hubtel Online Checkout — https://developers.hubtel.com / unified-pay SDK */
   hubtel: {
     merchantAccount: (process.env.HUBTEL_MERCHANT_ACCOUNT || '').trim(),

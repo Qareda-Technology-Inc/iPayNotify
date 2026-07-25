@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { attachOrganization } from '../middleware/attachOrganization.js';
+import { requireActiveOrganization } from '../middleware/requireActiveOrganization.js';
 import { routersApi } from './routers.js';
 import { packagesRouter } from './packages.js';
 import { pppoeRouter } from './pppoe.js';
@@ -14,14 +15,17 @@ import { dashboardRouter } from './dashboard.js';
 import { organizationRouter } from './organization.js';
 import { ticketSalesRouter } from './ticketSales.js';
 import { transactionsRouter } from './transactions.js';
+import { walletRouter } from './wallet.js';
 
 const router = express.Router();
 
 router.use(requireAuth);
 router.use(attachOrganization);
+router.use(requireActiveOrganization);
 router.use('/organization', organizationRouter);
 router.use('/dashboard', dashboardRouter);
 router.use('/transactions', transactionsRouter);
+router.use('/wallet', walletRouter);
 router.use('/routers', routersApi);
 router.use('/packages', packagesRouter);
 router.use('/users', usersRouter);

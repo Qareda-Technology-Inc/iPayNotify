@@ -1,7 +1,9 @@
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 import { Transaction, PppoeAccount, PlanPackage, User, Router } from '../models/index.js';
 import { resolveDefaultOrganizationId } from '../db/defaultOrganizationId.js';
 import { normalizeGhanaMsisdn } from '../utils/phoneGhana.js';
+import { normalizeRenewCode } from '../utils/renewCode.js';
 import { config } from '../config.js';
 import { syncPppoeAccountToRouter } from './pppoeService.js';
 import { generateVouchers } from './hotspotService.js';
@@ -10,6 +12,7 @@ import { extendPaidUntilByPackage } from '../utils/duration.js';
 import { notifyTransactionPaidSms } from './paymentSmsService.js';
 import { notifyTransactionPaidAdminEmail } from './paymentAdminNotifyService.js';
 import { resolveOrgBilling } from './orgBillingService.js';
+import { settlePaidTransactionToWallet } from './orgWalletService.js';
 
 function newClientReference() {
   return `QF-${crypto.randomBytes(12).toString('hex')}`;
@@ -26,8 +29,9 @@ function mergeTxMeta(tx, patch) {
 
 /** Pending tx + payload for in-app draft checkout UI (test only). */
 async function finalizeDraftCheckout(tx, draft) {
+  const prev = tx.meta && typeof tx.meta === 'object' ? { ...tx.meta } : {};
   tx.providerReference = 'draft-hubtel';
-  mergeTxMeta(tx, { paymentUi: 'draft_hubtel' });
+  tx.meta = { ...prev, paymentUi: 'draft_hubtel' };
   await tx.save();
   return {
     mode: 'draft_hubtel',
@@ -60,38 +64,49 @@ function checkoutResponseFromHubtel(tx, session, extras = {}) {
   };
 }
 
-export async function findPppoeForRenewal(secretName, routerId) {
-  const q = { secretName: String(secretName).trim() };
-  if (routerId) q.routerId = routerId;
-  return PppoeAccount.find(q)
-    .populate('packageId')
-    .populate('routerId')
-    .populate('userId', 'fullName phone');
+function populateRenewAccount(q) {
+  return q.populate('packageId').populate('routerId').populate('userId', 'fullName phone');
 }
 
-export async function quotePppoeRenewal(secretName, routerId) {
-  const matches = await findPppoeForRenewal(secretName, routerId);
-  if (matches.length === 0) {
-    const err = new Error('No PPPoE account found for that username');
-    err.status = 404;
-    throw err;
+function phoneLookupVariants(raw) {
+  const msisdn = normalizeGhanaMsisdn(raw);
+  if (!msisdn) return [];
+  const local10 = `0${msisdn.slice(3)}`;
+  const nine = msisdn.slice(3);
+  const digits = String(raw).replace(/\D/g, '');
+  return [...new Set([msisdn, local10, nine, digits].filter(Boolean))];
+}
+
+/**
+ * Resolve one PPPoE line for public renew.
+ * Priority: renewCode (global) → phone (exactly one line) → secretName+routerId (site-bound).
+ */
+export async function findPppoeForRenewal({ renewCode, phone, secretName, routerId } = {}) {
+  const code = normalizeRenewCode(renewCode);
+  if (code) {
+    const account = await populateRenewAccount(PppoeAccount.findOne({ renewCode: code }));
+    return account ? [account] : [];
   }
-  if (matches.length > 1 && !routerId) {
-    return {
-      needRouterSelection: true,
-      routers: matches.map((a) => ({
-        id: String(a.routerId?._id || a.routerId),
-        name: a.routerId?.name,
-        host: a.routerId?.host,
-      })),
-    };
+
+  const phoneVariants = phoneLookupVariants(phone);
+  if (phoneVariants.length) {
+    const users = await User.find({ phone: { $in: phoneVariants } })
+      .select('_id')
+      .lean();
+    if (!users.length) return [];
+    const userIds = users.map((u) => u._id);
+    return populateRenewAccount(PppoeAccount.find({ userId: { $in: userIds }, disabled: false }));
   }
-  const account = matches[0];
-  const pkg = account.packageId
-    ? account.packageId.priceCents != null
-      ? account.packageId
-      : await PlanPackage.findById(account.packageId)
-    : null;
+
+  const secret = String(secretName || '').trim();
+  const rid = routerId != null ? String(routerId).trim() : '';
+  if (!secret) return [];
+  /** Multi-tenant: never search usernames across all orgs without a venue. */
+  if (!rid || !mongoose.isValidObjectId(rid)) return [];
+  return populateRenewAccount(PppoeAccount.find({ secretName: secret, routerId: rid }));
+}
+
+function quoteFromAccount(account, pkg) {
   const amountCents = pkg?.priceCents ?? 0;
   const linkedUser =
     account.userId && typeof account.userId === 'object' ? account.userId : null;
@@ -100,33 +115,87 @@ export async function quotePppoeRenewal(secretName, routerId) {
     normalizeGhanaMsisdn(linkedUser?.phone) || String(linkedUser?.phone || '').trim() || '';
   return {
     needRouterSelection: false,
+    renewCode: account.renewCode || null,
     secretName: account.secretName,
     packageName: pkg?.name || 'Custom',
     amountCents,
     currency: pkg?.currency || 'GHS',
     routerId: String(account.routerId?._id || account.routerId),
-    routerName: account.routerId?.name,
+    routerName: account.routerId?.name || account.routerId?.comment || null,
     paidUntil: account.paidUntil,
     needsPrice: amountCents <= 0,
     customerName: customerName || null,
     customerPhone: customerPhone || null,
     hasLinkedCustomer: Boolean(linkedUser),
+    organizationId: account.organizationId ? String(account.organizationId) : null,
   };
 }
 
+async function packageForAccount(account) {
+  if (!account.packageId) return null;
+  if (account.packageId.priceCents != null) return account.packageId;
+  return PlanPackage.findById(account.packageId);
+}
+
+/**
+ * @param {{ renewCode?: string, phone?: string, secretName?: string, routerId?: string }} input
+ */
+export async function quotePppoeRenewal(input = {}) {
+  const { renewCode, phone, secretName, routerId } = input;
+  const hasCode = Boolean(normalizeRenewCode(renewCode));
+  const hasPhone = Boolean(normalizeGhanaMsisdn(phone) || String(phone || '').replace(/\D/g, '').length >= 9);
+  const hasSecret = Boolean(String(secretName || '').trim());
+
+  if (!hasCode && !hasPhone && !hasSecret) {
+    const err = new Error('Enter your renew ID, registered phone, or PPPoE username');
+    err.status = 400;
+    throw err;
+  }
+
+  if (hasSecret && !hasCode && !hasPhone) {
+    if (!routerId || !mongoose.isValidObjectId(String(routerId))) {
+      const err = new Error(
+        'PPPoE username needs your ISP renew link (?r=site), or use your renew ID / phone instead.'
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  const matches = await findPppoeForRenewal({ renewCode, phone, secretName, routerId });
+  if (matches.length === 0) {
+    const err = new Error(
+      hasCode
+        ? 'No account found for that renew ID'
+        : hasPhone
+          ? 'No account found for that phone number'
+          : 'No PPPoE account found for that username at this site'
+    );
+    err.status = 404;
+    throw err;
+  }
+  if (matches.length > 1) {
+    const err = new Error(
+      'Several lines match that phone. Use your renew ID from your ISP (or SMS) instead.'
+    );
+    err.status = 409;
+    throw err;
+  }
+
+  const account = matches[0];
+  const pkg = await packageForAccount(account);
+  return quoteFromAccount(account, pkg);
+}
+
 export async function createPppoeRenewalCheckout({
+  renewCode,
+  phone,
   secretName,
   routerId,
   customerMsisdn,
   customerName,
 }) {
-  const quote = await quotePppoeRenewal(secretName, routerId);
-  if (quote.needRouterSelection) {
-    const err = new Error('This username exists on more than one router — choose your router');
-    err.status = 400;
-    err.routers = quote.routers;
-    throw err;
-  }
+  const quote = await quotePppoeRenewal({ renewCode, phone, secretName, routerId });
   if (quote.needsPrice) {
     const err = new Error(
       'This account has no package price — assign a PPPoE package with price in admin'
@@ -135,13 +204,14 @@ export async function createPppoeRenewalCheckout({
     throw err;
   }
 
-  const matches = await findPppoeForRenewal(secretName, routerId);
+  const matches = await findPppoeForRenewal({ renewCode, phone, secretName, routerId });
   const account = matches[0];
-  const pkg = account.packageId
-    ? account.packageId.priceCents != null
-      ? account.packageId
-      : await PlanPackage.findById(account.packageId)
-    : null;
+  if (!account) {
+    const err = new Error('No PPPoE account found');
+    err.status = 404;
+    throw err;
+  }
+  const pkg = await packageForAccount(account);
 
   const linkedUser =
     account.userId && typeof account.userId === 'object' ? account.userId : null;
@@ -178,6 +248,7 @@ export async function createPppoeRenewalCheckout({
     customerName: resolvedName || undefined,
     meta: {
       secretName: account.secretName,
+      renewCode: account.renewCode || undefined,
       fulfillment: 'pending',
     },
   });
@@ -242,12 +313,22 @@ export async function createHotspotPurchaseCheckout({
     throw err;
   }
 
-  const clientReference = newClientReference();
   const routerDoc = await Router.findById(routerId).select('organizationId').lean();
-  const orgId =
-    routerDoc?.organizationId ||
-    pkg.organizationId ||
-    (await resolveDefaultOrganizationId());
+  if (!routerDoc) {
+    const err = new Error('Router not found');
+    err.status = 404;
+    throw err;
+  }
+  const routerOrg = routerDoc.organizationId ? String(routerDoc.organizationId) : '';
+  const pkgOrg = pkg.organizationId ? String(pkg.organizationId) : '';
+  if (!routerOrg || !pkgOrg || routerOrg !== pkgOrg) {
+    const err = new Error('Package is not available at this site');
+    err.status = 400;
+    throw err;
+  }
+
+  const clientReference = newClientReference();
+  const orgId = routerDoc.organizationId || pkg.organizationId || (await resolveDefaultOrganizationId());
   const resolvedPhone =
     normalizeGhanaMsisdn(customerMsisdn) || String(customerMsisdn || '').trim() || '';
   const resolvedName = String(customerName || '').trim() || undefined;
@@ -273,7 +354,12 @@ export async function createHotspotPurchaseCheckout({
     if (resolvedPhone.startsWith('233') && resolvedPhone.length >= 12) {
       phoneOr.push({ phone: `0${resolvedPhone.slice(3)}` });
     }
-    const linkedUser = await User.findOne({ $or: phoneOr }).select('_id').lean();
+    const linkedUser = await User.findOne({
+      organizationId: orgId,
+      $or: phoneOr,
+    })
+      .select('_id')
+      .lean();
     if (linkedUser) {
       tx.userId = linkedUser._id;
       await tx.save();
@@ -477,6 +563,11 @@ export async function markTransactionPaidByReference(clientReference, providerDa
   if (!tx) return { ok: false, reason: 'not_found' };
   if (tx.status === 'paid') {
     await fulfillPaidTransaction(tx);
+    try {
+      await settlePaidTransactionToWallet(tx);
+    } catch (e) {
+      console.error('[wallet] settle duplicate path failed', e?.message || e);
+    }
     return { ok: true, duplicate: true };
   }
   tx.status = 'paid';
@@ -492,5 +583,10 @@ export async function markTransactionPaidByReference(clientReference, providerDa
   mergeTxMeta(tx, { callback: providerData });
   await tx.save();
   const result = await fulfillPaidTransaction(tx);
+  try {
+    await settlePaidTransactionToWallet(tx);
+  } catch (e) {
+    console.error('[wallet] settle failed', e?.message || e);
+  }
   return { ok: true, ...result };
 }

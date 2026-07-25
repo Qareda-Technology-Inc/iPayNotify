@@ -14,6 +14,11 @@ const pppoeAccountSchema = new mongoose.Schema(
     routerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Router', required: true },
     secretName: { type: String, required: true },
     secretPassword: { type: String, required: true },
+    /**
+     * Platform-unique online renew ID (e.g. QF7K2M9P).
+     * Customers enter this (or registered phone) to renew without a site slug.
+     */
+    renewCode: { type: String, trim: true, uppercase: true, sparse: true, unique: true },
     service: { type: String, default: 'pppoe' },
     activeProfile: { type: String, required: true },
     expiredProfile: { type: String, required: true },

@@ -35,7 +35,7 @@ function jsonWithPortal(doc) {
  * Apply `body.billing` onto a Mongoose organisation document (mutates).
  * Omitted credential fields keep existing values so PATCH can update labels only.
  */
-function applyBillingPatch(doc, billingBody) {
+function applyBillingPatch(doc, billingBody, { isSuperAdmin = false } = {}) {
   if (!billingBody || typeof billingBody !== 'object') return;
   if (!doc.billing) doc.billing = {};
   const b = billingBody;
@@ -46,47 +46,31 @@ function applyBillingPatch(doc, billingBody) {
   if (b.smsBrandName !== undefined) {
     doc.billing.smsBrandName = String(b.smsBrandName || '').trim();
   }
-  if (b.useCustomHubtel !== undefined) {
-    doc.billing.useCustomHubtel = Boolean(b.useCustomHubtel);
+  if (b.payoutMomoNumber !== undefined) {
+    doc.billing.payoutMomoNumber = String(b.payoutMomoNumber || '').trim();
+  }
+  if (b.payoutNote !== undefined) {
+    doc.billing.payoutNote = String(b.payoutNote || '').trim();
+  }
+  /** Platform fee override — super admin only. */
+  if (isSuperAdmin && b.platformFeeBps !== undefined) {
+    if (b.platformFeeBps === null || b.platformFeeBps === '') {
+      doc.billing.platformFeeBps = null;
+    } else {
+      const n = Math.round(Number(b.platformFeeBps));
+      if (!Number.isFinite(n) || n < 0 || n > 10_000) {
+        const err = new Error('platformFeeBps must be 0–10000 (basis points)');
+        err.status = 400;
+        throw err;
+      }
+      doc.billing.platformFeeBps = n;
+    }
   }
 
-  if (b.hubtelMerchantAccount !== undefined) {
-    doc.billing.hubtelMerchantAccount = String(b.hubtelMerchantAccount || '').trim();
-  }
-  if (b.hubtelClientId !== undefined) {
-    doc.billing.hubtelClientId = String(b.hubtelClientId || '').trim();
-  }
-  if (b.hubtelClientSecret !== undefined && String(b.hubtelClientSecret).trim() !== '') {
-    doc.billing.hubtelClientSecret = String(b.hubtelClientSecret).trim();
-  }
-  if (b.hubtelCallbackUrl !== undefined) {
-    doc.billing.hubtelCallbackUrl = String(b.hubtelCallbackUrl || '').trim();
-  }
+  /** Hubtel always settles on platform — ignore legacy custom Hubtel patches. */
+  doc.billing.useCustomHubtel = false;
 
   doc.markModified('billing');
-
-  if (doc.billing.useCustomHubtel) {
-    const ma = String(doc.billing.hubtelMerchantAccount || '').trim();
-    const cid = String(doc.billing.hubtelClientId || '').trim();
-    const secret = String(doc.billing.hubtelClientSecret || '').trim();
-    const cb =
-      String(doc.billing.hubtelCallbackUrl || '').trim() ||
-      String(config.hubtel.callbackUrl || '').trim();
-    if (!ma || !cid || !secret) {
-      const err = new Error(
-        'Custom Hubtel requires merchant account, client ID, and client secret (callback URL can inherit from platform env).'
-      );
-      err.status = 400;
-      throw err;
-    }
-    if (!cb) {
-      const err = new Error(
-        'Set HUBTEL_CALLBACK_URL on the server or enter a callback URL for this organisation.'
-      );
-      err.status = 400;
-      throw err;
-    }
-  }
 }
 
 organizationRouter.get(
@@ -130,6 +114,7 @@ organizationRouter.get(
     const { billing, ...rest } = doc;
     res.json({
       ...rest,
+      walletBalanceCents: Number(doc.walletBalanceCents) || 0,
       billing: sanitizeBillingForClient(billing),
       portal: publicPortalLinks(doc.slug),
     });
@@ -180,7 +165,7 @@ organizationRouter.patch(
     }
 
     if (body.billing != null) {
-      applyBillingPatch(doc, body.billing);
+      applyBillingPatch(doc, body.billing, { isSuperAdmin: role === 'super_admin' });
     }
 
     try {

@@ -85,6 +85,57 @@ export function buildSmtpTestEmail(p) {
 }
 
 /**
+ * Organisation admin invite (set password via link).
+ * @param {{ brand: string, inviteeName: string, orgName: string, acceptUrl: string, expiresDays?: number, appUrl?: string }} p
+ */
+export function buildAdminInviteEmail(p) {
+  const brand = String(p.brand || 'QareFi Billing').trim();
+  const inviteeName = String(p.inviteeName || '').trim() || 'there';
+  const orgName = String(p.orgName || 'your organisation').trim();
+  const acceptUrl = String(p.acceptUrl || '').trim();
+  const expiresDays = Number(p.expiresDays) || 7;
+  const appUrl = String(p.appUrl || '').trim();
+
+  const subject = `${brand} — you're invited to ${orgName}`;
+
+  const text = [
+    `${brand}`,
+    '',
+    `Hi ${inviteeName},`,
+    '',
+    `You have been invited to manage ${orgName} on ${brand}.`,
+    '',
+    `Accept your invite and set a password:`,
+    acceptUrl,
+    '',
+    `This link expires in ${expiresDays} days.`,
+    appUrl ? `\nDashboard: ${appUrl}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const innerHtml = `
+    <p style="margin:0 0 12px;">Hi <strong style="color:#e2e8f0;">${escapeHtml(inviteeName)}</strong>,</p>
+    <p style="margin:0 0 16px;">You have been invited to manage <strong style="color:#e2e8f0;">${escapeHtml(orgName)}</strong> on ${escapeHtml(brand)}.</p>
+    <p style="margin:0 0 20px;text-align:center;">
+      <a href="${escapeHtml(acceptUrl)}" style="display:inline-block;padding:12px 22px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px;">Accept invite &amp; set password</a>
+    </p>
+    <p style="margin:0;color:#94a3b8;font-size:13px;">Or paste this link into your browser:<br/><span style="word-break:break-all;color:#cbd5e1;">${escapeHtml(acceptUrl)}</span></p>
+    <p style="margin:16px 0 0;color:#94a3b8;font-size:13px;">This link expires in <strong style="color:#cbd5e1;">${escapeHtml(String(expiresDays))} days</strong>.</p>
+  `.trim();
+
+  const html = wrapTransactionalHtml({
+    brand,
+    title: 'Organisation invite',
+    preheader: `Join ${orgName} on ${brand}`,
+    innerHtml,
+    footerText: appUrl ? `Dashboard: ${appUrl}` : '',
+  });
+
+  return { subject, text, html };
+}
+
+/**
  * Admin alert after a customer payment is fulfilled (renewal / voucher).
  * @param {{
  *   brand: string,

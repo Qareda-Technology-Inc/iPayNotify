@@ -120,6 +120,9 @@ transactionsRouter.get(
         fulfillment: t.meta?.fulfillment || null,
         voucherCode: t.meta?.voucherCode || null,
         renewedUntil: t.meta?.renewedUntil || null,
+        feeBps: t.feeBps ?? t.meta?.feeBps ?? null,
+        platformFeeCents: t.platformFeeCents ?? t.meta?.platformFeeCents ?? null,
+        orgNetCents: t.orgNetCents ?? t.meta?.orgNetCents ?? null,
       })),
     });
   })

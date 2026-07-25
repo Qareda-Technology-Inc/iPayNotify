@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { sendArkeselSms } from '../integrations/arkesel.js';
 import {
   audienceAny,
+  attachPppoeRenewFields,
   collectMessageRecipients,
   collectRecipientsFromPhones,
   collectRecipientsFromUserIds,
@@ -13,7 +14,23 @@ import {
 } from './messageRecipientService.js';
 import { renderMessageBody } from './messageTemplateService.js';
 import { resolveSmsBranding } from './smsRouterBranding.js';
+
 const MAX_ERROR_ROWS = 40;
+
+function publicRenewUrl() {
+  return `${String(config.publicAppUrl || '').replace(/\/$/, '') || 'http://localhost:5173'}/portal/renew`;
+}
+
+/** Per-recipient placeholders for broadcast SMS (renew ID, PPP secret, etc.). */
+function recipientTemplateVars(r) {
+  return {
+    name: r?.name || '',
+    phone: r?.phone || '',
+    secret: r?.secret || '',
+    renew_code: r?.renewCode || '',
+    renew_url: publicRenewUrl(),
+  };
+}
 
 /** Allow send-time placeholders (e.g. {{date}}, {{time_window}}). brand/name are always set by the server. */
 export function sanitizeBroadcastTemplateVars(raw) {
@@ -214,6 +231,12 @@ export async function runMessageBroadcast(opts) {
     recipients = await collectMessageRecipients(audiences, collectOpts);
   }
 
+  /** Personalize {{renew_code}} / {{secret}} from linked PPPoE lines (segments, picks, or mixed). */
+  recipients = await attachPppoeRenewFields(recipients, {
+    organizationId: tenantOrg,
+    routerId: routerIdValid ? routerIdRaw : undefined,
+  });
+
   const skippedNoPhone = 0;
 
   if (recipients.length === 0 && !dryRun) {
@@ -227,12 +250,12 @@ export async function runMessageBroadcast(opts) {
       ? renderMessageBody(bodyTemplate, {
           ...extraVars,
           brand: branding.brandName,
-          name: recipients[0].name || '',
+          ...recipientTemplateVars(recipients[0]),
         }).slice(0, 500)
       : renderMessageBody(bodyTemplate, {
           ...extraVars,
           brand: branding.brandName,
-          name: '',
+          ...recipientTemplateVars(null),
         }).slice(0, 500);
 
   const logPayload = {
@@ -267,10 +290,11 @@ export async function runMessageBroadcast(opts) {
   if (dryRun) {
     const samples = recipients.slice(0, 5).map((r) => ({
       phone: r.phone,
+      renewCode: r.renewCode || '',
       message: renderMessageBody(bodyTemplate, {
         ...extraVars,
         brand: branding.brandName,
-        name: r.name,
+        ...recipientTemplateVars(r),
       }).slice(0, 200),
     }));
     const doc = await MessageBroadcastLog.create(logPayload);
@@ -296,7 +320,7 @@ export async function runMessageBroadcast(opts) {
         const text = renderMessageBody(bodyTemplate, {
           ...extraVars,
           brand: branding.brandName,
-          name: r.name,
+          ...recipientTemplateVars(r),
         });
         const result = await sendArkeselSms({
           to: r.phone,

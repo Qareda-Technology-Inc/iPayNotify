@@ -29,6 +29,11 @@ const transactionSchema = new mongoose.Schema(
       enum: ['subscription', 'voucher', 'renewal', 'topup'],
       required: true,
     },
+    /** Platform take-rate applied when settling the org wallet (basis points). */
+    feeBps: { type: Number },
+    platformFeeCents: { type: Number },
+    /** amountCents − platformFeeCents credited to the vendor wallet. */
+    orgNetCents: { type: Number },
     meta: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true }

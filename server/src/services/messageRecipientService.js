@@ -21,9 +21,74 @@ export function audienceAny(flags) {
   return !!(flags && (flags.pppoe || flags.remote || flags.hotspot));
 }
 
+function mergeCsvField(prev, next) {
+  const a = String(prev || '').trim();
+  const b = String(next || '').trim();
+  if (!b) return a;
+  if (!a) return b;
+  const parts = new Set(a.split(/,\s*/).map((s) => s.trim()).filter(Boolean));
+  if (parts.has(b)) return a;
+  return `${a}, ${b}`;
+}
+
+/**
+ * Attach renewCode / secret from PPPoE lines onto recipient rows (by userId).
+ * Multiple lines for one customer are joined with ", ".
+ */
+export async function attachPppoeRenewFields(recipients, { organizationId, routerId } = {}) {
+  const list = Array.isArray(recipients) ? recipients : [];
+  if (!list.length) return list;
+  const userIds = [
+    ...new Set(list.map((r) => r.userId).filter((id) => id && mongoose.isValidObjectId(String(id)))),
+  ];
+  if (!userIds.length) return list;
+
+  const q = {
+    userId: { $in: userIds },
+    renewCode: { $exists: true, $nin: [null, ''] },
+  };
+  if (
+    organizationId != null &&
+    String(organizationId).trim() &&
+    mongoose.isValidObjectId(String(organizationId).trim())
+  ) {
+    q.organizationId = String(organizationId).trim();
+  }
+  if (
+    routerId != null &&
+    String(routerId).trim() &&
+    mongoose.isValidObjectId(String(routerId).trim())
+  ) {
+    q.routerId = String(routerId).trim();
+  }
+
+  const accounts = await PppoeAccount.find(q).select('userId renewCode secretName').lean();
+  const byUser = new Map();
+  for (const acc of accounts) {
+    const uid = String(acc.userId);
+    const prev = byUser.get(uid) || { renewCode: '', secret: '' };
+    byUser.set(uid, {
+      renewCode: mergeCsvField(prev.renewCode, acc.renewCode),
+      secret: mergeCsvField(prev.secret, acc.secretName),
+    });
+  }
+
+  for (const r of list) {
+    const hit = r.userId ? byUser.get(String(r.userId)) : null;
+    if (hit) {
+      r.renewCode = hit.renewCode;
+      r.secret = hit.secret;
+    } else {
+      if (r.renewCode == null) r.renewCode = '';
+      if (r.secret == null) r.secret = '';
+    }
+  }
+  return list;
+}
+
 /**
  * Build deduplicated SMS recipients from billing registrations.
- * - PPPoE: users linked to at least one PPPoE account (User.phone).
+ * - PPPoE: users linked to at least one PPPoE account (User.phone); includes renewCode/secret.
  * - Remote: remote-access subscriptions (subscription.phone); excludes voucher-only buyers.
  * - Hotspot: users linked to a paid voucher transaction (userId on Transaction), not anonymous codes.
  * Anonymous hotspot buyers (voucher tx without userId) are never included.
@@ -49,18 +114,22 @@ export async function collectMessageRecipients(audiences, options = {}) {
 
   const byPhone = new Map();
 
-  function add(rawPhone, { name, sources, userId }) {
+  function add(rawPhone, { name, sources, userId, renewCode, secret }) {
     const normalized = normalizeGhanaMsisdn(rawPhone);
     if (!normalized) return;
     const key = normalized;
     const prev = byPhone.get(key);
     const label = name && String(name).trim() ? String(name).trim() : 'Customer';
     const uid = userId != null && String(userId).trim() ? String(userId) : undefined;
+    const code = renewCode != null ? String(renewCode).trim() : '';
+    const sec = secret != null ? String(secret).trim() : '';
     if (!prev) {
       byPhone.set(key, {
         phone: normalized,
         name: label,
         sources: [...sources],
+        renewCode: code,
+        secret: sec,
         ...(uid ? { userId: uid } : {}),
       });
       return;
@@ -69,13 +138,18 @@ export async function collectMessageRecipients(audiences, options = {}) {
     prev.sources = [...merged];
     if (prev.name === 'Customer' && label !== 'Customer') prev.name = label;
     if (uid && !prev.userId) prev.userId = uid;
+    prev.renewCode = mergeCsvField(prev.renewCode, code);
+    prev.secret = mergeCsvField(prev.secret, sec);
   }
 
   if (pppoe) {
     const q = { userId: { $exists: true, $ne: null } };
     if (routerOid) q.routerId = routerOid;
     if (orgOid) q.organizationId = orgOid;
-    const userIds = await PppoeAccount.distinct('userId', q);
+    const accounts = await PppoeAccount.find(q)
+      .select('userId renewCode secretName')
+      .lean();
+    const userIds = [...new Set(accounts.map((a) => String(a.userId)).filter(Boolean))];
     const users = await User.find({
       _id: { $in: userIds },
       phone: { $exists: true, $nin: [null, ''] },
@@ -83,11 +157,16 @@ export async function collectMessageRecipients(audiences, options = {}) {
     })
       .select('phone fullName email _id')
       .lean();
-    for (const u of users) {
+    const userById = new Map(users.map((u) => [String(u._id), u]));
+    for (const acc of accounts) {
+      const u = userById.get(String(acc.userId));
+      if (!u) continue;
       add(u.phone, {
         name: u.fullName || u.email,
         sources: ['pppoe'],
         userId: String(u._id),
+        renewCode: acc.renewCode || '',
+        secret: acc.secretName || '',
       });
     }
   }
@@ -205,9 +284,11 @@ export async function collectRecipientsFromUserIds(userIds, { organizationId } =
       name: u.fullName || u.email || 'Customer',
       sources: ['specific_user'],
       userId: String(u._id),
+      renewCode: '',
+      secret: '',
     });
   }
-  return [...byPhone.values()];
+  return attachPppoeRenewFields([...byPhone.values()], { organizationId });
 }
 
 function splitPhoneLines(input) {

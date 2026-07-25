@@ -2,7 +2,11 @@ import express from 'express';
 import mongoose from 'mongoose';
 import { User, PppoeAccount, RemoteAccessSubscription } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { requireRoles } from '../middleware/requireRoles.js';
+
 export const usersRouter = express.Router();
+
+usersRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
 
 const USER_WRITABLE = new Set([
   'email',

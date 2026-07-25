@@ -6,8 +6,11 @@ import {
   listMessageBroadcastLogs,
 } from '../services/messageBroadcastService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { requireRoles } from '../middleware/requireRoles.js';
 
 export const messageBroadcastsRouter = express.Router();
+
+messageBroadcastsRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
 
 messageBroadcastsRouter.get(
   '/sms-status',

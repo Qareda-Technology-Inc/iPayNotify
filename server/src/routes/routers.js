@@ -1,6 +1,7 @@
 import express from 'express';
 import { Router as MikrotikRouter } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { requireRoles } from '../middleware/requireRoles.js';
 import {
   getRouterPppProfiles,
   getRouterPppSecrets,
@@ -21,6 +22,8 @@ import { routerDisplayName } from '../utils/routerLabel.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
 
 export const routersApi = express.Router();
+
+routersApi.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
 
 /**
  * Hostnames (and any literal IPs) the billing app and MoMo flow need over HTTPS — for operators

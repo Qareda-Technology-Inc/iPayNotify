@@ -1,4 +1,4 @@
-import { Router as MikrotikRouter } from '../models/index.js';
+import { Organization, Router as MikrotikRouter } from '../models/index.js';
 import { routerDisplayName } from '../utils/routerLabel.js';
 
 /** Normalize IPv4 from Express / proxies (::ffff:1.2.3.4, IPv6-mapped). */
@@ -43,8 +43,39 @@ export function isValidSitePublicIp(s) {
   });
 }
 
+async function withOrgGate(routerDoc, match) {
+  const organizationId = routerDoc.organizationId ? String(routerDoc.organizationId) : null;
+  if (!organizationId) {
+    return { resolved: false, reason: 'router_missing_org' };
+  }
+  const org = await Organization.findById(organizationId).select('name slug status').lean();
+  if (!org) {
+    return { resolved: false, reason: 'org_missing' };
+  }
+  if (org.status === 'suspended') {
+    return { resolved: false, reason: 'org_suspended' };
+  }
+  return {
+    resolved: true,
+    match,
+    router: {
+      id: String(routerDoc._id),
+      name: routerDisplayName(routerDoc),
+      organizationId,
+    },
+    organization: {
+      id: organizationId,
+      name: org.name,
+      slug: org.slug,
+      status: org.status,
+    },
+  };
+}
+
 /**
- * Nettportal-style: resolve router from ?r=slug (captive link) or from client WAN IPv4.
+ * Resolve venue from captive/QR `?r=slug` or client WAN IPv4.
+ * Always returns organizationId when resolved so renew/hotspot stay tenant-scoped.
+ * Same PPPoE usernames may exist in other orgs — callers must use this router id.
  */
 export async function resolvePortalRouter(req, slugQuery) {
   const slug = slugQuery != null ? String(slugQuery).trim().toLowerCase() : '';
@@ -54,15 +85,9 @@ export async function resolvePortalRouter(req, slugQuery) {
       return { resolved: false, reason: 'invalid_slug' };
     }
     const bySlug = await MikrotikRouter.findOne({ portalSlug: slug })
-      .select('_id name comment')
+      .select('_id name comment organizationId')
       .lean();
-    if (bySlug) {
-      return {
-        resolved: true,
-        match: 'slug',
-        router: { id: String(bySlug._id), name: routerDisplayName(bySlug) },
-      };
-    }
+    if (bySlug) return withOrgGate(bySlug, 'slug');
     return { resolved: false, reason: 'unknown_slug' };
   }
 
@@ -72,15 +97,18 @@ export async function resolvePortalRouter(req, slugQuery) {
   }
 
   const byIp = await MikrotikRouter.findOne({ sitePublicIp: ip })
-    .select('_id name comment')
+    .select('_id name comment organizationId')
     .lean();
-  if (byIp) {
-    return {
-      resolved: true,
-      match: 'ip',
-      router: { id: String(byIp._id), name: routerDisplayName(byIp) },
-    };
-  }
+  if (byIp) return withOrgGate(byIp, 'ip');
 
   return { resolved: false, reason: 'no_match' };
+}
+
+/** Shared portal-site resolution for public POST bodies (`portalSlug` or query `r`). */
+export async function resolvePortalSiteFromRequest(req, portalSlugBody) {
+  const slug =
+    portalSlugBody != null && String(portalSlugBody).trim()
+      ? String(portalSlugBody).trim()
+      : req.query.r ?? req.query.router ?? req.query.site;
+  return resolvePortalRouter(req, slug);
 }

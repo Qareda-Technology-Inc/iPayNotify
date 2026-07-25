@@ -1,9 +1,12 @@
 import express from 'express';
 import { PlanPackage } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { requireRoles } from '../middleware/requireRoles.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
 
 export const packagesRouter = express.Router();
+
+packagesRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
 
 packagesRouter.get(
   '/',

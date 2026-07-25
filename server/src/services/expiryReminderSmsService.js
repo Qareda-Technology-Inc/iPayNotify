@@ -11,9 +11,13 @@ import { normalizeGhanaMsisdn } from '../utils/phoneGhana.js';
 import { renderMessageBody } from './messageTemplateService.js';
 import { resolveSmsBranding } from './smsRouterBranding.js';
 
+function publicRenewUrl() {
+  return `${String(config.publicAppUrl || '').replace(/\/$/, '') || 'http://localhost:5173'}/portal/renew`;
+}
+
 /** Fallback when no org template exists for a tier. */
 export const DEFAULT_EXPIRY_REMINDER_SMS_BODY =
-  '{{brand}}: Hi {{name}}, your {{service_type}} plan ({{package}}) ends in {{days_left}} day(s) on {{paidUntil}}. Renew soon to avoid interruption.';
+  '{{brand}}: Hi {{name}}, your {{service_type}} plan ({{package}}) ends in {{days_left}} day(s) on {{paidUntil}}. Renew ID {{renew_code}}: {{renew_url}}';
 
 const TIER_TEMPLATE_CATEGORY = {
   7: 'expiry_reminder_7d',
@@ -133,6 +137,7 @@ export async function runExpiryReminderSmsJob(options = {}) {
     name,
     pkgName,
     secret,
+    renewCode,
     serviceType,
   }) {
     const daysLeft = daysLeftFloat(periodEnd, now);
@@ -147,12 +152,15 @@ export async function runExpiryReminderSmsJob(options = {}) {
     const branding = await resolveSmsBranding(routerId || null, orgId);
     const paidUntilStr = new Date(periodEnd).toLocaleDateString();
     const daysLeftLabel = String(Math.max(1, Math.ceil(daysLeft)));
+    const code = String(renewCode || '').trim();
     const message = renderMessageBody(bodyTemplate, {
       brand: branding.brandName,
       name,
       paidUntil: paidUntilStr,
       package: pkgName,
       secret: String(secret || '').trim(),
+      renew_code: code,
+      renew_url: publicRenewUrl(),
       service_type: serviceType,
       days_left: daysLeftLabel,
       days_before: String(tier),
@@ -230,6 +238,7 @@ export async function runExpiryReminderSmsJob(options = {}) {
       name,
       pkgName: (acc.packageId && acc.packageId.name) || 'your plan',
       secret: acc.secretName,
+      renewCode: acc.renewCode || '',
       serviceType: 'PPPoE',
     });
   }
@@ -262,6 +271,7 @@ export async function runExpiryReminderSmsJob(options = {}) {
       name: String(sub.displayName || '').trim() || 'Customer',
       pkgName: (sub.packageId && sub.packageId.name) || 'your plan',
       secret: '',
+      renewCode: '',
       serviceType: 'Remote access',
     });
   }

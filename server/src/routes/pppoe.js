@@ -10,9 +10,12 @@ import {
 } from '../services/pppoeService.js';
 import { enforceExpiredPppoeAccounts } from '../services/renewalService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { requireRoles } from '../middleware/requireRoles.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
 
 export const pppoeRouter = express.Router();
+
+pppoeRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
 
 pppoeRouter.get(
   '/',

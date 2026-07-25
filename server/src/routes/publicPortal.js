@@ -1,5 +1,4 @@
 import express from 'express';
-import { Router as MikrotikRouter } from '../models/index.js';
 import { PlanPackage } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import {
@@ -9,10 +8,27 @@ import {
   getTransactionByReference,
   markTransactionPaidByReference,
 } from '../services/paymentService.js';
-import { resolvePortalRouter } from '../services/portalContextService.js';
-import { routerDisplayName } from '../utils/routerLabel.js';
+import {
+  resolvePortalRouter,
+  resolvePortalSiteFromRequest,
+} from '../services/portalContextService.js';
 
 export const publicPortalRouter = express.Router();
+
+function portalUnresolvedError(ctx) {
+  if (ctx?.reason === 'org_suspended') {
+    return {
+      status: 403,
+      error: 'This service provider is temporarily unavailable. Please try again later.',
+    };
+  }
+  return {
+    status: 400,
+    error:
+      'Could not determine this venue. Open your ISP link (?r=site) or connect on the site network.',
+    reason: ctx?.reason || 'unresolved',
+  };
+}
 
 publicPortalRouter.get(
   '/portal-context',
@@ -23,27 +39,23 @@ publicPortalRouter.get(
   })
 );
 
-publicPortalRouter.get(
-  '/routers',
-  asyncHandler(async (req, res) => {
-    const list = await MikrotikRouter.find()
-      .select('name comment host')
-      .sort({ createdAt: 1 })
-      .lean();
-    res.json(
-      list.map((r) => ({
-        _id: r._id,
-        name: routerDisplayName(r),
-        host: r.host,
-      }))
-    );
-  })
-);
-
+/**
+ * Packages for the resolved venue only (never cross-tenant).
+ * GET /packages/hotspot?r=slug  (or on-site IP match)
+ */
 publicPortalRouter.get(
   '/packages/hotspot',
   asyncHandler(async (req, res) => {
-    const list = await PlanPackage.find({ kind: 'hotspot', isActive: true })
+    const ctx = await resolvePortalSiteFromRequest(req, req.query.r);
+    if (!ctx.resolved || !ctx.router?.organizationId) {
+      const e = portalUnresolvedError(ctx);
+      return res.status(e.status).json({ error: e.error, reason: e.reason });
+    }
+    const list = await PlanPackage.find({
+      organizationId: ctx.router.organizationId,
+      kind: 'hotspot',
+      isActive: true,
+    })
       .select('name priceCents currency activeProfile durationDays description')
       .sort({ name: 1 })
       .lean();
@@ -54,15 +66,44 @@ publicPortalRouter.get(
 publicPortalRouter.post(
   '/renew/quote',
   asyncHandler(async (req, res) => {
-    const { secretName, routerId } = req.body;
-    if (!secretName) {
-      return res.status(400).json({ error: 'secretName is required' });
+    const { secretName, renewCode, phone, portalSlug } = req.body || {};
+    const hasCode = Boolean(String(renewCode || '').trim());
+    const hasPhone = Boolean(String(phone || '').trim());
+    const hasSecret = Boolean(String(secretName || '').trim());
+    if (!hasCode && !hasPhone && !hasSecret) {
+      return res.status(400).json({
+        error: 'Enter your renew ID, registered phone, or PPPoE username',
+      });
     }
-    const quote = await quotePppoeRenewal(secretName, routerId || undefined);
-    if (quote.needRouterSelection) {
-      return res.json({ needRouterSelection: true, routers: quote.routers });
+
+    let routerId;
+    if (hasSecret && !hasCode && !hasPhone) {
+      const ctx = await resolvePortalSiteFromRequest(req, portalSlug);
+      if (!ctx.resolved || !ctx.router?.id) {
+        const e = portalUnresolvedError(ctx);
+        return res.status(e.status).json({
+          error:
+            'PPPoE username needs your ISP renew link (?r=site), or use renew ID / phone instead.',
+          reason: e.reason,
+        });
+      }
+      routerId = ctx.router.id;
+    }
+
+    const quote = await quotePppoeRenewal({
+      renewCode,
+      phone,
+      secretName: hasSecret ? secretName : undefined,
+      routerId,
+    });
+    if (quote.needsPrice) {
+      return res.json({
+        ...quote,
+        needsPrice: true,
+      });
     }
     res.json({
+      renewCode: quote.renewCode,
       secretName: quote.secretName,
       packageName: quote.packageName,
       amountCents: quote.amountCents,
@@ -81,13 +122,36 @@ publicPortalRouter.post(
 publicPortalRouter.post(
   '/renew/checkout',
   asyncHandler(async (req, res) => {
-    const { secretName, routerId, customerMsisdn, customerName } = req.body;
-    if (!secretName) {
-      return res.status(400).json({ error: 'secretName is required' });
+    const { secretName, renewCode, phone, customerMsisdn, customerName, portalSlug } =
+      req.body || {};
+    const hasCode = Boolean(String(renewCode || '').trim());
+    const hasPhone = Boolean(String(phone || '').trim());
+    const hasSecret = Boolean(String(secretName || '').trim());
+    if (!hasCode && !hasPhone && !hasSecret) {
+      return res.status(400).json({
+        error: 'Enter your renew ID, registered phone, or PPPoE username',
+      });
     }
+
+    let routerId;
+    if (hasSecret && !hasCode && !hasPhone) {
+      const ctx = await resolvePortalSiteFromRequest(req, portalSlug);
+      if (!ctx.resolved || !ctx.router?.id) {
+        const e = portalUnresolvedError(ctx);
+        return res.status(e.status).json({
+          error:
+            'PPPoE username needs your ISP renew link (?r=site), or use renew ID / phone instead.',
+          reason: e.reason,
+        });
+      }
+      routerId = ctx.router.id;
+    }
+
     const out = await createPppoeRenewalCheckout({
-      secretName,
-      routerId: routerId || undefined,
+      renewCode,
+      phone,
+      secretName: hasSecret ? secretName : undefined,
+      routerId,
       customerMsisdn: customerMsisdn ? String(customerMsisdn).replace(/\s/g, '') : undefined,
       customerName,
     });
@@ -103,21 +167,10 @@ publicPortalRouter.post(
       return res.status(400).json({ error: 'packageId is required' });
     }
 
-    /**
-     * Site is resolved only from captive/QR slug or the client's public IP.
-     * Clients cannot pick an arbitrary router.
-     */
-    const slug =
-      portalSlug != null && String(portalSlug).trim()
-        ? String(portalSlug).trim()
-        : req.query.r ?? req.query.router ?? req.query.site;
-    const ctx = await resolvePortalRouter(req, slug);
+    const ctx = await resolvePortalSiteFromRequest(req, portalSlug);
     if (!ctx.resolved || !ctx.router?.id) {
-      return res.status(400).json({
-        error:
-          'Could not determine this venue. Connect to the site Wi‑Fi or open the buy link from the login page (?r=site).',
-        reason: ctx.reason || 'unresolved',
-      });
+      const e = portalUnresolvedError(ctx);
+      return res.status(e.status).json({ error: e.error, reason: e.reason });
     }
 
     const out = await createHotspotPurchaseCheckout({
@@ -150,22 +203,13 @@ publicPortalRouter.get(
 publicPortalRouter.post(
   '/payment/mock-complete',
   asyncHandler(async (req, res) => {
-    const simOk =
-      process.env.ALLOW_PAYMENT_SIMULATION === 'true' ||
-      process.env.HUBTEL_MOCK === 'true' ||
-      process.env.PAYMENT_DRAFT_CHECKOUT === 'true' ||
-      process.env.PAYMENT_DRAFT_MOMO === 'true' ||
-      process.env.MTN_MOMO_MOCK === 'true' ||
-      process.env.NODE_ENV !== 'production';
-    if (!simOk) {
-      return res.status(403).json({ error: 'Simulation disabled in production' });
-    }
     const { clientReference } = req.body;
     if (!clientReference) {
       return res.status(400).json({ error: 'clientReference required' });
     }
     const result = await markTransactionPaidByReference(clientReference, {
       mock: true,
+      TransactionId: `mock-${clientReference}`,
     });
     res.json(result);
   })

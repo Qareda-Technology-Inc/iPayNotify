@@ -11,6 +11,8 @@ export { MessageTemplate, MESSAGE_TEMPLATE_CATEGORIES } from './MessageTemplate.
 export { MessageBroadcastLog } from './MessageBroadcastLog.js';
 export { HotspotVoucher } from './HotspotVoucher.js';
 export { Transaction } from './Transaction.js';
+export { OrgLedgerEntry } from './OrgLedgerEntry.js';
+export { WithdrawalRequest } from './WithdrawalRequest.js';
 export { BillingJobRun } from './BillingJobRun.js';
 export { ExpiryReminderSmsLog } from './ExpiryReminderSmsLog.js';
 export { TicketSite } from './TicketSite.js';

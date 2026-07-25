@@ -8,9 +8,12 @@ import {
   adminRenewRemoteAccessSubscription,
 } from '../services/remoteAccessService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { requireRoles } from '../middleware/requireRoles.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
 
 export const remoteAccessRouter = express.Router();
+
+remoteAccessRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
 
 remoteAccessRouter.get(
   '/',

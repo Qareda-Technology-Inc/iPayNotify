@@ -1,8 +1,12 @@
 import mongoose from 'mongoose';
 import { Organization } from '../models/index.js';
 import { config } from '../config.js';
+import { resolvePlatformFeeBps } from './orgWalletService.js';
 
-/** Hubtel + merchant labels for a tenant (falls back to platform `config`). */
+/**
+ * Hubtel + merchant labels for a tenant.
+ * Checkout always uses platform Hubtel (Qaretech collects); orgs do not supply their own keys.
+ */
 export async function resolveOrgBilling(organizationId) {
   let org = null;
   if (
@@ -18,22 +22,13 @@ export async function resolveOrgBilling(organizationId) {
     String(b.merchantDisplayName || '').trim() || config.merchant.displayName;
 
   const smsBrandName = String(b.smsBrandName || '').trim();
-
-  const useOrgHubtel =
-    Boolean(b.useCustomHubtel) &&
-    String(b.hubtelMerchantAccount || '').trim() &&
-    String(b.hubtelClientId || '').trim() &&
-    String(b.hubtelClientSecret || '').trim();
+  const feeBps = resolvePlatformFeeBps(b);
 
   const hubtel = {
-    merchantAccount: useOrgHubtel
-      ? String(b.hubtelMerchantAccount).trim()
-      : config.hubtel.merchantAccount,
-    clientId: useOrgHubtel ? String(b.hubtelClientId).trim() : config.hubtel.clientId,
-    clientSecret: useOrgHubtel ? String(b.hubtelClientSecret).trim() : config.hubtel.clientSecret,
-    callbackUrl: useOrgHubtel
-      ? String(b.hubtelCallbackUrl || '').trim() || config.hubtel.callbackUrl
-      : config.hubtel.callbackUrl,
+    merchantAccount: config.hubtel.merchantAccount,
+    clientId: config.hubtel.clientId,
+    clientSecret: config.hubtel.clientSecret,
+    callbackUrl: config.hubtel.callbackUrl,
     mock: config.hubtel.mock,
     allowedChannels: config.hubtel.allowedChannels,
   };
@@ -42,7 +37,8 @@ export async function resolveOrgBilling(organizationId) {
     merchantDisplayName,
     smsBrandName,
     hubtel,
-    useOrgHubtelCredentials: useOrgHubtel,
+    useOrgHubtelCredentials: false,
+    platformFeeBps: feeBps,
   };
 }
 
@@ -52,20 +48,21 @@ export function sanitizeBillingForClient(billing) {
     return {
       merchantDisplayName: '',
       smsBrandName: '',
-      useCustomHubtel: false,
-      hubtelMerchantAccount: '',
-      hubtelClientId: '',
-      hubtelCallbackUrl: '',
-      hubtelClientSecretSet: false,
+      platformFeeBps: null,
+      platformFeePercent: config.platformFeeBps / 100,
+      payoutMomoNumber: '',
+      payoutNote: '',
+      settlementsViaPlatform: true,
     };
   }
+  const feeBps = resolvePlatformFeeBps(billing);
   return {
     merchantDisplayName: String(billing.merchantDisplayName || '').trim(),
     smsBrandName: String(billing.smsBrandName || '').trim(),
-    useCustomHubtel: Boolean(billing.useCustomHubtel),
-    hubtelMerchantAccount: String(billing.hubtelMerchantAccount || '').trim(),
-    hubtelClientId: String(billing.hubtelClientId || '').trim(),
-    hubtelCallbackUrl: String(billing.hubtelCallbackUrl || '').trim(),
-    hubtelClientSecretSet: Boolean(String(billing.hubtelClientSecret || '').trim()),
+    platformFeeBps: billing.platformFeeBps != null ? feeBps : null,
+    platformFeePercent: feeBps / 100,
+    payoutMomoNumber: String(billing.payoutMomoNumber || '').trim(),
+    payoutNote: String(billing.payoutNote || '').trim(),
+    settlementsViaPlatform: true,
   };
 }
