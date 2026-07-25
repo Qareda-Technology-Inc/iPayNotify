@@ -100,7 +100,8 @@ export function AdminShell({ onSignOut }) {
   const adminRole = me?.admin?.role || 'super_admin';
   const isSuper = adminRole === 'super_admin';
   const modules = me?.modules || { tickets: false, remoteAccess: false };
-  const showTickets = isSuper || Boolean(modules.tickets);
+  /** Tickets only for Qaretech Innovative (server forces modules.tickets for that org). */
+  const showTickets = Boolean(modules.tickets);
   const showRemoteAccess = isSuper || Boolean(modules.remoteAccess);
   const organizationName = me?.organizationName || null;
 

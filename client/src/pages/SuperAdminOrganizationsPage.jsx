@@ -104,9 +104,8 @@ export function SuperAdminOrganizationsPage() {
         method: 'PATCH',
         body: JSON.stringify({
           modules: {
-            tickets: Boolean(org.modules?.tickets),
             remoteAccess: Boolean(org.modules?.remoteAccess),
-            [key]: enabled,
+            ...(key === 'remoteAccess' ? { remoteAccess: enabled } : {}),
           },
         }),
       });
@@ -373,15 +372,16 @@ export function SuperAdminOrganizationsPage() {
                   <p className="w-full text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                     Modules for this organisation
                   </p>
-                  <label className="flex items-center gap-2 text-xs text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(o.modules?.tickets)}
-                      onChange={(e) => patchModule(o, 'tickets', e.target.checked)}
-                      className="rounded border-slate-600"
-                    />
-                    Ticket operations
-                  </label>
+                  <p className="text-xs text-slate-400">
+                    Ticket operations:{' '}
+                    {o.modules?.tickets ? (
+                      <span className="text-emerald-300">On (this org)</span>
+                    ) : (
+                      <span className="text-slate-500">
+                        Only for slug <span className="font-mono">qaretech-innovative</span>
+                      </span>
+                    )}
+                  </p>
                   <label className="flex items-center gap-2 text-xs text-slate-300">
                     <input
                       type="checkbox"

@@ -1,16 +1,24 @@
-import { normalizeOrgModules } from '../services/orgModulesService.js';
-
 /**
- * Allow super_admin always; org-scoped roles only when the tenant has the module enabled.
- * Relies on `attachOrganization` having set `req.organizationModules`.
+ * Gate APIs by organisation module.
+ * - tickets: only the configured tickets org (Qaretech Innovative by default) — all roles there.
+ * - remoteAccess: super_admin always, or org roles when module enabled.
+ * Relies on `attachOrganization` having set `req.organizationModules` / `req.organizationSlug`.
  * @param {'tickets' | 'remoteAccess'} moduleKey
  */
 export function requireOrgModule(moduleKey) {
   return (req, res, next) => {
+    const modules = req.organizationModules || { tickets: false, remoteAccess: false };
+
+    if (moduleKey === 'tickets') {
+      if (modules.tickets) return next();
+      return res.status(403).json({
+        error:
+          'Ticket operations are only available for the Qaretech Innovative organisation.',
+      });
+    }
+
     const role = req.admin?.role || 'super_admin';
     if (role === 'super_admin') return next();
-
-    const modules = normalizeOrgModules(req.organizationModules);
     if (modules[moduleKey]) return next();
 
     return res.status(403).json({

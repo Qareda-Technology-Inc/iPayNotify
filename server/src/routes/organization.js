@@ -56,7 +56,7 @@ async function jsonWithPortal(doc) {
     ...rest,
     walletBalanceCents: Number(o.walletBalanceCents) || 0,
     billing: await sanitizeBillingForClient(billing),
-    modules: normalizeOrgModules(o.modules),
+    modules: normalizeOrgModules(o.modules, o.slug),
     limits: normalizeOrgLimits(o.limits),
     usage: usagePack.usage,
     portalSites,

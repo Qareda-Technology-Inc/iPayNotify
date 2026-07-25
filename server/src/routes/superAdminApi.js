@@ -49,7 +49,7 @@ router.get(
         ...o,
         walletBalanceCents: Number(o.walletBalanceCents) || 0,
         billing: await sanitizeBillingForClient(o.billing),
-        modules: normalizeOrgModules(o.modules),
+        modules: normalizeOrgModules(o.modules, o.slug),
         limits: normalizeOrgLimits(o.limits),
         usage: usagePack.usage,
       });
@@ -165,7 +165,10 @@ router.patch(
         actorEmail: req.admin?.email,
         action: 'organization.modules_or_limits',
         meta: {
-          modules: req.body.modules != null ? normalizeOrgModules(doc.modules) : undefined,
+          modules:
+            req.body.modules != null
+              ? normalizeOrgModules(doc.modules, doc.slug)
+              : undefined,
           limits: req.body.limits != null ? normalizeOrgLimits(doc.limits) : undefined,
         },
       });
@@ -174,7 +177,7 @@ router.patch(
     const usagePack = await getOrgUsageAndLimits(o._id);
     res.json({
       ...o,
-      modules: normalizeOrgModules(o.modules),
+      modules: normalizeOrgModules(o.modules, o.slug),
       limits: normalizeOrgLimits(o.limits),
       usage: usagePack.usage,
     });

@@ -10,6 +10,15 @@ export const config = {
   mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/qarefi_billing',
   /** After `npm run db:backfill-organization`, set this to the printed id (optional if slug fallback is enough). */
   defaultOrganizationId: (process.env.DEFAULT_ORGANIZATION_ID || '').trim(),
+  /**
+   * Only this organisation slug gets Ticket operations (all roles in that org).
+   * Default matches the platform / Qaretech Innovative tenant.
+   */
+  ticketsOrganizationSlug: (
+    process.env.TICKETS_ORGANIZATION_SLUG || 'qaretech-innovative'
+  )
+    .trim()
+    .toLowerCase(),
   jwtSecret: process.env.JWT_SECRET || 'change-me-in-production',
   jwtExpiresIn: String(process.env.JWT_EXPIRES_IN || '7d').trim(),
   mikrotik: {
