@@ -13,6 +13,7 @@ import { jobsRouter } from './jobs.js';
 import { dashboardRouter } from './dashboard.js';
 import { organizationRouter } from './organization.js';
 import { ticketSalesRouter } from './ticketSales.js';
+import { transactionsRouter } from './transactions.js';
 
 const router = express.Router();
 
@@ -20,6 +21,7 @@ router.use(requireAuth);
 router.use(attachOrganization);
 router.use('/organization', organizationRouter);
 router.use('/dashboard', dashboardRouter);
+router.use('/transactions', transactionsRouter);
 router.use('/routers', routersApi);
 router.use('/packages', packagesRouter);
 router.use('/users', usersRouter);

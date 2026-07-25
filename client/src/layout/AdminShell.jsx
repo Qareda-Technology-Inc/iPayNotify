@@ -188,7 +188,7 @@ export function AdminShell({ onSignOut }) {
             <>
               <NavGroup title="Tenant">
                 <SideLink to="/">Dashboard</SideLink>
-                <SideLink to="/org/settings">Organisation &amp; MoMo</SideLink>
+                <SideLink to="/org/settings">Organisation &amp; Hubtel</SideLink>
               </NavGroup>
               <NavGroup title="Customers &amp; access">
                 <SideLink to="/users/customers" badge={counts?.customers}>

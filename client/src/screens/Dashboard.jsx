@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AdminShell } from '../layout/AdminShell.jsx';
 import { DashboardHome } from '../pages/DashboardHome.jsx';
-import { PaymentsPlaceholder } from '../pages/PaymentsPlaceholder.jsx';
+import { PaymentsPage } from '../pages/PaymentsPage.jsx';
 import { PackagesPage } from '../pages/PackagesPage.jsx';
 import { HotspotPanel } from '../components/HotspotPanel.jsx';
 import { PppoePanel } from '../components/PppoePanel.jsx';
@@ -137,7 +137,7 @@ export function Dashboard({ onSignOut }) {
           path="finance/payments"
           element={
             <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
-              <PaymentsPlaceholder />
+              <PaymentsPage />
             </RoleGate>
           }
         />

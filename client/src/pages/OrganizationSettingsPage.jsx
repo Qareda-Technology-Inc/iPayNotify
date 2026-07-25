@@ -223,7 +223,7 @@ export function OrganizationSettingsPage() {
           Organisation
         </h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-400">
-          Tenant profile, <strong className="text-slate-300">MoMo &amp; SMS branding</strong> for this organisation, and
+          Tenant profile, <strong className="text-slate-300">Hubtel &amp; SMS branding</strong> for this organisation, and
           customer links. Slug and account status: super admin only.
         </p>
       </div>

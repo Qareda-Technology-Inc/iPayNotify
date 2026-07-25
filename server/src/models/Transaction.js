@@ -20,7 +20,7 @@ const transactionSchema = new mongoose.Schema(
     },
     provider: { type: String, default: 'hubtel' },
     providerReference: { type: String },
-    /** Your reference sent to MTN as externalId; used in callbacks to match the transaction */
+    /** Merchant reference sent to Hubtel; used in callbacks to match the transaction */
     clientReference: { type: String, unique: true, sparse: true },
     customerPhone: { type: String },
     customerName: { type: String },

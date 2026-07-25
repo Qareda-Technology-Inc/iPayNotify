@@ -57,7 +57,7 @@ export function DashboardHome() {
           <span className="text-slate-500"> · QareFi Billing</span>
         </h2>
         <p className="mt-1 text-sm text-slate-500">
-          Revenue from paid MTN MoMo transactions recorded in this organisation&apos;s data.
+          Revenue from paid Hubtel transactions recorded in this organisation&apos;s data.
         </p>
       </div>
 

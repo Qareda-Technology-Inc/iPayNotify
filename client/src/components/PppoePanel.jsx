@@ -927,7 +927,7 @@ export function PppoePanel() {
                 </span>
               </label>
               <p className="text-xs text-slate-500">
-                If unchecked, renewal is recorded as paid by admin (cash / MoMo outside the app). A receipt row is
+                If unchecked, renewal is recorded as paid by admin (cash / Hubtel outside the app). A receipt row is
                 still created with amount 0.
               </p>
               <div className="flex justify-end gap-2 pt-2">

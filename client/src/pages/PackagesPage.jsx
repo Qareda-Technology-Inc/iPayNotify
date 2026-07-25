@@ -128,7 +128,7 @@ export function PackagesPage() {
               Renewal SMS — {smsModal.name}
             </h3>
             <p className="mt-2 text-xs leading-relaxed text-slate-500">
-              Sent after MoMo renewal, admin renew, or auto-renew when a phone is on file. Leave empty to use the
+              Sent after Hubtel renewal, admin renew, or auto-renew when a phone is on file. Leave empty to use the
               built-in default for this package kind (saved defaults apply to new packages automatically).
               Placeholders:{' '}
               <span className="font-mono text-slate-400">
