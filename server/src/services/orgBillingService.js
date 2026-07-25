@@ -1,7 +1,10 @@
 import mongoose from 'mongoose';
 import { Organization } from '../models/index.js';
 import { config } from '../config.js';
-import { resolvePlatformFeeBps } from './orgWalletService.js';
+import {
+  getDefaultPlatformFeeBps,
+  resolvePlatformFeeBps,
+} from './platformSettingsService.js';
 
 /**
  * Hubtel + merchant labels for a tenant.
@@ -22,7 +25,7 @@ export async function resolveOrgBilling(organizationId) {
     String(b.merchantDisplayName || '').trim() || config.merchant.displayName;
 
   const smsBrandName = String(b.smsBrandName || '').trim();
-  const feeBps = resolvePlatformFeeBps(b);
+  const feeBps = await resolvePlatformFeeBps(b);
 
   const hubtel = {
     merchantAccount: config.hubtel.merchantAccount,
@@ -43,24 +46,28 @@ export async function resolveOrgBilling(organizationId) {
 }
 
 /** API response: billing without raw Hubtel secrets. */
-export function sanitizeBillingForClient(billing) {
+export async function sanitizeBillingForClient(billing) {
+  const defaultBps = await getDefaultPlatformFeeBps();
   if (!billing || typeof billing !== 'object') {
     return {
       merchantDisplayName: '',
       smsBrandName: '',
       platformFeeBps: null,
-      platformFeePercent: config.platformFeeBps / 100,
+      platformFeePercent: defaultBps / 100,
+      defaultPlatformFeePercent: defaultBps / 100,
       payoutMomoNumber: '',
       payoutNote: '',
       settlementsViaPlatform: true,
     };
   }
-  const feeBps = resolvePlatformFeeBps(billing);
+  const feeBps = await resolvePlatformFeeBps(billing);
+  const hasOverride = billing.platformFeeBps != null && Number.isFinite(Number(billing.platformFeeBps));
   return {
     merchantDisplayName: String(billing.merchantDisplayName || '').trim(),
     smsBrandName: String(billing.smsBrandName || '').trim(),
-    platformFeeBps: billing.platformFeeBps != null ? feeBps : null,
+    platformFeeBps: hasOverride ? feeBps : null,
     platformFeePercent: feeBps / 100,
+    defaultPlatformFeePercent: defaultBps / 100,
     payoutMomoNumber: String(billing.payoutMomoNumber || '').trim(),
     payoutNote: String(billing.payoutNote || '').trim(),
     settlementsViaPlatform: true,

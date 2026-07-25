@@ -1,14 +1,8 @@
 import mongoose from 'mongoose';
 import { Organization, OrgLedgerEntry, WithdrawalRequest, Transaction } from '../models/index.js';
-import { config } from '../config.js';
+import { resolvePlatformFeeBps } from './platformSettingsService.js';
 
-export function resolvePlatformFeeBps(orgBilling) {
-  const override = orgBilling?.platformFeeBps;
-  if (override != null && Number.isFinite(Number(override))) {
-    return Math.max(0, Math.min(10_000, Math.round(Number(override))));
-  }
-  return config.platformFeeBps;
-}
+export { resolvePlatformFeeBps } from './platformSettingsService.js';
 
 export function computeFeeSplit(amountCents, feeBps) {
   const gross = Math.max(0, Math.round(Number(amountCents) || 0));
@@ -108,7 +102,7 @@ export async function settlePaidTransactionToWallet(txDoc) {
   }
 
   const org = await Organization.findById(orgId).select('billing').lean();
-  const feeBps = resolvePlatformFeeBps(org?.billing);
+  const feeBps = await resolvePlatformFeeBps(org?.billing);
   const { platformFeeCents, orgNetCents } = computeFeeSplit(txDoc.amountCents, feeBps);
 
   txDoc.feeBps = feeBps;
@@ -136,7 +130,7 @@ export async function getWalletSummary(organizationId) {
   const oid = String(organizationId || '').trim();
   const balanceCents = await getOrgAvailableBalanceCents(oid);
   const org = await Organization.findById(oid).select('billing name').lean();
-  const feeBps = resolvePlatformFeeBps(org?.billing);
+  const feeBps = await resolvePlatformFeeBps(org?.billing);
 
   const [pendingWithdrawals, paidSalesAgg, ledger] = await Promise.all([
     WithdrawalRequest.aggregate([

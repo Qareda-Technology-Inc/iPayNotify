@@ -16,6 +16,10 @@ import {
   getWalletSummary,
 } from '../services/orgWalletService.js';
 import { sanitizeBillingForClient } from '../services/orgBillingService.js';
+import {
+  getPlatformSettingsPublic,
+  updateDefaultPlatformFeeBps,
+} from '../services/platformSettingsService.js';
 
 const SALT = 10;
 
@@ -27,13 +31,45 @@ router.get(
   '/organizations',
   asyncHandler(async (_req, res) => {
     const list = await Organization.find().sort({ name: 1 }).lean();
-    res.json(
-      list.map((o) => ({
+    const out = [];
+    for (const o of list) {
+      out.push({
         ...o,
         walletBalanceCents: Number(o.walletBalanceCents) || 0,
-        billing: sanitizeBillingForClient(o.billing),
-      }))
-    );
+        billing: await sanitizeBillingForClient(o.billing),
+      });
+    }
+    res.json(out);
+  })
+);
+
+router.get(
+  '/platform-settings',
+  asyncHandler(async (_req, res) => {
+    res.json(await getPlatformSettingsPublic());
+  })
+);
+
+router.patch(
+  '/platform-settings',
+  asyncHandler(async (req, res) => {
+    const raw = req.body?.defaultPlatformFeeBps ?? req.body?.platformFeeBps;
+    const percent = req.body?.defaultPlatformFeePercent ?? req.body?.platformFeePercent;
+    let bps;
+    if (raw != null && String(raw).trim() !== '') {
+      bps = Number(raw);
+    } else if (percent != null && String(percent).trim() !== '') {
+      bps = Number(percent) * 100;
+    } else {
+      return res.status(400).json({ error: 'defaultPlatformFeePercent (or defaultPlatformFeeBps) is required' });
+    }
+    try {
+      await updateDefaultPlatformFeeBps(bps);
+      res.json(await getPlatformSettingsPublic());
+    } catch (e) {
+      const status = e.status && Number(e.status) >= 400 ? e.status : 500;
+      return res.status(status).json({ error: e.message || 'Update failed' });
+    }
   })
 );
 
@@ -403,7 +439,7 @@ router.patch(
     await doc.save();
     res.json({
       _id: doc._id,
-      billing: sanitizeBillingForClient(doc.billing),
+      billing: await sanitizeBillingForClient(doc.billing),
       walletBalanceCents: Number(doc.walletBalanceCents) || 0,
     });
   })

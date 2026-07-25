@@ -21,12 +21,13 @@ function publicPortalLinks(slug) {
   };
 }
 
-function jsonWithPortal(doc) {
+async function jsonWithPortal(doc) {
   const o = doc.toObject ? doc.toObject() : doc;
   const { billing, ...rest } = o;
   return {
     ...rest,
-    billing: sanitizeBillingForClient(billing),
+    walletBalanceCents: Number(o.walletBalanceCents) || 0,
+    billing: await sanitizeBillingForClient(billing),
     portal: publicPortalLinks(o.slug),
   };
 }
@@ -111,13 +112,7 @@ organizationRouter.get(
     }
     const doc = await Organization.findById(oid).lean();
     if (!doc) return res.status(404).json({ error: 'Organisation not found' });
-    const { billing, ...rest } = doc;
-    res.json({
-      ...rest,
-      walletBalanceCents: Number(doc.walletBalanceCents) || 0,
-      billing: sanitizeBillingForClient(billing),
-      portal: publicPortalLinks(doc.slug),
-    });
+    res.json(await jsonWithPortal(doc));
   })
 );
 
@@ -190,6 +185,6 @@ organizationRouter.patch(
       },
     });
 
-    res.json(jsonWithPortal(doc));
+    res.json(await jsonWithPortal(doc));
   })
 );

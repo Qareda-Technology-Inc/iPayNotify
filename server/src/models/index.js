@@ -2,6 +2,7 @@ export { Admin } from './Admin.js';
 export { AdminLoginChallenge } from './AdminLoginChallenge.js';
 export { Organization } from './Organization.js';
 export { OrganizationAuditLog } from './OrganizationAuditLog.js';
+export { PlatformSettings } from './PlatformSettings.js';
 export { Router } from './Router.js';
 export { User } from './User.js';
 export { PlanPackage } from './PlanPackage.js';

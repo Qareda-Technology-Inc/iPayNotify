@@ -15,7 +15,8 @@ const organizationBillingSchema = new mongoose.Schema(
     hubtelClientSecret: { type: String, default: '' },
     hubtelCallbackUrl: { type: String, default: '' },
     /**
-     * Platform take-rate in basis points (500 = 5%). Empty/null → env PLATFORM_FEE_BPS.
+     * Optional per-org take-rate in basis points (500 = 5%).
+     * Null → platform default from PlatformSettings in the database.
      */
     platformFeeBps: { type: Number, default: null },
     /** Optional MoMo / bank hint for super-admin payouts. */
