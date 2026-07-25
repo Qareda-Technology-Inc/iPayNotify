@@ -278,7 +278,7 @@ export function SuperAdminOrganizationsPage() {
                     to={`/super/organizations/${o._id}/admins`}
                     className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
                   >
-                    Admins
+                    Invite team
                   </Link>
                   <button
                     type="button"

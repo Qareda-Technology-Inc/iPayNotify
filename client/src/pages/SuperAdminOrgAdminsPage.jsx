@@ -2,6 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { apiFetch } from '../api.js';
 
+const ROLE_LABEL = {
+  org_admin: 'Admin',
+  ticket_manager: 'Tickets',
+  org_staff: 'Staff',
+};
+
 export function SuperAdminOrgAdminsPage() {
   const { orgId } = useParams();
   const [org, setOrg] = useState(null);
@@ -11,7 +17,6 @@ export function SuperAdminOrgAdminsPage() {
   const [loading, setLoading] = useState(true);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
   const [role, setRole] = useState('org_admin');
   const [creating, setCreating] = useState(false);
 
@@ -19,8 +24,6 @@ export function SuperAdminOrgAdminsPage() {
   const [editAdmin, setEditAdmin] = useState(null);
   const [editFullName, setEditFullName] = useState('');
   const [editEmail, setEditEmail] = useState('');
-  const [editPhone, setEditPhone] = useState('');
-  const [editPassword, setEditPassword] = useState('');
   const [editRole, setEditRole] = useState('org_admin');
   const [savingEdit, setSavingEdit] = useState(false);
 
@@ -53,8 +56,6 @@ export function SuperAdminOrgAdminsPage() {
     setEditAdmin(a);
     setEditFullName(a.fullName || '');
     setEditEmail(a.email || '');
-    setEditPhone(a.phone || '');
-    setEditPassword('');
     setEditRole(a.role || 'org_admin');
     setEditOpen(true);
     setErr('');
@@ -63,7 +64,6 @@ export function SuperAdminOrgAdminsPage() {
   function closeEdit() {
     setEditOpen(false);
     setEditAdmin(null);
-    setEditPassword('');
   }
 
   async function inviteAdmin(e) {
@@ -72,20 +72,21 @@ export function SuperAdminOrgAdminsPage() {
     setErr('');
     setInfo('');
     try {
-      const body = { fullName: fullName.trim(), email: email.trim(), role };
-      if (phone.trim()) body.phone = phone.trim();
       const created = await apiFetch(`/api/super-admin/organizations/${orgId}/admins`, {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          fullName: fullName.trim(),
+          email: email.trim(),
+          role,
+        }),
       });
       setFullName('');
       setEmail('');
-      setPhone('');
       setRole('org_admin');
       setInfo(
         created?.emailSent
-          ? `Invite sent to ${created.email}`
-          : `Invite created for ${created.email}. Email was not sent (check SMTP); use Resend after SMTP is ready.`
+          ? `Invite emailed to ${created.email}. They will set their own password from the link.`
+          : `Invite saved for ${created.email}, but email did not send. Check SMTP, then use Resend.`
       );
       await load();
     } catch (e) {
@@ -106,7 +107,7 @@ export function SuperAdminOrgAdminsPage() {
       setInfo(
         r?.emailSent
           ? `Invite re-sent to ${r.email}`
-          : `Invite refreshed for ${r.email}. Email was not sent (check SMTP).`
+          : `Invite refreshed for ${r.email}. Email did not send — check SMTP.`
       );
       await load();
     } catch (e) {
@@ -120,18 +121,13 @@ export function SuperAdminOrgAdminsPage() {
     setSavingEdit(true);
     setErr('');
     try {
-      const body = {
-        fullName: editFullName.trim(),
-        email: editEmail.trim(),
-        phone: editPhone.trim(),
-        role: editRole,
-      };
-      if (editPassword.trim().length > 0) {
-        body.password = editPassword;
-      }
       await apiFetch(`/api/super-admin/organizations/${orgId}/admins/${editAdmin._id}`, {
         method: 'PATCH',
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          fullName: editFullName.trim(),
+          email: editEmail.trim(),
+          role: editRole,
+        }),
       });
       closeEdit();
       await load();
@@ -143,7 +139,7 @@ export function SuperAdminOrgAdminsPage() {
   }
 
   async function deleteAdmin(adminId) {
-    if (!window.confirm('Remove this organisation administrator?')) return;
+    if (!window.confirm('Remove this person from the organisation?')) return;
     setErr('');
     try {
       await apiFetch(`/api/super-admin/organizations/${orgId}/admins/${adminId}`, {
@@ -161,12 +157,12 @@ export function SuperAdminOrgAdminsPage() {
         <Link to="/super/organizations" className="text-sm text-indigo-400 hover:text-indigo-300">
           ← Organisations
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-white">Organisation admins</h1>
+        <h1 className="mt-2 text-2xl font-semibold text-white">Team invites</h1>
         <p className="mt-1 text-sm text-slate-400">
           {org ? (
             <>
-              <strong className="text-slate-300">{org.name}</strong>{' '}
-              <span className="font-mono text-slate-500">({org.slug})</span>
+              Invite people to manage <strong className="text-slate-200">{org.name}</strong>. They get an email and
+              create their own password.
             </>
           ) : loading ? (
             'Loading…'
@@ -186,11 +182,7 @@ export function SuperAdminOrgAdminsPage() {
       )}
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h2 className="text-lg font-medium text-white">Invite administrator</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Sends an email invite so they set their own password. Add a Ghana phone for SMS login codes when verification
-          is enabled.
-        </p>
+        <h2 className="text-lg font-medium text-white">Send invite</h2>
         <form onSubmit={inviteAdmin} className="mt-4 space-y-4">
           <label className="block text-sm text-slate-300">
             Full name
@@ -204,7 +196,7 @@ export function SuperAdminOrgAdminsPage() {
             />
           </label>
           <label className="block text-sm text-slate-300">
-            Email
+            Work email
             <input
               type="email"
               required
@@ -214,97 +206,78 @@ export function SuperAdminOrgAdminsPage() {
             />
           </label>
           <label className="block text-sm text-slate-300">
-            Role
+            Access
             <select
               value={role}
               onChange={(e) => setRole(e.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
             >
-              <option value="org_admin">Organisation admin</option>
-              <option value="ticket_manager">Ticket manager</option>
-              <option value="org_staff">Organisation staff</option>
+              <option value="org_admin">Organisation admin — full dashboard</option>
+              <option value="ticket_manager">Ticket manager — tickets only</option>
+              <option value="org_staff">Staff — day-to-day operations</option>
             </select>
-          </label>
-          <label className="block text-sm text-slate-300">
-            Phone <span className="text-slate-500">(optional, Ghana 0XX… or 233…)</span>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="0244…"
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-            />
           </label>
           <button
             type="submit"
             disabled={creating || !org}
             className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
           >
-            {creating ? 'Sending invite…' : 'Send invite'}
+            {creating ? 'Sending…' : 'Email invite'}
           </button>
         </form>
       </section>
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h2 className="text-lg font-medium text-white">Administrators</h2>
+        <h2 className="text-lg font-medium text-white">People</h2>
         {loading ? (
           <p className="mt-4 text-sm text-slate-500">Loading…</p>
         ) : admins.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-500">No organisation admins yet.</p>
+          <p className="mt-4 text-sm text-slate-500">No one invited yet.</p>
         ) : (
           <ul className="mt-4 divide-y divide-slate-800">
             {admins.map((a) => (
               <li key={a._id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0">
                   <p className="text-sm font-medium text-white">
                     {String(a.fullName || '').trim() || a.email}
                   </p>
-                  <p className="text-sm text-slate-300">
-                    {a.email}{' '}
-                    <span className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] uppercase text-slate-400">
-                      {a.role === 'ticket_manager'
-                        ? 'Ticket manager'
-                        : a.role === 'org_staff'
-                          ? 'Org staff'
-                          : 'Org admin'}
+                  <p className="truncate text-sm text-slate-400">{a.email}</p>
+                  <p className="mt-1 flex flex-wrap gap-1.5 text-[10px] uppercase tracking-wide">
+                    <span className="rounded bg-slate-800 px-1.5 py-0.5 text-slate-400">
+                      {ROLE_LABEL[a.role] || a.role}
                     </span>
                     <span
-                      className={`ml-2 rounded px-1.5 py-0.5 text-[10px] uppercase ${
+                      className={`rounded px-1.5 py-0.5 ${
                         a.status === 'invited'
                           ? 'bg-amber-500/15 text-amber-200'
                           : 'bg-emerald-500/15 text-emerald-200'
                       }`}
                     >
-                      {a.status === 'invited' ? 'Invited' : 'Active'}
+                      {a.status === 'invited' ? 'Pending invite' : 'Active'}
                     </span>
                   </p>
-                  {a.phone ? (
-                    <p className="mt-0.5 font-mono text-xs text-slate-500">{a.phone}</p>
-                  ) : (
-                    <p className="mt-0.5 text-xs text-slate-600">No phone</p>
-                  )}
                 </div>
                 <div className="flex shrink-0 gap-2">
                   {a.status === 'invited' && (
                     <button
                       type="button"
                       onClick={() => resendInvite(a._id)}
-                      className="rounded-lg border border-amber-500/40 px-2 py-1 text-xs text-amber-200 hover:bg-amber-950/30"
+                      className="rounded-lg border border-amber-500/40 px-2.5 py-1 text-xs text-amber-200 hover:bg-amber-950/30"
                     >
-                      Resend
+                      Resend email
                     </button>
                   )}
                   <button
                     type="button"
                     onClick={() => openEdit(a)}
-                    className="rounded-lg border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800/50"
+                    className="rounded-lg border border-slate-600 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-800/50"
                   >
                     Edit
                   </button>
                   <button
                     type="button"
                     onClick={() => deleteAdmin(a._id)}
-                    className="rounded-lg border border-red-500/40 px-2 py-1 text-xs text-red-300 hover:bg-red-950/30"
+                    className="rounded-lg border border-red-500/40 px-2.5 py-1 text-xs text-red-300 hover:bg-red-950/30"
                   >
                     Remove
                   </button>
@@ -328,8 +301,13 @@ export function SuperAdminOrgAdminsPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="edit-admin-title" className="text-lg font-semibold text-white">
-              Edit administrator
+              Edit person
             </h2>
+            {editAdmin.status === 'invited' ? (
+              <p className="mt-2 text-xs text-slate-500">
+                They still need to open the invite email to set a password. Use Resend email if they lost the link.
+              </p>
+            ) : null}
             <form onSubmit={saveEdit} className="mt-4 space-y-4">
               <label className="block text-sm text-slate-300">
                 Full name
@@ -353,7 +331,7 @@ export function SuperAdminOrgAdminsPage() {
                 />
               </label>
               <label className="block text-sm text-slate-300">
-                Role
+                Access
                 <select
                   value={editRole}
                   onChange={(e) => setEditRole(e.target.value)}
@@ -361,28 +339,8 @@ export function SuperAdminOrgAdminsPage() {
                 >
                   <option value="org_admin">Organisation admin</option>
                   <option value="ticket_manager">Ticket manager</option>
-                  <option value="org_staff">Organisation staff</option>
+                  <option value="org_staff">Staff</option>
                 </select>
-              </label>
-              <label className="block text-sm text-slate-300">
-                Phone <span className="text-slate-500">(optional)</span>
-                <input
-                  type="tel"
-                  value={editPhone}
-                  onChange={(e) => setEditPhone(e.target.value)}
-                  placeholder="Clear to remove"
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-                />
-              </label>
-              <label className="block text-sm text-slate-300">
-                New password <span className="text-slate-500">(optional, min 8 if set)</span>
-                <input
-                  type="password"
-                  minLength={8}
-                  value={editPassword}
-                  onChange={(e) => setEditPassword(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-                />
               </label>
               <div className="flex justify-end gap-2 pt-2">
                 <button

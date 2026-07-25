@@ -1,25 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { apiFetch, resolveApiUrl, fetchWithApiDiagnostics } from '../api.js';
-import { getActingOrganizationId, getToken } from '../authStorage.js';
-
-function auditMetaSummary(meta) {
-  if (!meta || typeof meta !== 'object') return '';
-  const parts = [];
-  if (Array.isArray(meta.keys) && meta.keys.length) parts.push(`keys: ${meta.keys.join(', ')}`);
-  if (Array.isArray(meta.billingKeys) && meta.billingKeys.length) {
-    parts.push(`billing fields: ${meta.billingKeys.join(', ')}`);
-  }
-  if (Array.isArray(meta.patchKeys) && meta.patchKeys.length) {
-    parts.push(`updated fields: ${meta.patchKeys.join(', ')}`);
-  }
-  if (meta.name && meta.kind != null) parts.push(`${meta.kind}: ${meta.name}`);
-  if (meta.secretName) parts.push(`PPPoE ${meta.secretName}`);
-  if (meta.displayName) parts.push(String(meta.displayName));
-  if (meta.host && meta.transport) parts.push(`${meta.transport} ${meta.host}`);
-  if (parts.length) return parts.join(' · ');
-  const j = JSON.stringify(meta);
-  return j.length > 140 ? `${j.slice(0, 140)}…` : j;
-}
+import { Link } from 'react-router-dom';
+import { apiFetch } from '../api.js';
 
 const STATUSES = ['active', 'trial', 'past_due', 'suspended'];
 
@@ -52,9 +33,7 @@ export function OrganizationSettingsPage() {
   const [pwdBusy, setPwdBusy] = useState(false);
   const [pwdMsg, setPwdMsg] = useState('');
   const [pwdErr, setPwdErr] = useState('');
-  const [audit, setAudit] = useState([]);
-  const [auditLoading, setAuditLoading] = useState(false);
-  const [auditCsvErr, setAuditCsvErr] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const isSuper = me?.admin?.role === 'super_admin';
 
@@ -81,63 +60,46 @@ export function OrganizationSettingsPage() {
     load();
   }, [load]);
 
-  useEffect(() => {
+  async function save(e) {
+    e.preventDefault();
     if (!org?._id) return;
-    let cancelled = false;
-    setAuditLoading(true);
-    apiFetch('/api/organization/audit-log?limit=30')
-      .then((rows) => {
-        if (!cancelled) setAudit(Array.isArray(rows) ? rows : []);
-      })
-      .catch(() => {
-        if (!cancelled) setAudit([]);
-      })
-      .finally(() => {
-        if (!cancelled) setAuditLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [org?._id]);
-
-  async function downloadAuditCsv() {
-    if (!org?._id) return;
-    setAuditCsvErr('');
+    setSaving(true);
+    setErr('');
     try {
-      const token = getToken();
-      const headers = {};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      const acting = getActingOrganizationId();
-      if (acting) headers['X-Organization-Id'] = acting;
-      const res = await fetchWithApiDiagnostics(
-        resolveApiUrl('/api/organization/audit-log?format=csv&limit=500'),
-        {
-          headers,
-          cache: 'no-store',
-        }
-      );
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error || res.statusText || 'Download failed');
+      const body = {
+        name: name.trim(),
+        billing: {
+          merchantDisplayName: bill.merchantDisplayName.trim(),
+          smsBrandName: bill.smsBrandName.trim(),
+          payoutMomoNumber: bill.payoutMomoNumber.trim(),
+          payoutNote: bill.payoutNote.trim(),
+        },
+      };
+      if (isSuper) {
+        body.slug = slug.trim().toLowerCase().replace(/\s+/g, '-');
+        body.status = status;
       }
-      const text = await res.text();
-      const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `org-audit-${String(org.slug || org._id).replace(/[^\w-]+/g, '_')}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      setAuditCsvErr(e.message || 'Download failed');
+      const updated = await apiFetch('/api/organization', {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      setOrg(updated);
+      setName(String(updated?.name || ''));
+      setSlug(String(updated?.slug || ''));
+      setStatus(STATUSES.includes(updated?.status) ? updated.status : 'active');
+      setBill(billingFromOrg(updated));
+    } catch (e2) {
+      setErr(e2.message || 'Save failed');
+    } finally {
+      setSaving(false);
     }
   }
 
   async function changePassword(e) {
     e.preventDefault();
+    setPwdBusy(true);
     setPwdErr('');
     setPwdMsg('');
-    setPwdBusy(true);
     try {
       await apiFetch('/api/auth/change-password', {
         method: 'POST',
@@ -148,52 +110,12 @@ export function OrganizationSettingsPage() {
       });
       setPwdCurrent('');
       setPwdNew('');
-      setPwdMsg('Password updated. Use the new password next time you sign in.');
-    } catch (err) {
-      setPwdErr(err.message || 'Could not change password');
+      setPwdMsg('Password updated.');
+      setShowPassword(false);
+    } catch (e2) {
+      setPwdErr(e2.message || 'Could not update password');
     } finally {
       setPwdBusy(false);
-    }
-  }
-
-  async function save(e) {
-    e.preventDefault();
-    if (!org?._id) return;
-    setSaving(true);
-    setErr('');
-    try {
-      const body = { name: name.trim() };
-      if (isSuper) {
-        body.slug = slug.trim().toLowerCase().replace(/\s+/g, '-');
-        body.status = status;
-      }
-      const billing = {
-        merchantDisplayName: bill.merchantDisplayName.trim(),
-        smsBrandName: bill.smsBrandName.trim(),
-        payoutMomoNumber: bill.payoutMomoNumber.trim(),
-        payoutNote: bill.payoutNote.trim(),
-      };
-      body.billing = billing;
-
-      const updated = await apiFetch('/api/organization', {
-        method: 'PATCH',
-        body: JSON.stringify(body),
-      });
-      setOrg(updated);
-      setName(String(updated?.name || ''));
-      setSlug(String(updated?.slug || ''));
-      setStatus(STATUSES.includes(updated?.status) ? updated.status : 'active');
-      setBill(billingFromOrg(updated));
-      try {
-        const rows = await apiFetch('/api/organization/audit-log?limit=30');
-        setAudit(Array.isArray(rows) ? rows : []);
-      } catch {
-        /* ignore */
-      }
-    } catch (e) {
-      setErr(e.message || 'Save failed');
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -209,17 +131,19 @@ export function OrganizationSettingsPage() {
     );
   }
 
-  const portal = org.portal || {};
+  const feeLabel =
+    bill.platformFeePercent != null ? `${bill.platformFeePercent}%` : '—';
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
+    <div className="mx-auto max-w-2xl space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-          Organisation
-        </h1>
-        <p className="mt-1 max-w-2xl text-sm text-slate-400">
-          Tenant profile, SMS branding, and payout destination. Customer payments settle via{' '}
-          <strong className="text-slate-300">Qaretech Hubtel</strong>; your wallet is sales minus platform fee.
+        <h1 className="text-2xl font-semibold tracking-tight text-white">Organisation</h1>
+        <p className="mt-1 text-sm text-slate-400">
+          Branding and payout details. Customer payments go through Qaretech; your share is in{' '}
+          <Link to="/finance/wallet" className="text-indigo-400 hover:text-indigo-300">
+            Wallet
+          </Link>
+          .
         </p>
       </div>
 
@@ -229,11 +153,24 @@ export function OrganizationSettingsPage() {
         </p>
       )}
 
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Wallet</p>
+          <p className="mt-1 text-xl font-semibold text-emerald-300">
+            GHS {((Number(org.walletBalanceCents) || 0) / 100).toFixed(2)}
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Platform fee</p>
+          <p className="mt-1 text-xl font-semibold text-slate-100">{feeLabel}</p>
+        </div>
+      </div>
+
       <form
         onSubmit={save}
-        className="space-y-10 rounded-2xl border border-slate-800 bg-slate-900/40 p-6 shadow-lg shadow-black/20"
+        className="space-y-8 rounded-2xl border border-slate-800 bg-slate-900/40 p-6"
       >
-        <fieldset className="space-y-6">
+        <fieldset className="space-y-4">
           <legend className="text-sm font-semibold text-white">Profile</legend>
           <label className="block text-sm text-slate-300">
             Display name
@@ -245,57 +182,38 @@ export function OrganizationSettingsPage() {
             />
           </label>
 
-          <label className="block text-sm text-slate-300">
-            Portal slug
-            <input
-              value={slug}
-              onChange={(e) => setSlug(e.target.value)}
-              disabled={!isSuper}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
-            />
-            <span className="mt-1 block text-xs text-slate-500">
-              Customer URLs use <span className="font-mono text-slate-400">?r=</span> with this slug.
-            </span>
-          </label>
-
-          <label className="block text-sm text-slate-300">
-            Account status
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              disabled={!isSuper}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </select>
-          </label>
+          {isSuper ? (
+            <>
+              <label className="block text-sm text-slate-300">
+                Slug
+                <input
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-200"
+                />
+              </label>
+              <label className="block text-sm text-slate-300">
+                Status
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-200"
+                >
+                  {STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s.replace(/_/g, ' ')}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ) : null}
         </fieldset>
 
-        <fieldset className="space-y-4 border-t border-slate-800 pt-8">
-          <legend className="text-sm font-semibold text-white">Branding &amp; payouts</legend>
-          <p className="text-xs text-slate-500">
-            Wallet balance:{' '}
-            <strong className="text-emerald-300">
-              GHS {((Number(org.walletBalanceCents) || 0) / 100).toFixed(2)}
-            </strong>
-            {' · '}
-            Platform fee:{' '}
-            <strong className="text-slate-300">
-              {bill.platformFeePercent != null ? `${bill.platformFeePercent}%` : '—'}
-            </strong>
-            {bill.platformFeeBps == null && bill.defaultPlatformFeePercent != null
-              ? ' (platform default)'
-              : bill.platformFeeBps != null
-                ? ' (org override)'
-                : ''}
-            . Manage withdrawals under Finance → Wallet.
-          </p>
+        <fieldset className="space-y-4 border-t border-slate-800 pt-6">
+          <legend className="text-sm font-semibold text-white">Branding</legend>
           <label className="block text-sm text-slate-300">
-            Merchant display name
+            Name on checkout
             <input
               value={bill.merchantDisplayName}
               onChange={(e) => setBill((b) => ({ ...b, merchantDisplayName: e.target.value }))}
@@ -304,16 +222,23 @@ export function OrganizationSettingsPage() {
             />
           </label>
           <label className="block text-sm text-slate-300">
-            SMS brand name (fallback)
+            SMS brand
             <input
               value={bill.smsBrandName}
               onChange={(e) => setBill((b) => ({ ...b, smsBrandName: e.target.value }))}
-              placeholder="Short label in SMS, e.g. AcmeNet"
+              placeholder="e.g. AcmeNet"
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
             />
           </label>
+        </fieldset>
+
+        <fieldset className="space-y-4 border-t border-slate-800 pt-6">
+          <legend className="text-sm font-semibold text-white">Payout destination</legend>
+          <p className="text-xs text-slate-500">
+            Where Qaretech should send your withdrawals (shown when you request payout in Wallet).
+          </p>
           <label className="block text-sm text-slate-300">
-            Payout MoMo number
+            MoMo number
             <input
               value={bill.payoutMomoNumber}
               onChange={(e) => setBill((b) => ({ ...b, payoutMomoNumber: e.target.value }))}
@@ -322,11 +247,10 @@ export function OrganizationSettingsPage() {
             />
           </label>
           <label className="block text-sm text-slate-300">
-            Payout note
+            Note (account name / bank)
             <input
               value={bill.payoutNote}
               onChange={(e) => setBill((b) => ({ ...b, payoutNote: e.target.value }))}
-              placeholder="Account name / bank details"
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
             />
           </label>
@@ -341,134 +265,75 @@ export function OrganizationSettingsPage() {
         </button>
       </form>
 
-      <form
-        onSubmit={changePassword}
-        className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-6"
-      >
-        <h2 className="text-lg font-semibold text-white">Your sign-in password</h2>
-        <p className="text-xs text-slate-500">
-          Changes the password for <span className="font-mono text-slate-400">{me?.admin?.email}</span> — the account
-          you are logged in with now.
-        </p>
-        {pwdErr && (
-          <p className="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-200">{pwdErr}</p>
-        )}
-        {pwdMsg && (
-          <p className="rounded-lg border border-emerald-500/30 bg-emerald-950/25 px-3 py-2 text-sm text-emerald-100">
-            {pwdMsg}
-          </p>
-        )}
-        <label className="block text-sm text-slate-300">
-          Current password
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={pwdCurrent}
-            onChange={(e) => setPwdCurrent(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
-          />
-        </label>
-        <label className="block text-sm text-slate-300">
-          New password (min 8 characters)
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={pwdNew}
-            onChange={(e) => setPwdNew(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={pwdBusy || !pwdCurrent || !pwdNew}
-          className="rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700 disabled:opacity-50"
-        >
-          {pwdBusy ? 'Updating…' : 'Update password'}
-        </button>
-      </form>
-
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-white">Recent changes</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Organisation settings, packages, routers, PPPoE, and remote access admin actions. Sensitive values are
-              never stored in the log.
-            </p>
+            <h2 className="text-lg font-semibold text-white">Your login password</h2>
+            <p className="mt-0.5 text-xs text-slate-500">{me?.admin?.email}</p>
           </div>
           <button
             type="button"
-            onClick={downloadAuditCsv}
-            className="shrink-0 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+            onClick={() => {
+              setShowPassword((v) => !v);
+              setPwdErr('');
+              setPwdMsg('');
+            }}
+            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
           >
-            Download CSV
+            {showPassword ? 'Hide' : 'Change'}
           </button>
         </div>
-        {auditCsvErr && (
-          <p className="mt-3 rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-            {auditCsvErr}
-          </p>
-        )}
-        {auditLoading ? (
-          <p className="mt-4 text-sm text-slate-500">Loading audit…</p>
-        ) : audit.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-500">
-            No entries yet — save organisation settings or change billing, packages, or network items to create logs.
-          </p>
-        ) : (
-          <ul className="mt-4 max-h-72 space-y-2 overflow-y-auto text-sm">
-            {audit.map((row) => {
-              const summary = auditMetaSummary(row.meta);
-              return (
-                <li
-                  key={row._id}
-                  className="rounded-lg border border-slate-800/80 bg-slate-950/50 px-3 py-2 text-slate-300"
-                >
-                  <span className="text-xs text-slate-500">
-                    {row.createdAt ? new Date(row.createdAt).toLocaleString() : '—'}
-                  </span>
-                  <p className="mt-0.5 font-mono text-xs text-amber-200/90">{row.action}</p>
-                  <p className="text-xs text-slate-500">{row.actorEmail || '—'}</p>
-                  {summary ? (
-                    <p className="mt-1 break-words font-mono text-[11px] leading-snug text-slate-500">{summary}</p>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        {showPassword ? (
+          <form onSubmit={changePassword} className="mt-4 space-y-3">
+            {pwdErr && (
+              <p className="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                {pwdErr}
+              </p>
+            )}
+            {pwdMsg && (
+              <p className="rounded-lg border border-emerald-500/30 bg-emerald-950/25 px-3 py-2 text-sm text-emerald-100">
+                {pwdMsg}
+              </p>
+            )}
+            <label className="block text-sm text-slate-300">
+              Current password
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={pwdCurrent}
+                onChange={(e) => setPwdCurrent(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
+              />
+            </label>
+            <label className="block text-sm text-slate-300">
+              New password
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                value={pwdNew}
+                onChange={(e) => setPwdNew(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={pwdBusy || !pwdCurrent || pwdNew.length < 8}
+              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
+            >
+              {pwdBusy ? 'Updating…' : 'Update password'}
+            </button>
+          </form>
+        ) : null}
       </section>
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h2 className="text-lg font-semibold text-white">Customer links</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Built from <span className="font-mono text-slate-400">PUBLIC_APP_URL</span> and your portal slug.
-        </p>
-        <ul className="mt-4 space-y-3 text-sm">
-          <li>
-            <span className="text-slate-500">PPPoE renew</span>
-            <a
-              href={portal.renewUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 block break-all font-mono text-emerald-400 hover:text-emerald-300"
-            >
-              {portal.renewUrl || '—'}
-            </a>
-          </li>
-          <li>
-            <span className="text-slate-500">Hotspot purchase</span>
-            <a
-              href={portal.hotspotUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 block break-all font-mono text-emerald-400 hover:text-emerald-300"
-            >
-              {portal.hotspotUrl || '—'}
-            </a>
-          </li>
-        </ul>
-      </section>
+      <p className="text-xs text-slate-500">
+        Site renew and hotspot links are on each router under{' '}
+        <Link to="/devices/mikrotik" className="text-indigo-400 hover:text-indigo-300">
+          MikroTik
+        </Link>
+        . Online PPPoE renew also works with each customer&apos;s renew ID.
+      </p>
     </div>
   );
 }

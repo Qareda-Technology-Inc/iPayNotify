@@ -69,7 +69,7 @@ function headerTitleForPath(pathname) {
     '/super/withdrawals': 'Vendor withdrawals',
   };
   if (exact[p]) return exact[p];
-  if (p.startsWith('/super/organizations/') && p.includes('/admins')) return 'Organisation admins';
+  if (p.startsWith('/super/organizations/') && p.includes('/admins')) return 'Team invites';
   return 'Admin';
 }
 
