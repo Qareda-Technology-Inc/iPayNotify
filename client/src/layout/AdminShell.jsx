@@ -64,6 +64,7 @@ function headerTitleForPath(pathname) {
     '/finance/messages': 'Messages & SMS',
     '/devices/mikrotik': 'MikroTik routers',
     '/org/settings': 'Organisation',
+    '/account': 'Account',
     '/super/organizations': 'All organisations',
     '/super/email-templates': 'Email & templates',
     '/super/withdrawals': 'Vendor withdrawals',
@@ -98,6 +99,9 @@ export function AdminShell({ onSignOut }) {
   const adminDisplayName = String(me?.admin?.fullName || '').trim() || adminEmail;
   const adminRole = me?.admin?.role || 'super_admin';
   const isSuper = adminRole === 'super_admin';
+  const modules = me?.modules || { tickets: false, remoteAccess: false };
+  const showTickets = isSuper || Boolean(modules.tickets);
+  const showRemoteAccess = isSuper || Boolean(modules.remoteAccess);
   const organizationName = me?.organizationName || null;
 
   useEffect(() => {
@@ -185,6 +189,7 @@ export function AdminShell({ onSignOut }) {
           <NavGroup title="Tenant">
             <SideLink to="/">Dashboard</SideLink>
             <SideLink to="/org/settings">Organisation</SideLink>
+            <SideLink to="/account">Account</SideLink>
           </NavGroup>
           <NavGroup title="Customers &amp; access">
             <SideLink to="/users/customers" badge={counts?.customers}>
@@ -194,7 +199,7 @@ export function AdminShell({ onSignOut }) {
             <SideLink to="/finance/pppoe" badge={counts?.pppoeAccounts} accent="amber">
               PPPoE
             </SideLink>
-            {isSuper ? (
+            {showRemoteAccess ? (
               <SideLink to="/users/remote-access" badge={counts?.remoteAccessSubscriptions}>
                 Remote access
               </SideLink>
@@ -218,7 +223,7 @@ export function AdminShell({ onSignOut }) {
               MikroTik
             </SideLink>
           </NavGroup>
-          {isSuper ? (
+          {showTickets ? (
             <NavGroup title="Ticket operations">
               <SideLink to="/tickets/issue" accent="amber">
                 Issue tickets

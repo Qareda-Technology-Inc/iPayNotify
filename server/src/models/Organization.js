@@ -22,6 +22,29 @@ const organizationBillingSchema = new mongoose.Schema(
     /** Optional MoMo / bank hint for super-admin payouts. */
     payoutMomoNumber: { type: String, trim: true, default: '' },
     payoutNote: { type: String, trim: true, default: '' },
+    /** Public HTTPS URL for portal / checkout logo (optional white-label). */
+    logoUrl: { type: String, trim: true, default: '' },
+  },
+  { _id: false }
+);
+
+/** Optional product modules — enabled per tenant by super admin. */
+const organizationModulesSchema = new mongoose.Schema(
+  {
+    /** Ticket sales / collections / reports */
+    tickets: { type: Boolean, default: false },
+    /** Remote-access subscriptions (non-PPPoE) */
+    remoteAccess: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+
+/** Soft caps — null means unlimited. Enforced on create/send. */
+const organizationLimitsSchema = new mongoose.Schema(
+  {
+    maxRouters: { type: Number, default: null },
+    maxAdmins: { type: Number, default: null },
+    maxSmsPerMonth: { type: Number, default: null },
   },
   { _id: false }
 );
@@ -38,6 +61,8 @@ const organizationSchema = new mongoose.Schema(
       default: 'active',
     },
     billing: { type: organizationBillingSchema, default: () => ({}) },
+    modules: { type: organizationModulesSchema, default: () => ({}) },
+    limits: { type: organizationLimitsSchema, default: () => ({}) },
     /** Cached available wallet balance (cents). Updated with each ledger entry. */
     walletBalanceCents: { type: Number, default: 0 },
   },

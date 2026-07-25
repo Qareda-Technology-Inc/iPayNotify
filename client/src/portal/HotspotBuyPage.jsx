@@ -4,6 +4,7 @@ import { publicFetch } from '../api.js';
 import { usePortalContext, getPortalSlugFromLocation } from './usePortalContext.js';
 import { DraftCheckoutPrompt } from './DraftCheckoutPrompt.jsx';
 import { HubtelCheckout } from './HubtelCheckout.jsx';
+import { PortalBrandHeader } from './PortalBrandHeader.jsx';
 
 /**
  * Hotspot buy is always bound to the current site:
@@ -105,16 +106,18 @@ export function HotspotBuyPage() {
           if (ref) navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`);
         }}
       />
-      <h1 className="text-xl font-semibold text-white">Buy hotspot access</h1>
-      {ctxLoading ? (
-        <p className="mt-2 text-sm text-slate-400">Detecting your location…</p>
-      ) : siteReady ? (
-        <p className="mt-2 text-sm text-slate-400">
-          Choose a package for <span className="text-slate-200">{ctx.router.name}</span>.
-        </p>
-      ) : (
-        <p className="mt-2 text-sm text-slate-400">Access is sold per venue.</p>
-      )}
+      <PortalBrandHeader
+        branding={ctx?.branding}
+        routerName={siteReady ? ctx?.router?.name : ''}
+        title="Buy hotspot access"
+        subtitle={
+          ctxLoading
+            ? 'Detecting your location…'
+            : siteReady
+              ? 'Choose a package for this venue.'
+              : 'Access is sold per venue. Use the buy link from the login page or connect to venue Wi‑Fi.'
+        }
+      />
 
       {ctxError && (
         <p className="mt-4 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">

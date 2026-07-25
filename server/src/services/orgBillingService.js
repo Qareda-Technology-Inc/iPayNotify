@@ -52,6 +52,7 @@ export async function sanitizeBillingForClient(billing) {
     return {
       merchantDisplayName: '',
       smsBrandName: '',
+      logoUrl: '',
       platformFeeBps: null,
       platformFeePercent: defaultBps / 100,
       defaultPlatformFeePercent: defaultBps / 100,
@@ -65,6 +66,7 @@ export async function sanitizeBillingForClient(billing) {
   return {
     merchantDisplayName: String(billing.merchantDisplayName || '').trim(),
     smsBrandName: String(billing.smsBrandName || '').trim(),
+    logoUrl: String(billing.logoUrl || '').trim(),
     platformFeeBps: hasOverride ? feeBps : null,
     platformFeePercent: feeBps / 100,
     defaultPlatformFeePercent: defaultBps / 100,

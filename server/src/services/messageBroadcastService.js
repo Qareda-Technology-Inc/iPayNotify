@@ -14,6 +14,8 @@ import {
 } from './messageRecipientService.js';
 import { renderMessageBody } from './messageTemplateService.js';
 import { resolveSmsBranding } from './smsRouterBranding.js';
+import { assertOrgLimit } from './orgLimitsService.js';
+import { logOrgAudit } from './orgAuditService.js';
 
 const MAX_ERROR_ROWS = 40;
 
@@ -308,6 +310,8 @@ export async function runMessageBroadcast(opts) {
     };
   }
 
+  await assertOrgLimit(tenantOrg, 'sms', { additionalSms: recipients.length });
+
   let sent = 0;
   let failed = 0;
   const failures = [];
@@ -350,6 +354,20 @@ export async function runMessageBroadcast(opts) {
   logPayload.failures = failures;
 
   const doc = await MessageBroadcastLog.create(logPayload);
+
+  void logOrgAudit({
+    organizationId: tenantOrg,
+    actorEmail: '',
+    action: 'message.broadcast',
+    meta: {
+      recipientCount: recipients.length,
+      sent,
+      failed,
+      recipientMode,
+      dryRun: false,
+      logId: String(doc._id),
+    },
+  });
 
   return {
     dryRun: false,

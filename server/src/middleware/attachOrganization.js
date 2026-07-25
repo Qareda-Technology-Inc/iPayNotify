@@ -1,15 +1,18 @@
 import mongoose from 'mongoose';
 import { Organization, Admin } from '../models/index.js';
 import { resolveDefaultOrganizationId } from '../db/defaultOrganizationId.js';
+import { normalizeOrgModules } from '../services/orgModulesService.js';
 
 async function attachOrganizationMeta(req) {
   if (req.organizationId && mongoose.isValidObjectId(String(req.organizationId))) {
-    const o = await Organization.findById(req.organizationId).select('name slug').lean();
+    const o = await Organization.findById(req.organizationId).select('name slug modules').lean();
     req.organizationName = o?.name || null;
     req.organizationSlug = o?.slug || null;
+    req.organizationModules = normalizeOrgModules(o?.modules);
   } else {
     req.organizationName = null;
     req.organizationSlug = null;
+    req.organizationModules = normalizeOrgModules(null);
   }
 }
 

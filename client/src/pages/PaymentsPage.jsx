@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { apiFetch } from '../api.js';
+import { apiFetch, apiDownload } from '../api.js';
 
 function formatMoney(cents, currency = 'GHS') {
   const n = Number(cents) || 0;
@@ -46,17 +46,23 @@ export function PaymentsPage() {
   const [q, setQ] = useState('');
   const [qDraft, setQDraft] = useState('');
   const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
+
+  const filterParams = useCallback(() => {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (kind) params.set('kind', kind);
+    if (q.trim()) params.set('q', q.trim());
+    return params;
+  }, [status, kind, q]);
 
   const load = useCallback(async () => {
     setErr('');
     setLoading(true);
     try {
-      const params = new URLSearchParams();
+      const params = filterParams();
       params.set('page', String(page));
       params.set('limit', '40');
-      if (status) params.set('status', status);
-      if (kind) params.set('kind', kind);
-      if (q.trim()) params.set('q', q.trim());
       const d = await apiFetch(`/api/transactions?${params}`);
       setData(d);
     } catch (e) {
@@ -65,7 +71,28 @@ export function PaymentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, status, kind, q]);
+  }, [page, filterParams]);
+
+  async function exportCsv() {
+    setExporting(true);
+    setErr('');
+    try {
+      const params = filterParams();
+      params.set('format', 'csv');
+      params.set('limit', '5000');
+      const blob = await apiDownload(`/api/transactions?${params}`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'payments-export.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setErr(e.message || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -88,14 +115,24 @@ export function PaymentsPage() {
             Hubtel checkout (Qaretech settles). Fee and your net credit are shown for paid sales.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => load()}
-          disabled={loading}
-          className="rounded-xl border border-slate-600/80 bg-slate-800/50 px-4 py-2.5 text-sm font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
-        >
-          {loading ? 'Refreshing…' : 'Refresh'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={exportCsv}
+            disabled={exporting || loading}
+            className="rounded-xl border border-emerald-700/50 bg-emerald-950/30 px-4 py-2.5 text-sm font-medium text-emerald-100 hover:bg-emerald-950/50 disabled:opacity-50"
+          >
+            {exporting ? 'Exporting…' : 'Export CSV'}
+          </button>
+          <button
+            type="button"
+            onClick={() => load()}
+            disabled={loading}
+            className="rounded-xl border border-slate-600/80 bg-slate-800/50 px-4 py-2.5 text-sm font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+          >
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3 text-sm">

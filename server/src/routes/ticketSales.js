@@ -2,8 +2,10 @@ import express from 'express';
 import mongoose from 'mongoose';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
+import { requireOrgModule } from '../middleware/requireOrgModule.js';
 import { Admin, TicketSale, TicketSite, TicketSiteSeller, TicketType } from '../models/index.js';
 import { notifyTicketTransactionUpdate } from '../services/ticketNotificationService.js';
+import { logOrgAudit } from '../services/orgAuditService.js';
 
 export const ticketSalesRouter = express.Router();
 
@@ -11,8 +13,10 @@ function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Platform-only: organisation vendors do not use ticket operations. */
-ticketSalesRouter.use(requireRoles('super_admin'));
+ticketSalesRouter.use(
+  requireRoles('super_admin', 'org_admin', 'ticket_manager', 'org_staff')
+);
+ticketSalesRouter.use(requireOrgModule('tickets'));
 
 ticketSalesRouter.get(
   '/sites',
@@ -394,6 +398,17 @@ ticketSalesRouter.post(
       eventKind: 'issued',
       saleId: doc._id,
     });
+    void logOrgAudit({
+      organizationId: req.organizationId,
+      actorEmail: req.admin?.email,
+      action: 'ticket.issue',
+      meta: {
+        saleId: String(doc._id),
+        quantity: doc.quantity,
+        amountCents: doc.amountCents,
+        sellerName: doc.sellerName,
+      },
+    });
     res.status(201).json(doc.toObject());
   })
 );
@@ -472,6 +487,16 @@ ticketSalesRouter.post(
       actorAdminId: req.admin.id,
       eventKind: 'collected',
       saleId: doc._id,
+    });
+    void logOrgAudit({
+      organizationId: req.organizationId,
+      actorEmail: req.admin?.email,
+      action: 'ticket.collect',
+      meta: {
+        saleId: String(doc._id),
+        issueSaleId: String(issue._id),
+        amountCents: doc.amountCents,
+      },
     });
     res.status(201).json(doc.toObject());
   })

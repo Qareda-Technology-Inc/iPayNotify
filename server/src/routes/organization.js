@@ -1,34 +1,69 @@
 import express from 'express';
 import mongoose from 'mongoose';
-import { Organization, OrganizationAuditLog } from '../models/index.js';
+import { Organization, OrganizationAuditLog, Router as MikrotikRouter } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { config } from '../config.js';
 import { sanitizeBillingForClient } from '../services/orgBillingService.js';
 import { logOrgAudit, formatOrgAuditCsv } from '../services/orgAuditService.js';
+import { normalizeOrgModules } from '../services/orgModulesService.js';
+import {
+  getOrgUsageAndLimits,
+  normalizeOrgLimits,
+} from '../services/orgLimitsService.js';
+import { routerDisplayName } from '../utils/routerLabel.js';
 
 export const organizationRouter = express.Router();
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
 const STATUSES = new Set(['active', 'trial', 'past_due', 'suspended']);
 
-function publicPortalLinks(slug) {
-  const base = String(config.publicAppUrl || '').replace(/\/$/, '') || 'http://localhost:5173';
-  const r = encodeURIComponent(String(slug || '').trim());
-  return {
-    baseUrl: base,
-    renewUrl: `${base}/portal/renew?r=${r}`,
-    hotspotUrl: `${base}/portal/hotspot?r=${r}`,
-  };
+function publicAppBase() {
+  return String(config.publicAppUrl || '').replace(/\/$/, '') || 'http://localhost:5173';
+}
+
+/** Customer links use each router’s portalSlug (not Organisation.slug). */
+async function portalSitesForOrg(organizationId) {
+  const base = publicAppBase();
+  const routers = await MikrotikRouter.find({
+    organizationId,
+    portalSlug: { $exists: true, $nin: [null, ''] },
+  })
+    .select('name comment portalSlug')
+    .sort({ name: 1 })
+    .lean();
+  return routers.map((r) => {
+    const slug = String(r.portalSlug || '').trim().toLowerCase();
+    const enc = encodeURIComponent(slug);
+    return {
+      id: String(r._id),
+      name: routerDisplayName(r),
+      portalSlug: slug,
+      renewUrl: `${base}/portal/renew?r=${enc}`,
+      hotspotUrl: `${base}/portal/hotspot?r=${enc}`,
+    };
+  });
 }
 
 async function jsonWithPortal(doc) {
   const o = doc.toObject ? doc.toObject() : doc;
   const { billing, ...rest } = o;
+  const oid = o._id;
+  const [portalSites, usagePack] = await Promise.all([
+    portalSitesForOrg(oid),
+    getOrgUsageAndLimits(oid),
+  ]);
   return {
     ...rest,
     walletBalanceCents: Number(o.walletBalanceCents) || 0,
     billing: await sanitizeBillingForClient(billing),
-    portal: publicPortalLinks(o.slug),
+    modules: normalizeOrgModules(o.modules),
+    limits: normalizeOrgLimits(o.limits),
+    usage: usagePack.usage,
+    portalSites,
+    portal: {
+      baseUrl: publicAppBase(),
+      note: 'Use portalSites[].renewUrl / hotspotUrl (router portal slug). Organisation slug is not a portal key.',
+    },
   };
 }
 
@@ -46,6 +81,15 @@ function applyBillingPatch(doc, billingBody, { isSuperAdmin = false } = {}) {
   }
   if (b.smsBrandName !== undefined) {
     doc.billing.smsBrandName = String(b.smsBrandName || '').trim();
+  }
+  if (b.logoUrl !== undefined) {
+    const raw = String(b.logoUrl || '').trim();
+    if (raw && !/^https:\/\//i.test(raw)) {
+      const err = new Error('logoUrl must be an https:// URL');
+      err.status = 400;
+      throw err;
+    }
+    doc.billing.logoUrl = raw;
   }
   if (b.payoutMomoNumber !== undefined) {
     doc.billing.payoutMomoNumber = String(b.payoutMomoNumber || '').trim();
@@ -160,7 +204,11 @@ organizationRouter.patch(
     }
 
     if (body.billing != null) {
-      applyBillingPatch(doc, body.billing, { isSuperAdmin: role === 'super_admin' });
+      try {
+        applyBillingPatch(doc, body.billing, { isSuperAdmin: role === 'super_admin' });
+      } catch (e) {
+        return res.status(e.status || 400).json({ error: e.message || 'Invalid billing' });
+      }
     }
 
     try {

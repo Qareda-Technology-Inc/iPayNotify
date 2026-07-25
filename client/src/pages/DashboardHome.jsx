@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../api.js';
 
-function useIsSuperAdmin() {
-  const [isSuper, setIsSuper] = useState(false);
+function useShowRemoteAccessStat() {
+  const [show, setShow] = useState(false);
   useEffect(() => {
     apiFetch('/api/auth/me')
-      .then((m) => setIsSuper(m?.admin?.role === 'super_admin'))
-      .catch(() => setIsSuper(false));
+      .then((m) => {
+        const isSuper = m?.admin?.role === 'super_admin';
+        setShow(isSuper || Boolean(m?.modules?.remoteAccess));
+      })
+      .catch(() => setShow(false));
   }, []);
-  return isSuper;
+  return show;
 }
 
 function formatCedi(cents) {
@@ -32,13 +35,17 @@ function StatCard({ label, value, sub }) {
 
 export function DashboardHome() {
   const [data, setData] = useState(null);
+  const [portalSites, setPortalSites] = useState([]);
   const [err, setErr] = useState('');
-  const isSuper = useIsSuperAdmin();
+  const showRemoteAccess = useShowRemoteAccessStat();
 
   useEffect(() => {
     apiFetch('/api/dashboard/summary')
       .then(setData)
       .catch((e) => setErr(e.message));
+    apiFetch('/api/organization')
+      .then((o) => setPortalSites(Array.isArray(o?.portalSites) ? o.portalSites : []))
+      .catch(() => setPortalSites([]));
   }, []);
 
   if (err) {
@@ -92,7 +99,7 @@ export function DashboardHome() {
         <StatCard label="Packages" value={String(counts.packages)} />
         <StatCard label="Vouchers issued" value={String(counts.vouchers)} />
         <StatCard label="PPPoE accounts" value={String(counts.pppoeAccounts)} />
-        {isSuper ? (
+        {showRemoteAccess ? (
           <StatCard
             label="Remote access"
             value={String(counts.remoteAccessSubscriptions ?? 0)}
@@ -103,23 +110,29 @@ export function DashboardHome() {
       </div>
 
       <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-5">
-        <h3 className="text-sm font-semibold text-emerald-200">Customer payment links</h3>
-        <ul className="mt-3 space-y-2 font-mono text-xs text-emerald-400/90">
-          <li>
-            PPPoE renew:{' '}
-            <span className="select-all">
-              {typeof window !== 'undefined' ? window.location.origin : ''}/portal/renew
-            </span>
-          </li>
-          <li>
-            Hotspot:{' '}
-            <span className="select-all">
-              {typeof window !== 'undefined' ? window.location.origin : ''}/portal/hotspot
-            </span>
-          </li>
-        </ul>
+        <h3 className="text-sm font-semibold text-emerald-200">Customer site links</h3>
+        {portalSites.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-400">
+            Set a portal slug on each router under Devices → MikroTik. Full links also appear on
+            Organisation.
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-3 text-xs">
+            {portalSites.slice(0, 4).map((s) => (
+              <li key={s.id}>
+                <p className="font-medium text-emerald-100">{s.name}</p>
+                <p className="mt-0.5 break-all font-mono text-emerald-400/90 select-all">
+                  {s.renewUrl}
+                </p>
+                <p className="mt-0.5 break-all font-mono text-emerald-400/90 select-all">
+                  {s.hotspotUrl}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
         <p className="mt-2 text-xs text-slate-500">
-          Add <span className="font-mono">?r=slug</span> per router; set <span className="font-mono">PUBLIC_APP_URL</span> for walled garden + portal.
+          Online renew also works with each customer&apos;s renew ID (no site slug required).
         </p>
       </div>
     </div>

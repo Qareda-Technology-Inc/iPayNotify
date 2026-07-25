@@ -7,6 +7,7 @@ import {
   getWalletSummary,
   requestWithdrawal,
 } from '../services/orgWalletService.js';
+import { logOrgAudit } from '../services/orgAuditService.js';
 
 export const walletRouter = express.Router();
 
@@ -68,6 +69,15 @@ walletRouter.post(
         amountCents,
         destinationNote: req.body?.destinationNote,
         requestedByAdminId: req.admin?.id,
+      });
+      void logOrgAudit({
+        organizationId: oid,
+        actorEmail: req.admin?.email,
+        action: 'wallet.withdrawal_request',
+        meta: {
+          withdrawalId: String(doc._id),
+          amountCents: doc.amountCents,
+        },
       });
       res.status(201).json({
         id: String(doc._id),

@@ -20,6 +20,7 @@ import {
 import { parseRouterConnectString } from '../utils/routerConnect.js';
 import { routerDisplayName } from '../utils/routerLabel.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
+import { assertOrgLimit } from '../services/orgLimitsService.js';
 
 export const routersApi = express.Router();
 
@@ -83,6 +84,11 @@ routersApi.post(
       sitePublicIp,
       portalSlug,
     } = req.body;
+    try {
+      await assertOrgLimit(req.organizationId, 'routers');
+    } catch (e) {
+      return res.status(e.status || 403).json({ error: e.message || 'Router limit reached' });
+    }
     const u = String(apiUser ?? '').trim();
     const p = apiPassword != null ? String(apiPassword) : '';
     const hRaw = String(host ?? '').trim();

@@ -31,7 +31,7 @@ export function MessagesPage() {
   const [audPppoe, setAudPppoe] = useState(true);
   const [audRemote, setAudRemote] = useState(false);
   const [audHotspot, setAudHotspot] = useState(false);
-  const [isSuper, setIsSuper] = useState(false);
+  const [canRemoteAudience, setCanRemoteAudience] = useState(false);
   /** @type {[RecipientScope, import('react').Dispatch<import('react').SetStateAction<RecipientScope>>]} */
   const [recipientScope, setRecipientScope] = useState(/** @type {RecipientScope} */ ('audiences'));
   /** @type {[Record<string, boolean>, import('react').Dispatch<any>]} */
@@ -77,11 +77,12 @@ export function MessagesPage() {
     load();
     apiFetch('/api/auth/me')
       .then((m) => {
-        const superAdmin = m?.admin?.role === 'super_admin';
-        setIsSuper(superAdmin);
-        if (superAdmin) setAudRemote(true);
+        const allowed =
+          m?.admin?.role === 'super_admin' || Boolean(m?.modules?.remoteAccess);
+        setCanRemoteAudience(allowed);
+        if (allowed) setAudRemote(true);
       })
-      .catch(() => setIsSuper(false));
+      .catch(() => setCanRemoteAudience(false));
   }, [load]);
 
   async function sendTestSms(e) {
@@ -179,7 +180,7 @@ export function MessagesPage() {
   function buildRecipientPayload() {
     const audiences = {
       pppoe: audPppoe,
-      remote: isSuper ? audRemote : false,
+      remote: canRemoteAudience ? audRemote : false,
       hotspot: audHotspot,
     };
     const siteId = broadcastRouterId.trim();
@@ -719,7 +720,7 @@ export function MessagesPage() {
                   </span>
                 </span>
               </label>
-              {isSuper ? (
+              {canRemoteAudience ? (
                 <label className="flex items-start gap-2">
                   <input
                     type="checkbox"

@@ -20,6 +20,17 @@ import {
   getPlatformSettingsPublic,
   updateDefaultPlatformFeeBps,
 } from '../services/platformSettingsService.js';
+import {
+  applyModulesPatch,
+  normalizeOrgModules,
+} from '../services/orgModulesService.js';
+import {
+  applyLimitsPatch,
+  assertOrgLimit,
+  getOrgUsageAndLimits,
+  normalizeOrgLimits,
+} from '../services/orgLimitsService.js';
+import { logOrgAudit } from '../services/orgAuditService.js';
 
 const SALT = 10;
 
@@ -33,10 +44,14 @@ router.get(
     const list = await Organization.find().sort({ name: 1 }).lean();
     const out = [];
     for (const o of list) {
+      const usagePack = await getOrgUsageAndLimits(o._id);
       out.push({
         ...o,
         walletBalanceCents: Number(o.walletBalanceCents) || 0,
         billing: await sanitizeBillingForClient(o.billing),
+        modules: normalizeOrgModules(o.modules),
+        limits: normalizeOrgLimits(o.limits),
+        usage: usagePack.usage,
       });
     }
     res.json(out);
@@ -126,6 +141,16 @@ router.patch(
       }
       doc.slug = slug;
     }
+    if (req.body.modules != null) {
+      applyModulesPatch(doc, req.body.modules);
+    }
+    if (req.body.limits != null) {
+      try {
+        applyLimitsPatch(doc, req.body.limits);
+      } catch (e) {
+        return res.status(e.status || 400).json({ error: e.message || 'Invalid limits' });
+      }
+    }
     try {
       await doc.save();
     } catch (e) {
@@ -134,7 +159,25 @@ router.patch(
       }
       throw e;
     }
-    res.json(doc.toObject());
+    if (req.body.modules != null || req.body.limits != null) {
+      void logOrgAudit({
+        organizationId: doc._id,
+        actorEmail: req.admin?.email,
+        action: 'organization.modules_or_limits',
+        meta: {
+          modules: req.body.modules != null ? normalizeOrgModules(doc.modules) : undefined,
+          limits: req.body.limits != null ? normalizeOrgLimits(doc.limits) : undefined,
+        },
+      });
+    }
+    const o = doc.toObject();
+    const usagePack = await getOrgUsageAndLimits(o._id);
+    res.json({
+      ...o,
+      modules: normalizeOrgModules(o.modules),
+      limits: normalizeOrgLimits(o.limits),
+      usage: usagePack.usage,
+    });
   })
 );
 
@@ -225,6 +268,11 @@ router.post(
     if (existing) {
       return res.status(400).json({ error: 'An administrator with this email already exists' });
     }
+    try {
+      await assertOrgLimit(org._id, 'admins');
+    } catch (e) {
+      return res.status(e.status || 403).json({ error: e.message || 'Team limit reached' });
+    }
     const doc = await Admin.create({
       email,
       fullName,
@@ -235,6 +283,12 @@ router.post(
       status: 'invited',
     });
     const { emailSent } = await issueAdminInvite(doc, { orgName: org.name });
+    void logOrgAudit({
+      organizationId: org._id,
+      actorEmail: req.admin?.email,
+      action: 'admin.invite',
+      meta: { email: doc.email, role: doc.role, emailSent },
+    });
     res.status(201).json({
       _id: doc._id,
       email: doc.email,
@@ -402,6 +456,12 @@ router.delete(
       role: { $in: ORG_SCOPED_ADMIN_ROLES },
     });
     if (!r) return res.status(404).json({ error: 'Administrator not found' });
+    void logOrgAudit({
+      organizationId: req.params.orgId,
+      actorEmail: req.admin?.email,
+      action: 'admin.remove',
+      meta: { email: r.email, role: r.role },
+    });
     res.status(204).end();
   })
 );
@@ -491,6 +551,17 @@ router.post(
         processedByAdminId: req.admin?.id,
         processNote: req.body?.processNote,
       });
+      if (!result.duplicate) {
+        void logOrgAudit({
+          organizationId: result.withdrawal.organizationId,
+          actorEmail: req.admin?.email,
+          action: 'wallet.withdrawal_paid',
+          meta: {
+            withdrawalId: String(result.withdrawal._id),
+            amountCents: result.withdrawal.amountCents,
+          },
+        });
+      }
       res.json({
         ok: true,
         duplicate: Boolean(result.duplicate),
@@ -518,6 +589,17 @@ router.post(
         processedByAdminId: req.admin?.id,
         processNote: req.body?.processNote,
       });
+      if (!result.duplicate) {
+        void logOrgAudit({
+          organizationId: result.withdrawal.organizationId,
+          actorEmail: req.admin?.email,
+          action: 'wallet.withdrawal_rejected',
+          meta: {
+            withdrawalId: String(result.withdrawal._id),
+            amountCents: result.withdrawal.amountCents,
+          },
+        });
+      }
       res.json({
         ok: true,
         duplicate: Boolean(result.duplicate),

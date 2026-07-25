@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { apiFetch } from '../api.js';
+import { apiFetch, apiDownload } from '../api.js';
 
 const STATUSES = ['active', 'trial', 'past_due', 'suspended'];
 
@@ -9,6 +9,7 @@ function billingFromOrg(o) {
   return {
     merchantDisplayName: String(b.merchantDisplayName || ''),
     smsBrandName: String(b.smsBrandName || ''),
+    logoUrl: String(b.logoUrl || ''),
     platformFeePercent: b.platformFeePercent != null ? Number(b.platformFeePercent) : null,
     platformFeeBps: b.platformFeeBps,
     defaultPlatformFeePercent:
@@ -16,6 +17,19 @@ function billingFromOrg(o) {
     payoutMomoNumber: String(b.payoutMomoNumber || ''),
     payoutNote: String(b.payoutNote || ''),
   };
+}
+
+function limitLabel(n) {
+  return n == null ? 'Unlimited' : String(n);
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function OrganizationSettingsPage() {
@@ -26,14 +40,11 @@ export function OrganizationSettingsPage() {
   const [status, setStatus] = useState('active');
   const [bill, setBill] = useState(billingFromOrg(null));
   const [err, setErr] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [pwdCurrent, setPwdCurrent] = useState('');
-  const [pwdNew, setPwdNew] = useState('');
-  const [pwdBusy, setPwdBusy] = useState(false);
-  const [pwdMsg, setPwdMsg] = useState('');
-  const [pwdErr, setPwdErr] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [audit, setAudit] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const isSuper = me?.admin?.role === 'super_admin';
 
@@ -56,21 +67,36 @@ export function OrganizationSettingsPage() {
     }
   }, []);
 
+  const loadAudit = useCallback(async () => {
+    setAuditLoading(true);
+    try {
+      const rows = await apiFetch('/api/organization/audit-log?limit=40');
+      setAudit(Array.isArray(rows) ? rows : []);
+    } catch {
+      setAudit([]);
+    } finally {
+      setAuditLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadAudit();
+  }, [load, loadAudit]);
 
   async function save(e) {
     e.preventDefault();
     if (!org?._id) return;
     setSaving(true);
     setErr('');
+    setInfo('');
     try {
       const body = {
         name: name.trim(),
         billing: {
           merchantDisplayName: bill.merchantDisplayName.trim(),
           smsBrandName: bill.smsBrandName.trim(),
+          logoUrl: bill.logoUrl.trim(),
           payoutMomoNumber: bill.payoutMomoNumber.trim(),
           payoutNote: bill.payoutNote.trim(),
         },
@@ -88,6 +114,8 @@ export function OrganizationSettingsPage() {
       setSlug(String(updated?.slug || ''));
       setStatus(STATUSES.includes(updated?.status) ? updated.status : 'active');
       setBill(billingFromOrg(updated));
+      setInfo('Saved.');
+      await loadAudit();
     } catch (e2) {
       setErr(e2.message || 'Save failed');
     } finally {
@@ -95,27 +123,17 @@ export function OrganizationSettingsPage() {
     }
   }
 
-  async function changePassword(e) {
-    e.preventDefault();
-    setPwdBusy(true);
-    setPwdErr('');
-    setPwdMsg('');
+  async function exportAuditCsv() {
     try {
-      await apiFetch('/api/auth/change-password', {
-        method: 'POST',
-        body: JSON.stringify({
-          currentPassword: pwdCurrent,
-          newPassword: pwdNew,
-        }),
-      });
-      setPwdCurrent('');
-      setPwdNew('');
-      setPwdMsg('Password updated.');
-      setShowPassword(false);
-    } catch (e2) {
-      setPwdErr(e2.message || 'Could not update password');
-    } finally {
-      setPwdBusy(false);
+      const blob = await apiDownload('/api/organization/audit-log?format=csv&limit=500');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'organization-audit.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setErr(e.message || 'Audit export failed');
     }
   }
 
@@ -133,15 +151,18 @@ export function OrganizationSettingsPage() {
 
   const feeLabel =
     bill.platformFeePercent != null ? `${bill.platformFeePercent}%` : '—';
+  const portalSites = Array.isArray(org.portalSites) ? org.portalSites : [];
+  const limits = org.limits || {};
+  const usage = org.usage || {};
 
   return (
     <div className="mx-auto max-w-2xl space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-white">Organisation</h1>
         <p className="mt-1 text-sm text-slate-400">
-          Branding and payout details. Customer payments go through Qaretech; your share is in{' '}
+          Branding, payouts, and customer site links. Wallet is under{' '}
           <Link to="/finance/wallet" className="text-indigo-400 hover:text-indigo-300">
-            Wallet
+            Finance → Wallet
           </Link>
           .
         </p>
@@ -150,6 +171,11 @@ export function OrganizationSettingsPage() {
       {err && (
         <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {err}
+        </p>
+      )}
+      {info && (
+        <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          {info}
         </p>
       )}
 
@@ -165,6 +191,73 @@ export function OrganizationSettingsPage() {
           <p className="mt-1 text-xl font-semibold text-slate-100">{feeLabel}</p>
         </div>
       </div>
+
+      <div className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-3 text-xs text-slate-400">
+        <p className="font-semibold uppercase tracking-wide text-slate-500">Usage / limits</p>
+        <p className="mt-2">
+          Routers {usage.routers ?? 0} / {limitLabel(limits.maxRouters)} · Team {usage.admins ?? 0} /{' '}
+          {limitLabel(limits.maxAdmins)} · SMS this month {usage.smsThisMonth ?? 0} /{' '}
+          {limitLabel(limits.maxSmsPerMonth)}
+        </p>
+      </div>
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+        <h2 className="text-lg font-semibold text-white">Customer site links</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Links use each router&apos;s <span className="font-mono">portal slug</span> (not the
+          organisation slug). Set slugs under{' '}
+          <Link to="/devices/mikrotik" className="text-indigo-400 hover:text-indigo-300">
+            MikroTik
+          </Link>
+          .
+        </p>
+        {portalSites.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-500">
+            No routers with a portal slug yet. Add a portal slug on a router to get renew/hotspot
+            URLs.
+          </p>
+        ) : (
+          <ul className="mt-4 space-y-3">
+            {portalSites.map((s) => (
+              <li
+                key={s.id}
+                className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-3 text-sm"
+              >
+                <p className="font-medium text-white">
+                  {s.name}{' '}
+                  <span className="font-mono text-xs text-slate-500">?r={s.portalSlug}</span>
+                </p>
+                <div className="mt-2 space-y-1 font-mono text-[11px] text-emerald-300/90">
+                  <p className="flex flex-wrap items-center gap-2">
+                    <span className="select-all break-all">{s.renewUrl}</span>
+                    <button
+                      type="button"
+                      className="shrink-0 text-indigo-400 hover:text-indigo-300"
+                      onClick={async () => {
+                        if (await copyText(s.renewUrl)) setInfo('Renew link copied');
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </p>
+                  <p className="flex flex-wrap items-center gap-2">
+                    <span className="select-all break-all">{s.hotspotUrl}</span>
+                    <button
+                      type="button"
+                      className="shrink-0 text-indigo-400 hover:text-indigo-300"
+                      onClick={async () => {
+                        if (await copyText(s.hotspotUrl)) setInfo('Hotspot link copied');
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <form
         onSubmit={save}
@@ -213,13 +306,26 @@ export function OrganizationSettingsPage() {
         <fieldset className="space-y-4 border-t border-slate-800 pt-6">
           <legend className="text-sm font-semibold text-white">Branding</legend>
           <label className="block text-sm text-slate-300">
-            Name on checkout
+            Name on checkout / portal
             <input
               value={bill.merchantDisplayName}
               onChange={(e) => setBill((b) => ({ ...b, merchantDisplayName: e.target.value }))}
               placeholder="e.g. Acme Fibre"
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
             />
+          </label>
+          <label className="block text-sm text-slate-300">
+            Logo URL (https)
+            <input
+              type="url"
+              value={bill.logoUrl}
+              onChange={(e) => setBill((b) => ({ ...b, logoUrl: e.target.value }))}
+              placeholder="https://cdn.example.com/logo.png"
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
+            />
+            <span className="mt-1 block text-xs text-slate-500">
+              Shown on renew and hotspot portal pages. Must be a public https image URL.
+            </span>
           </label>
           <label className="block text-sm text-slate-300">
             SMS brand
@@ -266,73 +372,53 @@ export function OrganizationSettingsPage() {
       </form>
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-white">Your login password</h2>
-            <p className="mt-0.5 text-xs text-slate-500">{me?.admin?.email}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setShowPassword((v) => !v);
-              setPwdErr('');
-              setPwdMsg('');
-            }}
-            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-          >
-            {showPassword ? 'Hide' : 'Change'}
-          </button>
-        </div>
-        {showPassword ? (
-          <form onSubmit={changePassword} className="mt-4 space-y-3">
-            {pwdErr && (
-              <p className="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                {pwdErr}
-              </p>
-            )}
-            {pwdMsg && (
-              <p className="rounded-lg border border-emerald-500/30 bg-emerald-950/25 px-3 py-2 text-sm text-emerald-100">
-                {pwdMsg}
-              </p>
-            )}
-            <label className="block text-sm text-slate-300">
-              Current password
-              <input
-                type="password"
-                autoComplete="current-password"
-                value={pwdCurrent}
-                onChange={(e) => setPwdCurrent(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
-              />
-            </label>
-            <label className="block text-sm text-slate-300">
-              New password
-              <input
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                value={pwdNew}
-                onChange={(e) => setPwdNew(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
-              />
-            </label>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold text-white">Activity log</h2>
+          <div className="flex gap-2">
             <button
-              type="submit"
-              disabled={pwdBusy || !pwdCurrent || pwdNew.length < 8}
-              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
+              type="button"
+              onClick={loadAudit}
+              className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
             >
-              {pwdBusy ? 'Updating…' : 'Update password'}
+              Refresh
             </button>
-          </form>
-        ) : null}
+            <button
+              type="button"
+              onClick={exportAuditCsv}
+              className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+            >
+              Export CSV
+            </button>
+          </div>
+        </div>
+        {auditLoading ? (
+          <p className="mt-4 text-sm text-slate-500">Loading…</p>
+        ) : audit.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-500">No audit events yet.</p>
+        ) : (
+          <ul className="mt-4 max-h-80 space-y-2 overflow-y-auto text-xs">
+            {audit.map((row) => (
+              <li
+                key={row._id}
+                className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-slate-300"
+              >
+                <p className="text-slate-500">
+                  {row.createdAt ? new Date(row.createdAt).toLocaleString() : '—'}
+                  {row.actorEmail ? ` · ${row.actorEmail}` : ''}
+                </p>
+                <p className="mt-0.5 font-medium text-slate-100">{row.action}</p>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <p className="text-xs text-slate-500">
-        Site renew and hotspot links are on each router under{' '}
-        <Link to="/devices/mikrotik" className="text-indigo-400 hover:text-indigo-300">
-          MikroTik
+        Change your login password under{' '}
+        <Link to="/account" className="text-indigo-400 hover:text-indigo-300">
+          Account
         </Link>
-        . Online PPPoE renew also works with each customer&apos;s renew ID.
+        .
       </p>
     </div>
   );

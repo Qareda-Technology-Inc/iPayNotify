@@ -16,6 +16,7 @@ import { SuperAdminOrganizationsPage } from '../pages/SuperAdminOrganizationsPag
 import { SuperAdminOrgAdminsPage } from '../pages/SuperAdminOrgAdminsPage.jsx';
 import { SuperAdminEmailTemplatesPage } from '../pages/SuperAdminEmailTemplatesPage.jsx';
 import { OrganizationSettingsPage } from '../pages/OrganizationSettingsPage.jsx';
+import { AccountPage } from '../pages/AccountPage.jsx';
 import { SuperAdminGate } from '../components/SuperAdminGate.jsx';
 import { RoleGate } from '../components/RoleGate.jsx';
 import { TicketSitesPage } from '../pages/tickets/TicketSitesPage.jsx';
@@ -47,6 +48,14 @@ export function Dashboard({ onSignOut }) {
           }
         />
         <Route
+          path="account"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff', 'ticket_manager']}>
+              <AccountPage />
+            </RoleGate>
+          }
+        />
+        <Route
           path="users/customers"
           element={
             <RoleGate allow={['super_admin', 'org_admin', 'org_staff', 'ticket_manager']}>
@@ -66,7 +75,10 @@ export function Dashboard({ onSignOut }) {
         <Route
           path="tickets/sites"
           element={
-            <RoleGate allow={['super_admin']}>
+            <RoleGate
+              allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}
+              module="tickets"
+            >
               <TicketSitesPage />
             </RoleGate>
           }
@@ -74,7 +86,10 @@ export function Dashboard({ onSignOut }) {
         <Route
           path="tickets/types"
           element={
-            <RoleGate allow={['super_admin']}>
+            <RoleGate
+              allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}
+              module="tickets"
+            >
               <TicketTypesPage />
             </RoleGate>
           }
@@ -82,7 +97,10 @@ export function Dashboard({ onSignOut }) {
         <Route
           path="tickets/issue"
           element={
-            <RoleGate allow={['super_admin']}>
+            <RoleGate
+              allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}
+              module="tickets"
+            >
               <TicketIssuePage />
             </RoleGate>
           }
@@ -90,7 +108,10 @@ export function Dashboard({ onSignOut }) {
         <Route
           path="tickets/collections"
           element={
-            <RoleGate allow={['super_admin']}>
+            <RoleGate
+              allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}
+              module="tickets"
+            >
               <TicketCollectionsPage />
             </RoleGate>
           }
@@ -98,7 +119,10 @@ export function Dashboard({ onSignOut }) {
         <Route
           path="tickets/reports"
           element={
-            <RoleGate allow={['super_admin']}>
+            <RoleGate
+              allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}
+              module="tickets"
+            >
               <TicketReportsPage />
             </RoleGate>
           }
@@ -130,7 +154,10 @@ export function Dashboard({ onSignOut }) {
         <Route
           path="users/remote-access"
           element={
-            <RoleGate allow={['super_admin']}>
+            <RoleGate
+              allow={['super_admin', 'org_admin', 'org_staff', 'ticket_manager']}
+              module="remoteAccess"
+            >
               <RemoteAccessPanel />
             </RoleGate>
           }

@@ -9,12 +9,15 @@ import {
 } from '../services/remoteAccessService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
+import { requireOrgModule } from '../middleware/requireOrgModule.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
 
 export const remoteAccessRouter = express.Router();
 
-/** Platform-only: organisation vendors do not manage remote-access subscriptions. */
-remoteAccessRouter.use(requireRoles('super_admin'));
+remoteAccessRouter.use(
+  requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager')
+);
+remoteAccessRouter.use(requireOrgModule('remoteAccess'));
 
 remoteAccessRouter.get(
   '/',

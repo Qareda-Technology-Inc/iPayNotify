@@ -5,6 +5,7 @@ import { publicFetch } from '../api.js';
 import { usePortalContext, getPortalSlugFromLocation } from './usePortalContext.js';
 import { DraftCheckoutPrompt } from './DraftCheckoutPrompt.jsx';
 import { HubtelCheckout } from './HubtelCheckout.jsx';
+import { PortalBrandHeader } from './PortalBrandHeader.jsx';
 
 function DetailRow({ label, children }) {
   return (
@@ -169,20 +170,18 @@ export function RenewPage() {
           if (ref) navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`);
         }}
       />
-      <h1 className="text-xl font-semibold text-white">Renew service</h1>
-      {step === 'lookup' ? (
-        <p className="mt-2 text-sm text-slate-400">
-          Renew online with your <span className="text-slate-200">renew ID</span> or registered
-          phone
-          {siteReady ? (
-            <>
-              {' '}
-              — or your PPPoE username for <span className="text-slate-200">{ctx.router.name}</span>
-            </>
-          ) : null}
-          .
-        </p>
-      ) : null}
+      <PortalBrandHeader
+        branding={ctx?.branding}
+        routerName={siteReady ? ctx?.router?.name : ''}
+        title="Renew service"
+        subtitle={
+          step === 'lookup'
+            ? siteReady
+              ? 'Use your renew ID, registered phone, or PPPoE username at this site.'
+              : 'Use your renew ID or registered phone to renew online.'
+            : ''
+        }
+      />
 
       {ctxLoading && (
         <p className="mt-2 text-sm text-slate-500">Checking site link…</p>

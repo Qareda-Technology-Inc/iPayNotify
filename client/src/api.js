@@ -66,6 +66,23 @@ export async function apiFetch(path, options = {}) {
   return data;
 }
 
+/** Authenticated download (CSV etc.) — returns a Blob. */
+export async function apiDownload(path) {
+  const token = getToken();
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const acting = getActingOrganizationId();
+  if (acting) headers['X-Organization-Id'] = acting;
+  const url = resolveApiUrl(path);
+  const res = await fetchWithApiDiagnostics(url, { cache: 'no-store', headers });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || res.statusText || 'Download failed');
+  }
+  return res.blob();
+}
+
 export async function publicFetch(path, options = {}) {
   const url = resolveApiUrl(path);
   const res = await fetchWithApiDiagnostics(url, {

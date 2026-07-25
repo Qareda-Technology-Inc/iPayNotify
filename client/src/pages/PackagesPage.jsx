@@ -22,7 +22,7 @@ export function PackagesPage() {
   const [smsModal, setSmsModal] = useState(null);
   const [smsDraft, setSmsDraft] = useState('');
   const [smsSaving, setSmsSaving] = useState(false);
-  const [isSuper, setIsSuper] = useState(false);
+  const [canRemoteAccess, setCanRemoteAccess] = useState(false);
 
   const load = useCallback(() => {
     setErr('');
@@ -34,8 +34,11 @@ export function PackagesPage() {
   useEffect(() => {
     load();
     apiFetch('/api/auth/me')
-      .then((m) => setIsSuper(m?.admin?.role === 'super_admin'))
-      .catch(() => setIsSuper(false));
+      .then((m) => {
+        const isSuper = m?.admin?.role === 'super_admin';
+        setCanRemoteAccess(isSuper || Boolean(m?.modules?.remoteAccess));
+      })
+      .catch(() => setCanRemoteAccess(false));
   }, [load]);
 
   async function createPackage(e) {
@@ -110,7 +113,7 @@ export function PackagesPage() {
       <div>
         <h2 className="text-lg font-semibold text-white">Packages</h2>
         <p className="mt-1 text-sm text-slate-500">
-          {isSuper
+          {canRemoteAccess
             ? 'Hotspot, PPPoE, and remote access billing templates.'
             : 'Hotspot and PPPoE billing templates for your customers.'}
         </p>
@@ -195,10 +198,10 @@ export function PackagesPage() {
           >
             <option value="hotspot">Hotspot</option>
             <option value="pppoe">PPPoE</option>
-            {isSuper ? <option value="remote_access">Remote access</option> : null}
+            {canRemoteAccess ? <option value="remote_access">Remote access</option> : null}
           </select>
           <span className="mt-1 block text-xs text-slate-500">
-            {isSuper ? (
+            {canRemoteAccess ? (
               <>
                 PPPoE → <strong className="text-slate-400">Users → PPPoE</strong>. Remote access →{' '}
                 <strong className="text-slate-400">Users → Remote access</strong>. Hotspot → public buy

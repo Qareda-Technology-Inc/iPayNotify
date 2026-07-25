@@ -96,6 +96,70 @@ export function SuperAdminOrganizationsPage() {
     }
   }
 
+  async function patchModule(org, key, enabled) {
+    setErr('');
+    setInfo('');
+    try {
+      await apiFetch(`/api/super-admin/organizations/${org._id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          modules: {
+            tickets: Boolean(org.modules?.tickets),
+            remoteAccess: Boolean(org.modules?.remoteAccess),
+            [key]: enabled,
+          },
+        }),
+      });
+      await load();
+    } catch (e) {
+      setErr(e.message || 'Could not update modules');
+    }
+  }
+
+  async function editLimits(org) {
+    const cur = org.limits || {};
+    const routers = window.prompt(
+      'Max routers (blank = unlimited)',
+      cur.maxRouters != null ? String(cur.maxRouters) : ''
+    );
+    if (routers === null) return;
+    const admins = window.prompt(
+      'Max team members (blank = unlimited)',
+      cur.maxAdmins != null ? String(cur.maxAdmins) : ''
+    );
+    if (admins === null) return;
+    const sms = window.prompt(
+      'Max SMS per month (blank = unlimited)',
+      cur.maxSmsPerMonth != null ? String(cur.maxSmsPerMonth) : ''
+    );
+    if (sms === null) return;
+    setErr('');
+    setInfo('');
+    const parse = (v) => {
+      const t = String(v).trim();
+      if (t === '') return null;
+      const n = Math.round(Number(t));
+      if (!Number.isFinite(n) || n < 0) throw new Error('Limits must be non-negative numbers');
+      return n;
+    };
+    try {
+      await apiFetch(`/api/super-admin/organizations/${org._id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          limits: {
+            maxRouters: parse(routers),
+            maxAdmins: parse(admins),
+            maxSmsPerMonth: parse(sms),
+          },
+        }),
+      });
+      setInfo(`Limits updated for ${org.name}`);
+      await load();
+    } catch (e) {
+      setErr(e.message || 'Could not update limits');
+    }
+  }
+
   async function editFee(org) {
     const defaultPct =
       org.billing?.defaultPlatformFeePercent != null
@@ -149,8 +213,8 @@ export function SuperAdminOrganizationsPage() {
       <div>
         <h1 className="text-2xl font-semibold text-white">Organisations</h1>
         <p className="mt-1 text-sm text-slate-400">
-          Create tenants and open their billing dashboard using <strong className="text-slate-300">Open dashboard</strong>{' '}
-          (sets which organisation normal admin APIs use for this browser).
+          Create tenants, enable optional modules, and open their dashboard with{' '}
+          <strong className="text-slate-300">Open dashboard</strong>.
         </p>
       </div>
 
@@ -237,56 +301,96 @@ export function SuperAdminOrganizationsPage() {
         ) : (
           <ul className="mt-4 divide-y divide-slate-800">
             {rows.map((o) => (
-              <li key={o._id} className="flex flex-wrap items-center justify-between gap-3 py-4">
-                <div>
-                  <p className="font-medium text-white">{o.name}</p>
-                  <p className="font-mono text-xs text-slate-500">{o.slug}</p>
-                  <p className="mt-1 text-xs text-emerald-300/90">
-                    Wallet GHS {((Number(o.walletBalanceCents) || 0) / 100).toFixed(2)}
-                    {o.billing?.platformFeePercent != null
-                      ? ` · fee ${o.billing.platformFeePercent}%`
-                      : ''}
-                  </p>
+              <li key={o._id} className="space-y-3 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-white">{o.name}</p>
+                    <p className="font-mono text-xs text-slate-500">{o.slug}</p>
+                    <p className="mt-1 text-xs text-emerald-300/90">
+                      Wallet GHS {((Number(o.walletBalanceCents) || 0) / 100).toFixed(2)}
+                      {o.billing?.platformFeePercent != null
+                        ? ` · fee ${o.billing.platformFeePercent}%`
+                        : ''}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Usage: routers {o.usage?.routers ?? 0}
+                      {o.limits?.maxRouters != null ? `/${o.limits.maxRouters}` : ''} · team{' '}
+                      {o.usage?.admins ?? 0}
+                      {o.limits?.maxAdmins != null ? `/${o.limits.maxAdmins}` : ''} · SMS{' '}
+                      {o.usage?.smsThisMonth ?? 0}
+                      {o.limits?.maxSmsPerMonth != null ? `/${o.limits.maxSmsPerMonth}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={o.status || 'active'}
+                      onChange={(e) => patchStatus(o._id, e.target.value)}
+                      className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200"
+                    >
+                      {STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => openDashboardAsOrg(o)}
+                      className="rounded-lg border border-emerald-700/50 bg-emerald-950/40 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-950/70"
+                    >
+                      Open dashboard
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => editFee(o)}
+                      className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                    >
+                      Fee %
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => editLimits(o)}
+                      className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                    >
+                      Limits
+                    </button>
+                    <Link
+                      to={`/super/organizations/${o._id}/admins`}
+                      className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                    >
+                      Invite team
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => removeOrg(o._id)}
+                      className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-950/30"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    value={o.status || 'active'}
-                    onChange={(e) => patchStatus(o._id, e.target.value)}
-                    className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200"
-                  >
-                    {STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => openDashboardAsOrg(o)}
-                    className="rounded-lg border border-emerald-700/50 bg-emerald-950/40 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-950/70"
-                  >
-                    Open dashboard
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => editFee(o)}
-                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-                  >
-                    Fee %
-                  </button>
-                  <Link
-                    to={`/super/organizations/${o._id}/admins`}
-                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-                  >
-                    Invite team
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => removeOrg(o._id)}
-                    className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-950/30"
-                  >
-                    Delete
-                  </button>
+                <div className="flex flex-wrap gap-4 rounded-xl border border-slate-800/80 bg-slate-950/40 px-3 py-2.5">
+                  <p className="w-full text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Modules for this organisation
+                  </p>
+                  <label className="flex items-center gap-2 text-xs text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(o.modules?.tickets)}
+                      onChange={(e) => patchModule(o, 'tickets', e.target.checked)}
+                      className="rounded border-slate-600"
+                    />
+                    Ticket operations
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(o.modules?.remoteAccess)}
+                      onChange={(e) => patchModule(o, 'remoteAccess', e.target.checked)}
+                      className="rounded border-slate-600"
+                    />
+                    Remote access
+                  </label>
                 </div>
               </li>
             ))}

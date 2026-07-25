@@ -48,13 +48,18 @@ async function withOrgGate(routerDoc, match) {
   if (!organizationId) {
     return { resolved: false, reason: 'router_missing_org' };
   }
-  const org = await Organization.findById(organizationId).select('name slug status').lean();
+  const org = await Organization.findById(organizationId)
+    .select('name slug status billing')
+    .lean();
   if (!org) {
     return { resolved: false, reason: 'org_missing' };
   }
   if (org.status === 'suspended') {
     return { resolved: false, reason: 'org_suspended' };
   }
+  const brandName =
+    String(org.billing?.merchantDisplayName || '').trim() || String(org.name || '').trim();
+  const logoUrl = String(org.billing?.logoUrl || '').trim();
   return {
     resolved: true,
     match,
@@ -68,6 +73,10 @@ async function withOrgGate(routerDoc, match) {
       name: org.name,
       slug: org.slug,
       status: org.status,
+    },
+    branding: {
+      displayName: brandName,
+      logoUrl: /^https:\/\//i.test(logoUrl) ? logoUrl : '',
     },
   };
 }
