@@ -178,10 +178,17 @@ export function PppoePanel() {
       if (!matchesFilter(a, statusFilter)) return false;
       if (!q) return true;
       const secret = (a.secretName || '').toLowerCase();
+      const renewCode = (a.renewCode || '').toLowerCase();
       const email = (a.userId?.email || '').toLowerCase();
       const name = (a.userId?.fullName || '').toLowerCase();
       const phone = (a.userId?.phone || '').toLowerCase();
-      return secret.includes(q) || email.includes(q) || name.includes(q) || phone.includes(q);
+      return (
+        secret.includes(q) ||
+        renewCode.includes(q) ||
+        email.includes(q) ||
+        name.includes(q) ||
+        phone.includes(q)
+      );
     });
   }, [accounts, statusFilter, tableSearch]);
 
@@ -579,7 +586,7 @@ export function PppoePanel() {
             <IconSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
               type="search"
-              placeholder="Search secret, customer name, email, or phone…"
+              placeholder="Search renew ID, secret, customer name, email, or phone…"
               value={tableSearch}
               onChange={(e) => setTableSearch(e.target.value)}
               className="w-full rounded-xl border border-slate-700/80 bg-slate-950/80 py-2.5 pl-10 pr-4 text-sm text-slate-200 placeholder:text-slate-600 outline-none ring-orange-500/30 focus:border-orange-500/40 focus:ring-2"
@@ -592,10 +599,11 @@ export function PppoePanel() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-left text-sm">
+          <table className="w-full min-w-[1020px] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-800/80 text-xs font-semibold uppercase tracking-wider text-slate-500">
                 <th className="px-5 py-3.5">Secret</th>
+                <th className="px-5 py-3.5">Renew ID</th>
                 <th className="px-5 py-3.5">Customer</th>
                 <th className="px-5 py-3.5">Phone</th>
                 <th className="px-5 py-3.5">Package</th>
@@ -608,7 +616,7 @@ export function PppoePanel() {
             <tbody className="divide-y divide-slate-800/60">
               {filteredAccounts.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-16 text-center">
+                  <td colSpan={9} className="px-5 py-16 text-center">
                     <div className="mx-auto flex max-w-sm flex-col items-center">
                       <IconEmpty className="text-slate-600" />
                       <p className="mt-4 text-base font-medium text-slate-300">
@@ -656,6 +664,9 @@ export function PppoePanel() {
                   return (
                     <tr key={a._id} className="text-slate-300 transition hover:bg-slate-800/30">
                       <td className="px-5 py-3.5 font-mono text-sm text-orange-300/95">{a.secretName}</td>
+                      <td className="px-5 py-3.5 font-mono text-sm text-emerald-400/90">
+                        {a.renewCode || <span className="text-slate-600">—</span>}
+                      </td>
                       <td className="px-5 py-3.5 text-slate-400">
                         {a.userId?.fullName || a.userId?.email || (
                           <span className="text-slate-600">—</span>
@@ -890,7 +901,10 @@ export function PppoePanel() {
               <p className="text-sm text-slate-400">
                 Adds <strong className="text-slate-200">one billing period</strong> from the package
                 (from today if expired, otherwise from the current paid-until). Re-enables the line and syncs
-                MikroTik.
+                MikroTik. Online renew ID:{' '}
+                <span className="font-mono text-emerald-300/90">
+                  {renewAccount.renewCode || '—'}
+                </span>
               </p>
               <label className="block text-sm text-slate-300">
                 Package for this renewal

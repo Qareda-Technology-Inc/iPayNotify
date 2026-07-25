@@ -85,7 +85,7 @@ export function PaymentsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Payments</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Hubtel checkout and admin renewals recorded for this organisation.
+            Hubtel checkout (Qaretech settles). Fee and your net credit are shown for paid sales.
           </p>
         </div>
         <button
@@ -179,7 +179,7 @@ export function PaymentsPage() {
       )}
 
       <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/40">
-        <table className="w-full min-w-[720px] text-left text-sm">
+        <table className="w-full min-w-[880px] text-left text-sm">
           <thead className="border-b border-slate-800 bg-slate-950/80 text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-4 py-3">When</th>
@@ -187,20 +187,22 @@ export function PaymentsPage() {
               <th className="px-4 py-3">Type</th>
               <th className="px-4 py-3">Customer</th>
               <th className="px-4 py-3">Package</th>
-              <th className="px-4 py-3">Amount</th>
+              <th className="px-4 py-3">Gross</th>
+              <th className="px-4 py-3">Fee</th>
+              <th className="px-4 py-3">Your net</th>
               <th className="px-4 py-3">Reference</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/80">
             {loading && !data ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-slate-500">
+                <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
                   Loading…
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-slate-500">
+                <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
                   No payments match these filters.
                 </td>
               </tr>
@@ -225,6 +227,12 @@ export function PaymentsPage() {
                   <td className="px-4 py-3 text-xs text-slate-400">{t.packageName || '—'}</td>
                   <td className="whitespace-nowrap px-4 py-3 font-medium text-white">
                     {formatMoney(t.amountCents, t.currency)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-amber-200/90">
+                    {t.platformFeeCents != null ? formatMoney(t.platformFeeCents, t.currency) : '—'}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-emerald-300/90">
+                    {t.orgNetCents != null ? formatMoney(t.orgNetCents, t.currency) : '—'}
                   </td>
                   <td className="px-4 py-3 font-mono text-[11px] text-slate-500">
                     <div className="max-w-[140px] truncate" title={t.clientReference}>

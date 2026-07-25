@@ -7,11 +7,11 @@ export function SuperAdminOrgAdminsPage() {
   const [org, setOrg] = useState(null);
   const [admins, setAdmins] = useState([]);
   const [err, setErr] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(true);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
   const [role, setRole] = useState('org_admin');
   const [creating, setCreating] = useState(false);
 
@@ -51,6 +51,7 @@ export function SuperAdminOrgAdminsPage() {
 
   function openEdit(a) {
     setEditAdmin(a);
+    setEditFullName(a.fullName || '');
     setEditEmail(a.email || '');
     setEditPhone(a.phone || '');
     setEditPassword('');
@@ -65,28 +66,51 @@ export function SuperAdminOrgAdminsPage() {
     setEditPassword('');
   }
 
-  async function createAdmin(e) {
+  async function inviteAdmin(e) {
     e.preventDefault();
     setCreating(true);
     setErr('');
+    setInfo('');
     try {
-      const body = { fullName: fullName.trim(), email: email.trim(), password };
-      body.role = role;
+      const body = { fullName: fullName.trim(), email: email.trim(), role };
       if (phone.trim()) body.phone = phone.trim();
-      await apiFetch(`/api/super-admin/organizations/${orgId}/admins`, {
+      const created = await apiFetch(`/api/super-admin/organizations/${orgId}/admins`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
       setFullName('');
       setEmail('');
       setPhone('');
-      setPassword('');
       setRole('org_admin');
+      setInfo(
+        created?.emailSent
+          ? `Invite sent to ${created.email}`
+          : `Invite created for ${created.email}. Email was not sent (check SMTP); use Resend after SMTP is ready.`
+      );
       await load();
     } catch (e) {
-      setErr(e.message || 'Create failed');
+      setErr(e.message || 'Invite failed');
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function resendInvite(adminId) {
+    setErr('');
+    setInfo('');
+    try {
+      const r = await apiFetch(
+        `/api/super-admin/organizations/${orgId}/admins/${adminId}/resend-invite`,
+        { method: 'POST', body: JSON.stringify({}) }
+      );
+      setInfo(
+        r?.emailSent
+          ? `Invite re-sent to ${r.email}`
+          : `Invite refreshed for ${r.email}. Email was not sent (check SMTP).`
+      );
+      await load();
+    } catch (e) {
+      setErr(e.message || 'Resend failed');
     }
   }
 
@@ -155,14 +179,19 @@ export function SuperAdminOrgAdminsPage() {
       {err && (
         <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">{err}</p>
       )}
+      {info && (
+        <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          {info}
+        </p>
+      )}
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
         <h2 className="text-lg font-medium text-white">Invite administrator</h2>
         <p className="mt-1 text-xs text-slate-500">
-          Create organisation admins, ticket managers, or organisation staff for this organisation. Add a Ghana phone for
-          SMS login codes when verification is enabled.
+          Sends an email invite so they set their own password. Add a Ghana phone for SMS login codes when verification
+          is enabled.
         </p>
-        <form onSubmit={createAdmin} className="mt-4 space-y-4">
+        <form onSubmit={inviteAdmin} className="mt-4 space-y-4">
           <label className="block text-sm text-slate-300">
             Full name
             <input
@@ -206,23 +235,12 @@ export function SuperAdminOrgAdminsPage() {
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
             />
           </label>
-          <label className="block text-sm text-slate-300">
-            Password (min 8 characters)
-            <input
-              type="password"
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-            />
-          </label>
           <button
             type="submit"
             disabled={creating || !org}
             className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
           >
-            {creating ? 'Creating…' : 'Create admin'}
+            {creating ? 'Sending invite…' : 'Send invite'}
           </button>
         </form>
       </section>
@@ -250,6 +268,15 @@ export function SuperAdminOrgAdminsPage() {
                           ? 'Org staff'
                           : 'Org admin'}
                     </span>
+                    <span
+                      className={`ml-2 rounded px-1.5 py-0.5 text-[10px] uppercase ${
+                        a.status === 'invited'
+                          ? 'bg-amber-500/15 text-amber-200'
+                          : 'bg-emerald-500/15 text-emerald-200'
+                      }`}
+                    >
+                      {a.status === 'invited' ? 'Invited' : 'Active'}
+                    </span>
                   </p>
                   {a.phone ? (
                     <p className="mt-0.5 font-mono text-xs text-slate-500">{a.phone}</p>
@@ -258,6 +285,15 @@ export function SuperAdminOrgAdminsPage() {
                   )}
                 </div>
                 <div className="flex shrink-0 gap-2">
+                  {a.status === 'invited' && (
+                    <button
+                      type="button"
+                      onClick={() => resendInvite(a._id)}
+                      className="rounded-lg border border-amber-500/40 px-2 py-1 text-xs text-amber-200 hover:bg-amber-950/30"
+                    >
+                      Resend
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => openEdit(a)}

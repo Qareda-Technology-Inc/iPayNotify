@@ -2,6 +2,8 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AdminShell } from '../layout/AdminShell.jsx';
 import { DashboardHome } from '../pages/DashboardHome.jsx';
 import { PaymentsPage } from '../pages/PaymentsPage.jsx';
+import { WalletPage } from '../pages/WalletPage.jsx';
+import { SuperAdminWithdrawalsPage } from '../pages/SuperAdminWithdrawalsPage.jsx';
 import { PackagesPage } from '../pages/PackagesPage.jsx';
 import { HotspotPanel } from '../components/HotspotPanel.jsx';
 import { PppoePanel } from '../components/PppoePanel.jsx';
@@ -142,6 +144,14 @@ export function Dashboard({ onSignOut }) {
           }
         />
         <Route
+          path="finance/wallet"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
+              <WalletPage />
+            </RoleGate>
+          }
+        />
+        <Route
           path="finance/messages"
           element={
             <RoleGate allow={['super_admin', 'org_admin', 'org_staff']}>
@@ -178,6 +188,14 @@ export function Dashboard({ onSignOut }) {
           element={
             <SuperAdminGate>
               <SuperAdminEmailTemplatesPage />
+            </SuperAdminGate>
+          }
+        />
+        <Route
+          path="super/withdrawals"
+          element={
+            <SuperAdminGate>
+              <SuperAdminWithdrawalsPage />
             </SuperAdminGate>
           }
         />

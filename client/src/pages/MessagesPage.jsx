@@ -362,7 +362,8 @@ export function MessagesPage() {
           <code className="text-slate-500">EXPIRY_REMINDER_SMS_ENABLED=true</code>{' '}
           (see <code className="text-slate-500">EXPIRY_REMINDER_DAYS</code>,{' '}
           <code className="text-slate-500">EXPIRY_REMINDER_SMS_CRON</code>). Template placeholders include{' '}
-          <code className="text-slate-400">{'{{brand}} {{name}} {{paidUntil}} {{package}} {{secret}} {{service_type}}'}</code>.
+          <code className="text-slate-400">{'{{brand}} {{name}} {{paidUntil}} {{package}} {{secret}} {{renew_code}} {{renew_url}} {{service_type}}'}</code>
+          . Broadcasts personalize <code className="text-slate-400">{'{{renew_code}}'}</code> per PPPoE customer.
           Remote-only and manual phone lists cannot be combined with a site filter. Anonymous hotspot buyers (no user
           account) are never in segment lists.
         </p>

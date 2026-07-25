@@ -60,11 +60,13 @@ function headerTitleForPath(pathname) {
     '/finance/packages': 'Packages',
     '/hotspot': 'Hotspot vouchers',
     '/finance/payments': 'Payments',
+    '/finance/wallet': 'Wallet',
     '/finance/messages': 'Messages & SMS',
     '/devices/mikrotik': 'MikroTik routers',
     '/org/settings': 'Organisation',
     '/super/organizations': 'All organisations',
     '/super/email-templates': 'Email & templates',
+    '/super/withdrawals': 'Vendor withdrawals',
   };
   if (exact[p]) return exact[p];
   if (p.startsWith('/super/organizations/') && p.includes('/admins')) return 'Organisation admins';
@@ -188,7 +190,7 @@ export function AdminShell({ onSignOut }) {
             <>
               <NavGroup title="Tenant">
                 <SideLink to="/">Dashboard</SideLink>
-                <SideLink to="/org/settings">Organisation &amp; Hubtel</SideLink>
+                <SideLink to="/org/settings">Organisation</SideLink>
               </NavGroup>
               <NavGroup title="Customers &amp; access">
                 <SideLink to="/users/customers" badge={counts?.customers}>
@@ -212,6 +214,7 @@ export function AdminShell({ onSignOut }) {
                 <SideLink to="/finance/payments" badge={counts?.paymentsPending}>
                   Payments
                 </SideLink>
+                <SideLink to="/finance/wallet">Wallet</SideLink>
                 <SideLink to="/finance/messages">Messages / SMS</SideLink>
               </NavGroup>
               <NavGroup title="Network">
@@ -242,6 +245,9 @@ export function AdminShell({ onSignOut }) {
             <NavGroup title="Platform (super admin)">
               <SideLink to="/super/organizations" accent="amber">
                 All organisations
+              </SideLink>
+              <SideLink to="/super/withdrawals" accent="amber">
+                Vendor withdrawals
               </SideLink>
               <SideLink to="/super/email-templates" accent="amber">
                 Email &amp; templates

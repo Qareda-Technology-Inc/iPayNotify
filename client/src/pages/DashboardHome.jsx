@@ -61,7 +61,12 @@ export function DashboardHome() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard
+          label="Wallet available"
+          value={formatCedi(data.walletBalanceCents)}
+          sub="Finance → Wallet to withdraw"
+        />
         <StatCard label="Today's revenue" value={formatCedi(revenueCents.today)} />
         <StatCard label="Weekly revenue" value={formatCedi(revenueCents.week)} />
         <StatCard label="Monthly revenue" value={formatCedi(revenueCents.month)} />

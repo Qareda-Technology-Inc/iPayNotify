@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatRemainingFromPaidUntil } from '../utils/remainingTime.js';
 import { publicFetch } from '../api.js';
-import { usePortalContext } from './usePortalContext.js';
+import { usePortalContext, getPortalSlugFromLocation } from './usePortalContext.js';
 import { DraftCheckoutPrompt } from './DraftCheckoutPrompt.jsx';
 import { HubtelCheckout } from './HubtelCheckout.jsx';
 
@@ -15,57 +15,75 @@ function DetailRow({ label, children }) {
   );
 }
 
+/**
+ * Online renew: platform-unique renew ID (or registered phone).
+ * On-site / captive (?r=): PPPoE username still works for that venue only.
+ */
 export function RenewPage() {
   const navigate = useNavigate();
   const { ctx, loading: ctxLoading, error: ctxError } = usePortalContext();
-  const [secretName, setSecretName] = useState('');
-  const [routerId, setRouterId] = useState('');
-  const [hintRouterId, setHintRouterId] = useState('');
-  const [routers, setRouters] = useState([]);
+  const [lookupMode, setLookupMode] = useState('renewCode');
+  const [lookupValue, setLookupValue] = useState('');
   const [quote, setQuote] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState('lookup');
   const [draftCheckout, setDraftCheckout] = useState(null);
   const [hubtelSession, setHubtelSession] = useState(null);
+  /** Remember how we found the quote so checkout uses the same key. */
+  const [lookupPayload, setLookupPayload] = useState(null);
 
-  useEffect(() => {
-    if (ctxLoading || !ctx?.resolved || !ctx.router?.id) return;
-    const id = ctx.router.id;
-    setHintRouterId(id);
-    setRouterId(id);
-  }, [ctx, ctxLoading]);
+  const siteReady = Boolean(ctx?.resolved && ctx.router?.id);
 
-  function applyQuote(data) {
+  function buildLookupBody(value) {
+    const v = String(value || '').trim();
+    if (!v) return null;
+    if (lookupMode === 'phone') {
+      return { phone: v };
+    }
+    if (lookupMode === 'secretName') {
+      return {
+        secretName: v,
+        portalSlug: getPortalSlugFromLocation() || undefined,
+      };
+    }
+    return { renewCode: v };
+  }
+
+  function applyQuote(data, body) {
     setQuote(data);
+    setLookupPayload(body);
     setStep('review');
   }
 
   async function doQuote(e) {
     e.preventDefault();
     setError('');
+    if (lookupMode === 'secretName' && !siteReady) {
+      setError(
+        'Site not detected for username lookup. Use your renew ID or registered phone instead.'
+      );
+      return;
+    }
+    const body = buildLookupBody(lookupValue);
+    if (!body) {
+      setError('Enter your renew ID, phone, or PPPoE username');
+      return;
+    }
     setLoading(true);
     setQuote(null);
     try {
       const data = await publicFetch('/api/public/renew/quote', {
         method: 'POST',
-        body: JSON.stringify({
-          secretName: secretName.trim(),
-          routerId: hintRouterId || routerId || undefined,
-        }),
+        body: JSON.stringify(body),
       });
-      if (data.needRouterSelection) {
-        setRouters(data.routers || []);
-        setStep('pickRouter');
-        return;
-      }
       if (data.needsPrice) {
         setError(
           'This line has no renewal price. Ask your ISP to link a PPPoE package with a price.'
         );
         return;
       }
-      applyQuote(data);
+      applyQuote(data, body);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -81,8 +99,7 @@ export function RenewPage() {
       const data = await publicFetch('/api/public/renew/checkout', {
         method: 'POST',
         body: JSON.stringify({
-          secretName: secretName.trim(),
-          routerId: quote?.routerId || hintRouterId || routerId || undefined,
+          ...(lookupPayload || {}),
           customerMsisdn: quote?.customerPhone || undefined,
           customerName: quote?.customerName || undefined,
         }),
@@ -106,6 +123,26 @@ export function RenewPage() {
       setLoading(false);
     }
   }
+
+  const modes = [
+    { id: 'renewCode', label: 'Renew ID' },
+    { id: 'phone', label: 'Phone' },
+    ...(siteReady ? [{ id: 'secretName', label: 'PPPoE username' }] : []),
+  ];
+
+  const inputLabel =
+    lookupMode === 'phone'
+      ? 'Registered phone'
+      : lookupMode === 'secretName'
+        ? 'PPPoE username'
+        : 'Renew ID';
+
+  const inputPlaceholder =
+    lookupMode === 'phone'
+      ? 'e.g. 0244123456'
+      : lookupMode === 'secretName'
+        ? 'Your PPP login name'
+        : 'e.g. QF7K2M9P';
 
   return (
     <div className="mx-auto max-w-md px-4 py-10">
@@ -133,27 +170,68 @@ export function RenewPage() {
         }}
       />
       <h1 className="text-xl font-semibold text-white">Renew service</h1>
-      {step === 'lookup' && (
-        <p className="mt-2 text-sm text-slate-400">Enter your PPPoE username to continue.</p>
+      {step === 'lookup' ? (
+        <p className="mt-2 text-sm text-slate-400">
+          Renew online with your <span className="text-slate-200">renew ID</span> or registered
+          phone
+          {siteReady ? (
+            <>
+              {' '}
+              — or your PPPoE username for <span className="text-slate-200">{ctx.router.name}</span>
+            </>
+          ) : null}
+          .
+        </p>
+      ) : null}
+
+      {ctxLoading && (
+        <p className="mt-2 text-sm text-slate-500">Checking site link…</p>
       )}
 
-      {ctxError && (
-        <p className="mt-4 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-          {ctxError}
+      {ctxError && !siteReady && (
+        <p className="mt-4 rounded border border-slate-700/80 bg-slate-900/50 px-3 py-2 text-sm text-slate-400">
+          {ctxError} You can still renew with your renew ID or phone.
         </p>
       )}
 
       {step === 'lookup' && (
         <form onSubmit={doQuote} className="mt-8 space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {modes.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => {
+                  setLookupMode(m.id);
+                  setLookupValue('');
+                  setError('');
+                }}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+                  lookupMode === m.id
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
           <label className="block text-sm">
-            <span className="text-slate-300">PPPoE username</span>
+            <span className="text-slate-300">{inputLabel}</span>
             <input
               required
-              value={secretName}
-              onChange={(e) => setSecretName(e.target.value)}
+              value={lookupValue}
+              onChange={(e) => setLookupValue(e.target.value)}
+              placeholder={inputPlaceholder}
+              autoCapitalize={lookupMode === 'renewCode' ? 'characters' : 'off'}
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 font-mono outline-none ring-emerald-500/40 focus:ring-2"
             />
           </label>
+          {lookupMode === 'renewCode' && (
+            <p className="text-xs text-slate-500">
+              Your renew ID looks like QF7K2M9P — ask your ISP or check your reminder SMS.
+            </p>
+          )}
           {error && (
             <p className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
               {error}
@@ -169,67 +247,22 @@ export function RenewPage() {
         </form>
       )}
 
-      {step === 'pickRouter' && (
-        <div className="mt-8 space-y-4">
-          <p className="text-sm text-slate-400">Choose your site / router:</p>
-          <select
-            required
-            value={routerId}
-            onChange={(e) => setRouterId(e.target.value)}
-            className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5"
-          >
-            <option value="">Select…</option>
-            {routers.map((r) => (
-              <option key={r._id || r.id} value={r._id || r.id}>
-                {r.name} ({r.host})
-              </option>
-            ))}
-          </select>
-          {error && (
-            <p className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {error}
-            </p>
-          )}
-          <button
-            type="button"
-            disabled={loading || !routerId}
-            onClick={async () => {
-              setError('');
-              setLoading(true);
-              try {
-                const data = await publicFetch('/api/public/renew/quote', {
-                  method: 'POST',
-                  body: JSON.stringify({
-                    secretName: secretName.trim(),
-                    routerId,
-                  }),
-                });
-                if (data.needsPrice) {
-                  setError('No renewal price configured for this account.');
-                  return;
-                }
-                applyQuote(data);
-              } catch (err) {
-                setError(err.message);
-              } finally {
-                setLoading(false);
-              }
-            }}
-            className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            {loading ? 'Looking up…' : 'Continue'}
-          </button>
-        </div>
-      )}
-
       {step === 'review' && quote && (
         <form onSubmit={doCheckout} className="mt-8 space-y-4">
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-1 text-sm">
+            {quote.renewCode ? (
+              <DetailRow label="Renew ID">
+                <span className="font-mono">{quote.renewCode}</span>
+              </DetailRow>
+            ) : null}
             <DetailRow label="PPPoE username">
               <span className="font-mono">{quote.secretName}</span>
             </DetailRow>
             {quote.customerName ? (
               <DetailRow label="Customer">{quote.customerName}</DetailRow>
+            ) : null}
+            {quote.routerName ? (
+              <DetailRow label="Site">{quote.routerName}</DetailRow>
             ) : null}
             <DetailRow label="Package">{quote.packageName}</DetailRow>
             <DetailRow label="Amount">
@@ -266,6 +299,7 @@ export function RenewPage() {
             onClick={() => {
               setStep('lookup');
               setQuote(null);
+              setLookupPayload(null);
               setError('');
             }}
             className="w-full text-sm text-slate-500"

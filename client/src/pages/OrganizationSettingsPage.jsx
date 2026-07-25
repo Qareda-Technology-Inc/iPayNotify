@@ -28,12 +28,12 @@ function billingFromOrg(o) {
   return {
     merchantDisplayName: String(b.merchantDisplayName || ''),
     smsBrandName: String(b.smsBrandName || ''),
-    useCustomHubtel: Boolean(b.useCustomHubtel),
-    hubtelMerchantAccount: String(b.hubtelMerchantAccount || ''),
-    hubtelClientId: String(b.hubtelClientId || ''),
-    hubtelClientSecret: '',
-    hubtelCallbackUrl: String(b.hubtelCallbackUrl || ''),
-    hubtelClientSecretSet: Boolean(b.hubtelClientSecretSet),
+    platformFeePercent: b.platformFeePercent != null ? Number(b.platformFeePercent) : null,
+    platformFeeBps: b.platformFeeBps,
+    defaultPlatformFeePercent:
+      b.defaultPlatformFeePercent != null ? Number(b.defaultPlatformFeePercent) : null,
+    payoutMomoNumber: String(b.payoutMomoNumber || ''),
+    payoutNote: String(b.payoutNote || ''),
   };
 }
 
@@ -170,14 +170,9 @@ export function OrganizationSettingsPage() {
       const billing = {
         merchantDisplayName: bill.merchantDisplayName.trim(),
         smsBrandName: bill.smsBrandName.trim(),
-        useCustomHubtel: bill.useCustomHubtel,
-        hubtelMerchantAccount: bill.hubtelMerchantAccount.trim(),
-        hubtelClientId: bill.hubtelClientId.trim(),
-        hubtelCallbackUrl: bill.hubtelCallbackUrl.trim(),
+        payoutMomoNumber: bill.payoutMomoNumber.trim(),
+        payoutNote: bill.payoutNote.trim(),
       };
-      if (bill.hubtelClientSecret.trim()) {
-        billing.hubtelClientSecret = bill.hubtelClientSecret.trim();
-      }
       body.billing = billing;
 
       const updated = await apiFetch('/api/organization', {
@@ -223,8 +218,8 @@ export function OrganizationSettingsPage() {
           Organisation
         </h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-400">
-          Tenant profile, <strong className="text-slate-300">Hubtel &amp; SMS branding</strong> for this organisation, and
-          customer links. Slug and account status: super admin only.
+          Tenant profile, SMS branding, and payout destination. Customer payments settle via{' '}
+          <strong className="text-slate-300">Qaretech Hubtel</strong>; your wallet is sales minus platform fee.
         </p>
       </div>
 
@@ -281,11 +276,23 @@ export function OrganizationSettingsPage() {
         </fieldset>
 
         <fieldset className="space-y-4 border-t border-slate-800 pt-8">
-          <legend className="text-sm font-semibold text-white">Payments &amp; SMS branding</legend>
+          <legend className="text-sm font-semibold text-white">Branding &amp; payouts</legend>
           <p className="text-xs text-slate-500">
-            <strong className="text-slate-400">Merchant name</strong> appears on Hubtel checkout descriptions.{' '}
-            <strong className="text-slate-400">SMS brand</strong> is used when a router has no site-specific SMS brand.
-            Per-router overrides still win in Messages and payment SMS.
+            Wallet balance:{' '}
+            <strong className="text-emerald-300">
+              GHS {((Number(org.walletBalanceCents) || 0) / 100).toFixed(2)}
+            </strong>
+            {' · '}
+            Platform fee:{' '}
+            <strong className="text-slate-300">
+              {bill.platformFeePercent != null ? `${bill.platformFeePercent}%` : '—'}
+            </strong>
+            {bill.platformFeeBps == null && bill.defaultPlatformFeePercent != null
+              ? ' (platform default)'
+              : bill.platformFeeBps != null
+                ? ' (org override)'
+                : ''}
+            . Manage withdrawals under Finance → Wallet.
           </p>
           <label className="block text-sm text-slate-300">
             Merchant display name
@@ -305,63 +312,24 @@ export function OrganizationSettingsPage() {
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
             />
           </label>
-
-          <label className="flex items-start gap-3 text-sm text-slate-300">
+          <label className="block text-sm text-slate-300">
+            Payout MoMo number
             <input
-              type="checkbox"
-              checked={bill.useCustomHubtel}
-              onChange={(e) => setBill((b) => ({ ...b, useCustomHubtel: e.target.checked }))}
-              className="mt-1"
+              value={bill.payoutMomoNumber}
+              onChange={(e) => setBill((b) => ({ ...b, payoutMomoNumber: e.target.value }))}
+              placeholder="0244…"
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
             />
-            <span>
-              <strong className="text-white">Use organisation Hubtel credentials</strong>
-              <span className="mt-1 block text-xs font-normal text-slate-500">
-                When off, the platform <span className="font-mono">HUBTEL_*</span> environment keys are used. When on,
-                fill merchant account, client ID, and client secret from your Hubtel business dashboard.
-              </span>
-            </span>
           </label>
-
-          {bill.useCustomHubtel && (
-            <div className="ml-7 space-y-3 rounded-xl border border-emerald-500/25 bg-emerald-950/15 p-4">
-              <label className="block text-xs font-medium uppercase tracking-wide text-emerald-200/90">
-                Merchant account number
-                <input
-                  value={bill.hubtelMerchantAccount}
-                  onChange={(e) => setBill((b) => ({ ...b, hubtelMerchantAccount: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
-                />
-              </label>
-              <label className="block text-xs font-medium uppercase tracking-wide text-emerald-200/90">
-                Client ID
-                <input
-                  value={bill.hubtelClientId}
-                  onChange={(e) => setBill((b) => ({ ...b, hubtelClientId: e.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
-                />
-              </label>
-              <label className="block text-xs font-medium uppercase tracking-wide text-emerald-200/90">
-                Client secret
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={bill.hubtelClientSecret}
-                  onChange={(e) => setBill((b) => ({ ...b, hubtelClientSecret: e.target.value }))}
-                  placeholder={bill.hubtelClientSecretSet ? 'Leave blank to keep saved secret' : 'Required'}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
-                />
-              </label>
-              <label className="block text-xs font-medium uppercase tracking-wide text-emerald-200/90">
-                Callback URL (optional if server has HUBTEL_CALLBACK_URL)
-                <input
-                  value={bill.hubtelCallbackUrl}
-                  onChange={(e) => setBill((b) => ({ ...b, hubtelCallbackUrl: e.target.value }))}
-                  placeholder="https://your-billing-host/api/payments/hubtel/callback"
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
-                />
-              </label>
-            </div>
-          )}
+          <label className="block text-sm text-slate-300">
+            Payout note
+            <input
+              value={bill.payoutNote}
+              onChange={(e) => setBill((b) => ({ ...b, payoutNote: e.target.value }))}
+              placeholder="Account name / bank details"
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white"
+            />
+          </label>
         </fieldset>
 
         <button

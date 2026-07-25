@@ -9,17 +9,26 @@ export function SuperAdminOrganizationsPage() {
   const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [creating, setCreating] = useState(false);
+  const [defaultFeePercent, setDefaultFeePercent] = useState('5');
+  const [savingFee, setSavingFee] = useState(false);
 
   const load = useCallback(async () => {
     setErr('');
     setLoading(true);
     try {
-      const list = await apiFetch('/api/super-admin/organizations');
+      const [list, settings] = await Promise.all([
+        apiFetch('/api/super-admin/organizations'),
+        apiFetch('/api/super-admin/platform-settings'),
+      ]);
       setRows(Array.isArray(list) ? list : []);
+      if (settings?.defaultPlatformFeePercent != null) {
+        setDefaultFeePercent(String(settings.defaultPlatformFeePercent));
+      }
     } catch (e) {
       setErr(e.message || 'Failed to load organisations');
       setRows([]);
@@ -31,6 +40,26 @@ export function SuperAdminOrganizationsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  async function saveDefaultFee(e) {
+    e.preventDefault();
+    setSavingFee(true);
+    setErr('');
+    setInfo('');
+    try {
+      const updated = await apiFetch('/api/super-admin/platform-settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ defaultPlatformFeePercent: Number(defaultFeePercent) }),
+      });
+      setDefaultFeePercent(String(updated.defaultPlatformFeePercent));
+      setInfo(`Default platform fee saved: ${updated.defaultPlatformFeePercent}%`);
+      await load();
+    } catch (e2) {
+      setErr(e2.message || 'Could not save platform fee');
+    } finally {
+      setSavingFee(false);
+    }
+  }
 
   async function createOrg(e) {
     e.preventDefault();
@@ -67,6 +96,38 @@ export function SuperAdminOrganizationsPage() {
     }
   }
 
+  async function editFee(org) {
+    const defaultPct =
+      org.billing?.defaultPlatformFeePercent != null
+        ? org.billing.defaultPlatformFeePercent
+        : defaultFeePercent;
+    const current =
+      org.billing?.platformFeeBps != null
+        ? String(org.billing.platformFeePercent)
+        : '';
+    const raw = window.prompt(
+      `Platform fee % for this organisation (blank = platform default ${defaultPct}%)`,
+      current
+    );
+    if (raw === null) return;
+    setErr('');
+    setInfo('');
+    try {
+      const trimmed = String(raw).trim();
+      const body =
+        trimmed === ''
+          ? { platformFeeBps: null }
+          : { platformFeeBps: Math.round(Number(trimmed) * 100) };
+      await apiFetch(`/api/super-admin/organizations/${org._id}/billing`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      await load();
+    } catch (e) {
+      setErr(e.message || 'Fee update failed');
+    }
+  }
+
   async function removeOrg(id) {
     if (!window.confirm('Delete this organisation? Routers and org admins must be removed first.')) return;
     setErr('');
@@ -96,6 +157,41 @@ export function SuperAdminOrganizationsPage() {
       {err && (
         <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">{err}</p>
       )}
+      {info && (
+        <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          {info}
+        </p>
+      )}
+
+      <section className="rounded-2xl border border-amber-500/25 bg-amber-950/15 p-6">
+        <h2 className="text-lg font-medium text-white">Default platform fee</h2>
+        <p className="mt-1 text-xs text-slate-400">
+          Stored in the database. Applied to every organisation unless you set a per-org override with{' '}
+          <strong className="text-slate-300">Fee %</strong>.
+        </p>
+        <form onSubmit={saveDefaultFee} className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="block text-sm text-slate-300">
+            Fee %
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              required
+              value={defaultFeePercent}
+              onChange={(e) => setDefaultFeePercent(e.target.value)}
+              className="mt-1 w-36 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={savingFee}
+            className="rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+          >
+            {savingFee ? 'Saving…' : 'Save default fee'}
+          </button>
+        </form>
+      </section>
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
         <h2 className="text-lg font-medium text-white">New organisation</h2>
@@ -145,6 +241,12 @@ export function SuperAdminOrganizationsPage() {
                 <div>
                   <p className="font-medium text-white">{o.name}</p>
                   <p className="font-mono text-xs text-slate-500">{o.slug}</p>
+                  <p className="mt-1 text-xs text-emerald-300/90">
+                    Wallet GHS {((Number(o.walletBalanceCents) || 0) / 100).toFixed(2)}
+                    {o.billing?.platformFeePercent != null
+                      ? ` · fee ${o.billing.platformFeePercent}%`
+                      : ''}
+                  </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <select
@@ -164,6 +266,13 @@ export function SuperAdminOrganizationsPage() {
                     className="rounded-lg border border-emerald-700/50 bg-emerald-950/40 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-950/70"
                   >
                     Open dashboard
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => editFee(o)}
+                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                  >
+                    Fee %
                   </button>
                   <Link
                     to={`/super/organizations/${o._id}/admins`}

@@ -22,15 +22,22 @@ export function HotspotBuyPage() {
   const [hubtelSession, setHubtelSession] = useState(null);
 
   const siteReady = Boolean(ctx?.resolved && ctx.router?.id);
+  const slug = getPortalSlugFromLocation();
 
   useEffect(() => {
-    publicFetch('/api/public/packages/hotspot')
+    if (!siteReady) {
+      setPackages([]);
+      setPackageId('');
+      return;
+    }
+    const qs = slug ? `?r=${encodeURIComponent(slug)}` : '';
+    publicFetch(`/api/public/packages/hotspot${qs}`)
       .then((p) => {
-        setPackages(p);
-        if (p[0]) setPackageId(p[0]._id);
+        setPackages(Array.isArray(p) ? p : []);
+        if (p?.[0]) setPackageId(p[0]._id);
       })
       .catch((e) => setError(e.message));
-  }, []);
+  }, [siteReady, slug]);
 
   async function onPay(e) {
     e.preventDefault();
