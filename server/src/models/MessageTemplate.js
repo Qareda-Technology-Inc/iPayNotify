@@ -6,8 +6,10 @@ export const MESSAGE_TEMPLATE_CATEGORIES = [
   'maintenance',
   /** General renewal / expiry messaging */
   'expiry_notice',
-  /** Pre-expiry: e.g. SMS ~3 days before service ends */
+  /** Pre-expiry reminders (7 / 3 / 1 days before) */
+  'expiry_reminder_7d',
   'expiry_reminder_3d',
+  'expiry_reminder_1d',
   /** Post-expiry: service already past due */
   'expiry_expired',
   'welcome_new_user',

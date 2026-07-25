@@ -11,14 +11,39 @@ import { normalizeGhanaMsisdn } from '../utils/phoneGhana.js';
 import { renderMessageBody } from './messageTemplateService.js';
 import { resolveSmsBranding } from './smsRouterBranding.js';
 
-/** When no active `expiry_reminder_3d` template exists for the organisation. */
+/** Fallback when no org template exists for a tier. */
 export const DEFAULT_EXPIRY_REMINDER_SMS_BODY =
-  '{{brand}}: Hi {{name}}, your {{service_type}} plan ({{package}}) ends on {{paidUntil}}. Renew soon to avoid interruption.';
+  '{{brand}}: Hi {{name}}, your {{service_type}} plan ({{package}}) ends in {{days_left}} day(s) on {{paidUntil}}. Renew soon to avoid interruption.';
+
+const TIER_TEMPLATE_CATEGORY = {
+  7: 'expiry_reminder_7d',
+  3: 'expiry_reminder_3d',
+  1: 'expiry_reminder_1d',
+};
+
+function daysLeftFloat(paidUntil, now) {
+  return (new Date(paidUntil).getTime() - now.getTime()) / 86400000;
+}
+
+/**
+ * Pick the most urgent unsent tier for this remaining time.
+ * Order over the life of a subscription: 7 → 3 → 1 as expiry approaches.
+ * On catch-up (e.g. first run with 2 days left), send the tightest matching tier first.
+ *
+ * @param {number} daysLeft
+ * @param {number[]} thresholds sorted descending e.g. [7,3,1]
+ * @param {Set<number>} alreadySentTiers
+ */
+export function pickExpiryReminderTier(daysLeft, thresholds, alreadySentTiers) {
+  if (!(daysLeft > 0)) return null;
+  const applicable = thresholds.filter((t) => daysLeft <= t && !alreadySentTiers.has(t));
+  if (!applicable.length) return null;
+  // Most urgent = smallest threshold still applicable
+  return Math.min(...applicable);
+}
 
 /**
  * @param {{ respectEnabledFlag?: boolean, organizationId?: string }} [options]
- * - `respectEnabledFlag` — when true (default), no-op if `config.expiryReminderSms.enabled` is false (cron uses this).
- * - `organizationId` — limit to one tenant (optional).
  */
 export async function runExpiryReminderSmsJob(options = {}) {
   const respectEnabledFlag = options.respectEnabledFlag !== false;
@@ -26,13 +51,14 @@ export async function runExpiryReminderSmsJob(options = {}) {
     return {
       skipped: true,
       reason: 'expiry_reminder_sms_disabled',
-      hint: 'Set EXPIRY_REMINDER_SMS_ENABLED=true',
+      hint: 'Set EXPIRY_REMINDER_SMS_ENABLED=false to disable; enabled by default.',
     };
   }
 
-  const days = config.expiryReminderSms.days;
+  const thresholds = config.expiryReminderSms.daysThresholds;
+  const maxDays = Math.max(...thresholds);
   const now = new Date();
-  const windowEnd = new Date(now.getTime() + days * 86400000);
+  const windowEnd = new Date(now.getTime() + maxDays * 86400000);
 
   const filterOrg =
     options.organizationId != null &&
@@ -44,39 +70,130 @@ export async function runExpiryReminderSmsJob(options = {}) {
   const orgMatch = filterOrg ? { organizationId: new mongoose.Types.ObjectId(filterOrg) } : {};
 
   const summary = {
-    windowDays: days,
+    thresholds,
+    windowDays: maxDays,
     windowEnd: windowEnd.toISOString(),
     pppoe: { candidates: 0, sent: 0, skippedNoPhone: 0, skippedAlreadySent: 0, failed: 0 },
     remote: { candidates: 0, sent: 0, skippedNoPhone: 0, skippedAlreadySent: 0, failed: 0 },
+    byTier: { 7: 0, 3: 0, 1: 0 },
   };
 
   const templateCache = new Map();
 
-  async function bodyForOrg(orgId) {
-    const key = String(orgId);
+  async function bodyForOrgTier(orgId, daysBefore) {
+    const key = `${orgId}:${daysBefore}`;
     if (templateCache.has(key)) return templateCache.get(key);
-    const t = await MessageTemplate.findOne({
-      organizationId: orgId,
-      category: 'expiry_reminder_3d',
-      isActive: true,
-    })
-      .sort({ updatedAt: -1 })
-      .select('body')
-      .lean();
-    const body = String(t?.body || '').trim() || DEFAULT_EXPIRY_REMINDER_SMS_BODY;
+
+    const categories = [
+      TIER_TEMPLATE_CATEGORY[daysBefore],
+      daysBefore !== 3 ? 'expiry_reminder_3d' : null,
+      'expiry_notice',
+    ].filter(Boolean);
+
+    let body = '';
+    for (const category of categories) {
+      const t = await MessageTemplate.findOne({
+        organizationId: orgId,
+        category,
+        isActive: true,
+      })
+        .sort({ updatedAt: -1 })
+        .select('body')
+        .lean();
+      const raw = String(t?.body || '').trim();
+      if (raw) {
+        body = raw;
+        break;
+      }
+    }
+    if (!body) body = DEFAULT_EXPIRY_REMINDER_SMS_BODY;
     templateCache.set(key, body);
     return body;
   }
 
-  async function alreadySent(kind, billingId, periodEnd) {
-    const hit = await ExpiryReminderSmsLog.findOne({
+  async function sentTiersFor(kind, billingId, periodEnd) {
+    const rows = await ExpiryReminderSmsLog.find({
       kind,
       billingId,
       periodEnd,
     })
-      .select('_id')
+      .select('daysBefore')
       .lean();
-    return Boolean(hit);
+    return new Set(rows.map((r) => Number(r.daysBefore)).filter((n) => Number.isFinite(n)));
+  }
+
+  async function notifyOne({
+    kind,
+    bucket,
+    orgId,
+    billingId,
+    periodEnd,
+    phone,
+    routerId,
+    name,
+    pkgName,
+    secret,
+    serviceType,
+  }) {
+    const daysLeft = daysLeftFloat(periodEnd, now);
+    const already = await sentTiersFor(kind, billingId, periodEnd);
+    const tier = pickExpiryReminderTier(daysLeft, thresholds, already);
+    if (tier == null) {
+      summary[bucket].skippedAlreadySent += 1;
+      return;
+    }
+
+    const bodyTemplate = await bodyForOrgTier(orgId, tier);
+    const branding = await resolveSmsBranding(routerId || null, orgId);
+    const paidUntilStr = new Date(periodEnd).toLocaleDateString();
+    const daysLeftLabel = String(Math.max(1, Math.ceil(daysLeft)));
+    const message = renderMessageBody(bodyTemplate, {
+      brand: branding.brandName,
+      name,
+      paidUntil: paidUntilStr,
+      package: pkgName,
+      secret: String(secret || '').trim(),
+      service_type: serviceType,
+      days_left: daysLeftLabel,
+      days_before: String(tier),
+    });
+
+    const result = await sendArkeselSms({
+      to: phone,
+      message,
+      senderId: branding.senderId || undefined,
+    });
+
+    if (result.ok || result.mock) {
+      try {
+        await ExpiryReminderSmsLog.create({
+          organizationId: orgId,
+          kind,
+          billingId,
+          periodEnd,
+          daysBefore: tier,
+          phone,
+        });
+        summary[bucket].sent += 1;
+        if (summary.byTier[tier] != null) summary.byTier[tier] += 1;
+      } catch (e) {
+        if (e?.code === 11000) {
+          summary[bucket].skippedAlreadySent += 1;
+        } else {
+          summary[bucket].failed += 1;
+          console.error(`[expiry-reminder-sms] ${kind} log failed`, e?.message || e);
+        }
+      }
+    } else {
+      summary[bucket].failed += 1;
+      if (summary[bucket].failed <= 5) {
+        console.error(
+          `[expiry-reminder-sms] ${kind} send failed`,
+          billingId,
+          result.error || result.reason
+        );
+      }
+    }
   }
 
   const pppoeList = await PppoeAccount.find({
@@ -98,59 +215,23 @@ export async function runExpiryReminderSmsJob(options = {}) {
       summary.pppoe.skippedNoPhone += 1;
       continue;
     }
-    if (await alreadySent('pppoe', acc._id, acc.paidUntil)) {
-      summary.pppoe.skippedAlreadySent += 1;
-      continue;
-    }
-
-    const orgId = acc.organizationId;
-    const bodyTemplate = await bodyForOrg(orgId);
-    const branding = await resolveSmsBranding(acc.routerId, orgId);
     const name =
       (u && typeof u === 'object' && String(u.fullName || '').trim()) ||
       String(u?.email || '').trim() ||
       'Customer';
-    const pkgName = (acc.packageId && acc.packageId.name) || 'your plan';
-    const paidUntilStr = new Date(acc.paidUntil).toLocaleDateString();
-    const message = renderMessageBody(bodyTemplate, {
-      brand: branding.brandName,
+    await notifyOne({
+      kind: 'pppoe',
+      bucket: 'pppoe',
+      orgId: acc.organizationId,
+      billingId: acc._id,
+      periodEnd: acc.paidUntil,
+      phone,
+      routerId: acc.routerId,
       name,
-      paidUntil: paidUntilStr,
-      package: pkgName,
-      secret: String(acc.secretName || '').trim(),
-      service_type: 'PPPoE',
+      pkgName: (acc.packageId && acc.packageId.name) || 'your plan',
+      secret: acc.secretName,
+      serviceType: 'PPPoE',
     });
-
-    const result = await sendArkeselSms({
-      to: phone,
-      message,
-      senderId: branding.senderId || undefined,
-    });
-
-    if (result.ok || result.mock) {
-      try {
-        await ExpiryReminderSmsLog.create({
-          organizationId: orgId,
-          kind: 'pppoe',
-          billingId: acc._id,
-          periodEnd: acc.paidUntil,
-          phone,
-        });
-        summary.pppoe.sent += 1;
-      } catch (e) {
-        if (e?.code === 11000) {
-          summary.pppoe.skippedAlreadySent += 1;
-        } else {
-          summary.pppoe.failed += 1;
-          console.error('[expiry-reminder-sms] pppoe log failed', e?.message || e);
-        }
-      }
-    } else {
-      summary.pppoe.failed += 1;
-      if (summary.pppoe.failed <= 5) {
-        console.error('[expiry-reminder-sms] pppoe send failed', acc.secretName, result.error || result.reason);
-      }
-    }
   }
 
   const remoteList = await RemoteAccessSubscription.find({
@@ -170,56 +251,19 @@ export async function runExpiryReminderSmsJob(options = {}) {
       summary.remote.skippedNoPhone += 1;
       continue;
     }
-    if (await alreadySent('remote_access', sub._id, sub.paidUntil)) {
-      summary.remote.skippedAlreadySent += 1;
-      continue;
-    }
-
-    const orgId = sub.organizationId;
-    const bodyTemplate = await bodyForOrg(orgId);
-    const branding = await resolveSmsBranding(null, orgId);
-    const name = String(sub.displayName || '').trim() || 'Customer';
-    const pkgName = (sub.packageId && sub.packageId.name) || 'your plan';
-    const paidUntilStr = new Date(sub.paidUntil).toLocaleDateString();
-    const message = renderMessageBody(bodyTemplate, {
-      brand: branding.brandName,
-      name,
-      paidUntil: paidUntilStr,
-      package: pkgName,
+    await notifyOne({
+      kind: 'remote_access',
+      bucket: 'remote',
+      orgId: sub.organizationId,
+      billingId: sub._id,
+      periodEnd: sub.paidUntil,
+      phone,
+      routerId: null,
+      name: String(sub.displayName || '').trim() || 'Customer',
+      pkgName: (sub.packageId && sub.packageId.name) || 'your plan',
       secret: '',
-      service_type: 'Remote access',
+      serviceType: 'Remote access',
     });
-
-    const result = await sendArkeselSms({
-      to: phone,
-      message,
-      senderId: branding.senderId || undefined,
-    });
-
-    if (result.ok || result.mock) {
-      try {
-        await ExpiryReminderSmsLog.create({
-          organizationId: orgId,
-          kind: 'remote_access',
-          billingId: sub._id,
-          periodEnd: sub.paidUntil,
-          phone,
-        });
-        summary.remote.sent += 1;
-      } catch (e) {
-        if (e?.code === 11000) {
-          summary.remote.skippedAlreadySent += 1;
-        } else {
-          summary.remote.failed += 1;
-          console.error('[expiry-reminder-sms] remote log failed', e?.message || e);
-        }
-      }
-    } else {
-      summary.remote.failed += 1;
-      if (summary.remote.failed <= 5) {
-        console.error('[expiry-reminder-sms] remote send failed', phone, result.error || result.reason);
-      }
-    }
   }
 
   return summary;

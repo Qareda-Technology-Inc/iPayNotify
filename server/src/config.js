@@ -76,15 +76,26 @@ export const config = {
   // PPPOE_EXPIRY_CRON: 5-field cron (min hour dom mon dow). Default every 10 minutes if unset.
   pppoeExpiryCron: (process.env.PPPOE_EXPIRY_CRON || '*/10 * * * *').trim(),
   /**
-   * SMS to PPPoE (linked User.phone) & remote-access subscribers when paidUntil is within N days (not yet expired).
-   * Opt-in: set EXPIRY_REMINDER_SMS_ENABLED=true. Uses MessageTemplate category `expiry_reminder_3d` per organisation.
+   * SMS to PPPoE (linked User.phone) & remote-access when paidUntil is within reminder tiers.
+   * Enabled by default. Set EXPIRY_REMINDER_SMS_ENABLED=false to disable.
+   * Tiers default to 7, 3, and 1 day(s) before expiry (override with EXPIRY_REMINDER_DAYS=7,3,1).
+   * Templates (optional): expiry_reminder_7d / expiry_reminder_3d / expiry_reminder_1d.
    */
   expiryReminderSms: {
-    enabled: process.env.EXPIRY_REMINDER_SMS_ENABLED === 'true' || process.env.EXPIRY_REMINDER_SMS_ENABLED === '1',
-    days: Math.min(
-      14,
-      Math.max(1, Number(process.env.EXPIRY_REMINDER_DAYS) || 3)
+    enabled: !(
+      String(process.env.EXPIRY_REMINDER_SMS_ENABLED || '').toLowerCase() === 'false' ||
+      process.env.EXPIRY_REMINDER_SMS_ENABLED === '0'
     ),
+    /** Descending day thresholds, e.g. [7, 3, 1] */
+    daysThresholds: (() => {
+      const raw = String(process.env.EXPIRY_REMINDER_DAYS || '7,3,1').trim();
+      const parsed = raw
+        .split(/[,;\s]+/)
+        .map((s) => Number(s))
+        .filter((n) => Number.isFinite(n) && n >= 1 && n <= 30);
+      const unique = [...new Set(parsed.length ? parsed : [7, 3, 1])];
+      return unique.sort((a, b) => b - a);
+    })(),
     cron: (process.env.EXPIRY_REMINDER_SMS_CRON || '0 9 * * *').trim(),
     logQuiet:
       String(process.env.EXPIRY_REMINDER_SMS_LOG_QUIET || '').toLowerCase() === 'true' ||

@@ -70,7 +70,7 @@ export function startBillingScheduler() {
       { timezone: config.cronTz }
     );
     console.log(
-      `[billing] Expiry reminder SMS cron "${expr}" (${config.cronTz}) — requires EXPIRY_REMINDER_SMS_ENABLED=true`
+      `[billing] Expiry reminder SMS cron "${expr}" (${config.cronTz}) — tiers ${config.expiryReminderSms.daysThresholds.join('/')}d (on by default)`
     );
   }
 }

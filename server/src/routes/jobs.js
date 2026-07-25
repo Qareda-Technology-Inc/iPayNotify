@@ -14,7 +14,7 @@ jobsRouter.post(
   })
 );
 
-/** Manual run: sends expiry-within-N-days SMS (same logic as cron). Does not require EXPIRY_REMINDER_SMS_ENABLED. */
+/** Manual run: sends 7d/3d/1d expiry reminder SMS (same logic as cron). Ignores enabled flag. */
 jobsRouter.post(
   '/expiry-reminders/run',
   requireRoles('super_admin', 'org_admin'),
