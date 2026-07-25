@@ -23,7 +23,7 @@ import { logOrgAudit } from '../services/orgAuditService.js';
 
 export const routersApi = express.Router();
 
-routersApi.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
+routersApi.use(requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'));
 
 /**
  * Hostnames (and any literal IPs) the billing app and MoMo flow need over HTTPS — for operators

@@ -23,7 +23,7 @@ function orgFilter(organizationId) {
  */
 transactionsRouter.get(
   '/',
-  requireRoles('super_admin', 'org_admin', 'org_staff'),
+  requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'),
   asyncHandler(async (req, res) => {
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));

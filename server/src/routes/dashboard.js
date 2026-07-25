@@ -5,7 +5,7 @@ import { getDashboardSummary } from '../services/dashboardStatsService.js';
 
 export const dashboardRouter = express.Router();
 
-dashboardRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
+dashboardRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'));
 
 dashboardRouter.get(
   '/summary',

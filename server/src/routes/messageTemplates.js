@@ -12,7 +12,7 @@ import { requireRoles } from '../middleware/requireRoles.js';
 
 export const messageTemplatesRouter = express.Router();
 
-messageTemplatesRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
+messageTemplatesRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'));
 
 messageTemplatesRouter.get(
   '/categories',

@@ -10,7 +10,7 @@ import { requireRoles } from '../middleware/requireRoles.js';
 
 export const messageBroadcastsRouter = express.Router();
 
-messageBroadcastsRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
+messageBroadcastsRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'));
 
 messageBroadcastsRouter.get(
   '/sms-status',

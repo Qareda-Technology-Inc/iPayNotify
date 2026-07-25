@@ -4,8 +4,8 @@ import { apiFetch } from '../api.js';
 
 const ROLE_LABEL = {
   org_admin: 'Admin',
-  ticket_manager: 'Tickets',
   org_staff: 'Staff',
+  ticket_manager: 'Staff',
 };
 
 export function SuperAdminOrgAdminsPage() {
@@ -56,7 +56,8 @@ export function SuperAdminOrgAdminsPage() {
     setEditAdmin(a);
     setEditFullName(a.fullName || '');
     setEditEmail(a.email || '');
-    setEditRole(a.role || 'org_admin');
+    const r = a.role || 'org_admin';
+    setEditRole(r === 'ticket_manager' ? 'org_staff' : r);
     setEditOpen(true);
     setErr('');
   }
@@ -213,7 +214,6 @@ export function SuperAdminOrgAdminsPage() {
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
             >
               <option value="org_admin">Organisation admin — full dashboard</option>
-              <option value="ticket_manager">Ticket manager — tickets only</option>
               <option value="org_staff">Staff — day-to-day operations</option>
             </select>
           </label>
@@ -338,7 +338,6 @@ export function SuperAdminOrgAdminsPage() {
                   className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
                 >
                   <option value="org_admin">Organisation admin</option>
-                  <option value="ticket_manager">Ticket manager</option>
                   <option value="org_staff">Staff</option>
                 </select>
               </label>

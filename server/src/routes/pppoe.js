@@ -15,7 +15,7 @@ import { logOrgAudit } from '../services/orgAuditService.js';
 
 export const pppoeRouter = express.Router();
 
-pppoeRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
+pppoeRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'));
 
 pppoeRouter.get(
   '/',

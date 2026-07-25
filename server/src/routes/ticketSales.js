@@ -11,7 +11,8 @@ function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-ticketSalesRouter.use(requireRoles('super_admin', 'org_admin', 'ticket_manager', 'org_staff'));
+/** Platform-only: organisation vendors do not use ticket operations. */
+ticketSalesRouter.use(requireRoles('super_admin'));
 
 ticketSalesRouter.get(
   '/sites',

@@ -29,8 +29,9 @@ export function MessagesPage() {
   const [sendTimeWindow, setSendTimeWindow] = useState('');
   const [sendNote, setSendNote] = useState('');
   const [audPppoe, setAudPppoe] = useState(true);
-  const [audRemote, setAudRemote] = useState(true);
+  const [audRemote, setAudRemote] = useState(false);
   const [audHotspot, setAudHotspot] = useState(false);
+  const [isSuper, setIsSuper] = useState(false);
   /** @type {[RecipientScope, import('react').Dispatch<import('react').SetStateAction<RecipientScope>>]} */
   const [recipientScope, setRecipientScope] = useState(/** @type {RecipientScope} */ ('audiences'));
   /** @type {[Record<string, boolean>, import('react').Dispatch<any>]} */
@@ -74,6 +75,13 @@ export function MessagesPage() {
 
   useEffect(() => {
     load();
+    apiFetch('/api/auth/me')
+      .then((m) => {
+        const superAdmin = m?.admin?.role === 'super_admin';
+        setIsSuper(superAdmin);
+        if (superAdmin) setAudRemote(true);
+      })
+      .catch(() => setIsSuper(false));
   }, [load]);
 
   async function sendTestSms(e) {
@@ -169,7 +177,11 @@ export function MessagesPage() {
   }
 
   function buildRecipientPayload() {
-    const audiences = { pppoe: audPppoe, remote: audRemote, hotspot: audHotspot };
+    const audiences = {
+      pppoe: audPppoe,
+      remote: isSuper ? audRemote : false,
+      hotspot: audHotspot,
+    };
     const siteId = broadcastRouterId.trim();
 
     if (siteId) {
@@ -707,21 +719,23 @@ export function MessagesPage() {
                   </span>
                 </span>
               </label>
-              <label className="flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  checked={audRemote}
-                  onChange={(e) => setAudRemote(e.target.checked)}
-                  disabled={recipientScope === 'phones'}
-                  className="mt-1 disabled:opacity-40"
-                />
-                <span>
-                  <strong className="text-white">Remote access</strong>
-                  <span className="mt-0.5 block text-xs text-slate-500">
-                    {meta?.audienceHelp?.remote}
+              {isSuper ? (
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={audRemote}
+                    onChange={(e) => setAudRemote(e.target.checked)}
+                    disabled={recipientScope === 'phones'}
+                    className="mt-1 disabled:opacity-40"
+                  />
+                  <span>
+                    <strong className="text-white">Remote access</strong>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      {meta?.audienceHelp?.remote}
+                    </span>
                   </span>
-                </span>
-              </label>
+                </label>
+              ) : null}
               <label className="flex items-start gap-2">
                 <input
                   type="checkbox"

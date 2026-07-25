@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../api.js';
 
+function useIsSuperAdmin() {
+  const [isSuper, setIsSuper] = useState(false);
+  useEffect(() => {
+    apiFetch('/api/auth/me')
+      .then((m) => setIsSuper(m?.admin?.role === 'super_admin'))
+      .catch(() => setIsSuper(false));
+  }, []);
+  return isSuper;
+}
+
 function formatCedi(cents) {
   const n = Number(cents) || 0;
   return new Intl.NumberFormat('en-GH', {
@@ -23,6 +33,7 @@ function StatCard({ label, value, sub }) {
 export function DashboardHome() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
+  const isSuper = useIsSuperAdmin();
 
   useEffect(() => {
     apiFetch('/api/dashboard/summary')
@@ -81,11 +92,13 @@ export function DashboardHome() {
         <StatCard label="Packages" value={String(counts.packages)} />
         <StatCard label="Vouchers issued" value={String(counts.vouchers)} />
         <StatCard label="PPPoE accounts" value={String(counts.pppoeAccounts)} />
-        <StatCard
-          label="Remote access"
-          value={String(counts.remoteAccessSubscriptions ?? 0)}
-          sub="Users → Remote access"
-        />
+        {isSuper ? (
+          <StatCard
+            label="Remote access"
+            value={String(counts.remoteAccessSubscriptions ?? 0)}
+            sub="Users → Remote access"
+          />
+        ) : null}
         <StatCard label="Customers (users)" value={String(counts.customers)} />
       </div>
 

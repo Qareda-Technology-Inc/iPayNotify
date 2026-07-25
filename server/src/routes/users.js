@@ -6,7 +6,7 @@ import { requireRoles } from '../middleware/requireRoles.js';
 
 export const usersRouter = express.Router();
 
-usersRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
+usersRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'));
 
 const USER_WRITABLE = new Set([
   'email',

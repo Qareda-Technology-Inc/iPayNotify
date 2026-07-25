@@ -166,9 +166,11 @@ router.delete(
   })
 );
 
+/** Existing + inviteable org roles (ticket_manager kept for legacy accounts only). */
 const ORG_SCOPED_ADMIN_ROLES = ['org_admin', 'ticket_manager', 'org_staff'];
+const ORG_INVITE_ROLES = ['org_admin', 'org_staff'];
 
-/** Organisation-scoped admins (org_admin, ticket_manager) */
+/** Organisation-scoped admins */
 router.get(
   '/organizations/:orgId/admins',
   asyncHandler(async (req, res) => {
@@ -200,7 +202,7 @@ router.post(
     const email = String(req.body?.email || '')
       .toLowerCase()
       .trim();
-    const role = ORG_SCOPED_ADMIN_ROLES.includes(String(req.body?.role || '').trim())
+    const role = ORG_INVITE_ROLES.includes(String(req.body?.role || '').trim())
       ? String(req.body.role).trim()
       : 'org_admin';
     const phoneRaw = req.body?.phone;
@@ -290,7 +292,7 @@ router.patch(
     if (!doc) return res.status(404).json({ error: 'Administrator not found' });
     if (req.body.role != null) {
       const role = String(req.body.role).trim();
-      if (!ORG_SCOPED_ADMIN_ROLES.includes(role)) {
+      if (!ORG_INVITE_ROLES.includes(role)) {
         return res.status(400).json({ error: 'Invalid role' });
       }
       doc.role = role;

@@ -97,6 +97,7 @@ export function AdminShell({ onSignOut }) {
   const adminEmail = me?.admin?.email || '';
   const adminDisplayName = String(me?.admin?.fullName || '').trim() || adminEmail;
   const adminRole = me?.admin?.role || 'super_admin';
+  const isSuper = adminRole === 'super_admin';
   const organizationName = me?.organizationName || null;
 
   useEffect(() => {
@@ -174,74 +175,69 @@ export function AdminShell({ onSignOut }) {
               Organisation administrator
             </p>
           )}
-          {adminRole === 'ticket_manager' && (
-            <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-emerald-400/90">
-              Ticket manager
-            </p>
-          )}
-          {adminRole === 'org_staff' && (
+          {(adminRole === 'org_staff' || adminRole === 'ticket_manager') && (
             <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-cyan-400/90">
               Organisation staff
             </p>
           )}
         </div>
         <nav className="flex-1 overflow-y-auto px-2 py-4">
-          {adminRole !== 'ticket_manager' && (
-            <>
-              <NavGroup title="Tenant">
-                <SideLink to="/">Dashboard</SideLink>
-                <SideLink to="/org/settings">Organisation</SideLink>
-              </NavGroup>
-              <NavGroup title="Customers &amp; access">
-                <SideLink to="/users/customers" badge={counts?.customers}>
-                  Customers
-                </SideLink>
-                <SideLink to="/users/active">Active users</SideLink>
-                <SideLink to="/finance/pppoe" badge={counts?.pppoeAccounts} accent="amber">
-                  PPPoE
-                </SideLink>
-                <SideLink to="/users/remote-access" badge={counts?.remoteAccessSubscriptions}>
-                  Remote access
-                </SideLink>
-              </NavGroup>
-              <NavGroup title="Billing">
-                <SideLink to="/finance/packages" badge={counts?.packages}>
-                  Packages
-                </SideLink>
-                <SideLink to="/hotspot" badge={counts?.vouchers}>
-                  Vouchers
-                </SideLink>
-                <SideLink to="/finance/payments" badge={counts?.paymentsPending}>
-                  Payments
-                </SideLink>
-                <SideLink to="/finance/wallet">Wallet</SideLink>
-                <SideLink to="/finance/messages">Messages / SMS</SideLink>
-              </NavGroup>
-              <NavGroup title="Network">
-                <SideLink to="/devices/mikrotik" badge={counts?.routers}>
-                  MikroTik
-                </SideLink>
-              </NavGroup>
-            </>
-          )}
-          <NavGroup title="Ticket operations">
-            <SideLink to="/tickets/issue" accent="amber">
-              Issue tickets
+          <NavGroup title="Tenant">
+            <SideLink to="/">Dashboard</SideLink>
+            <SideLink to="/org/settings">Organisation</SideLink>
+          </NavGroup>
+          <NavGroup title="Customers &amp; access">
+            <SideLink to="/users/customers" badge={counts?.customers}>
+              Customers
             </SideLink>
-            <SideLink to="/tickets/collections" accent="amber">
-              Collections
+            <SideLink to="/users/active">Active users</SideLink>
+            <SideLink to="/finance/pppoe" badge={counts?.pppoeAccounts} accent="amber">
+              PPPoE
             </SideLink>
-            <SideLink to="/tickets/reports" accent="amber">
-              Reports
+            {isSuper ? (
+              <SideLink to="/users/remote-access" badge={counts?.remoteAccessSubscriptions}>
+                Remote access
+              </SideLink>
+            ) : null}
+          </NavGroup>
+          <NavGroup title="Billing">
+            <SideLink to="/finance/packages" badge={counts?.packages}>
+              Packages
             </SideLink>
-            <SideLink to="/tickets/types" accent="amber">
-              Ticket types
+            <SideLink to="/hotspot" badge={counts?.vouchers}>
+              Vouchers
             </SideLink>
-            <SideLink to="/tickets/sites" accent="amber">
-              Ticket sites
+            <SideLink to="/finance/payments" badge={counts?.paymentsPending}>
+              Payments
+            </SideLink>
+            <SideLink to="/finance/wallet">Wallet</SideLink>
+            <SideLink to="/finance/messages">Messages / SMS</SideLink>
+          </NavGroup>
+          <NavGroup title="Network">
+            <SideLink to="/devices/mikrotik" badge={counts?.routers}>
+              MikroTik
             </SideLink>
           </NavGroup>
-          {adminRole === 'super_admin' && (
+          {isSuper ? (
+            <NavGroup title="Ticket operations">
+              <SideLink to="/tickets/issue" accent="amber">
+                Issue tickets
+              </SideLink>
+              <SideLink to="/tickets/collections" accent="amber">
+                Collections
+              </SideLink>
+              <SideLink to="/tickets/reports" accent="amber">
+                Reports
+              </SideLink>
+              <SideLink to="/tickets/types" accent="amber">
+                Ticket types
+              </SideLink>
+              <SideLink to="/tickets/sites" accent="amber">
+                Ticket sites
+              </SideLink>
+            </NavGroup>
+          ) : null}
+          {isSuper && (
             <NavGroup title="Platform (super admin)">
               <SideLink to="/super/organizations" accent="amber">
                 All organisations

@@ -13,7 +13,8 @@ import { logOrgAudit } from '../services/orgAuditService.js';
 
 export const remoteAccessRouter = express.Router();
 
-remoteAccessRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
+/** Platform-only: organisation vendors do not manage remote-access subscriptions. */
+remoteAccessRouter.use(requireRoles('super_admin'));
 
 remoteAccessRouter.get(
   '/',

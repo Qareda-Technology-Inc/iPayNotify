@@ -10,7 +10,7 @@ import {
 
 export const walletRouter = express.Router();
 
-walletRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff'));
+walletRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'));
 
 walletRouter.get(
   '/',

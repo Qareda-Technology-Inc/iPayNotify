@@ -101,7 +101,7 @@ export function CustomersPage() {
   async function removeCustomer(u) {
     const ok = window.confirm(
       `Delete customer "${[u.fullName, u.phone, u.email].filter(Boolean).join(' · ') || u._id}"?\n\n` +
-        'PPPoE and remote-access rows will be unlinked (not deleted).'
+        'Linked PPPoE accounts will be unlinked (not deleted).'
     );
     if (!ok) return;
     setError('');
@@ -124,7 +124,7 @@ export function CustomersPage() {
             under <strong className="text-slate-300">Network → PPPoE</strong>. To tie Elvin&apos;s line to someone here,
             open that PPPoE account, enable <strong className="text-slate-300">Link to a billing customer</strong>, and
             pick this customer (or create the customer first, then link). Deleting a customer only unlinks PPPoE /
-            remote-access references.
+            related subscriptions.
           </p>
         </div>
         <button
