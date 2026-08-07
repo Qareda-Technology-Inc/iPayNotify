@@ -77,6 +77,7 @@
   <div class="page-break"></div>
 
   <h2>3. Sample callback — success</h2>
+  <p class="muted">HTTP body Hubtel POSTs to <code>/api/payments/hubtel/callback</code></p>
   <pre>{
   "ResponseCode": "0000",
   "Status": "Success",
@@ -92,7 +93,24 @@
   "ClientReference": "QF-f13b21d32ea0c37a438c648c"
 }</pre>
 
+  <h2>3b. Merchant server log — success</h2>
+  <p class="muted">Render log lines when the success callback is received and processed (search logs for <code>HUBTEL CALLBACK SUCCESS</code> or <code>[hubtel.callback.SUCCESS]</code>).</p>
+  <pre>========== HUBTEL CALLBACK SUCCESS ==========
+[hubtel.hit] POST /api/payments/hubtel/callback
+[hubtel.callback] received POST QF-f13b21d32ea0c37a438c648c
+[hubtel.callback] payload=
+{ "ResponseCode": "0000", "Status": "Success", … "ClientReference": "QF-f13b21d32ea0c37a438c648c" }
+[hubtel.callback.SUCCESS] {
+  clientReference: 'QF-f13b21d32ea0c37a438c648c',
+  ResponseCode: '0000',
+  Status: 'Success',
+  TransactionId: '7fd01221faeb41469daec7b3561bddc5',
+  merchantResult: { ok: true, paid: true }
+}
+=============================================</pre>
+
   <h2>4. Sample callback — failed</h2>
+  <p class="muted">HTTP body Hubtel POSTs on a failed / declined payment</p>
   <pre>{
   "ResponseCode": "2001",
   "Status": "Failed",
@@ -104,6 +122,22 @@
   },
   "ClientReference": "QF-4158bc782798436d23a56bc6"
 }</pre>
+
+  <h2>4b. Merchant server log — failed</h2>
+  <p class="muted">Render log lines when the failed callback is received (search logs for <code>HUBTEL CALLBACK FAILED</code> or <code>[hubtel.callback.FAILED]</code>).</p>
+  <pre>========== HUBTEL CALLBACK FAILED ==========
+[hubtel.hit] POST /api/payments/hubtel/callback
+[hubtel.callback] received POST QF-4158bc782798436d23a56bc6
+[hubtel.callback] payload=
+{ "ResponseCode": "2001", "Status": "Failed", … "ClientReference": "QF-4158bc782798436d23a56bc6" }
+[hubtel.callback.FAILED] {
+  clientReference: 'QF-4158bc782798436d23a56bc6',
+  ResponseCode: '2001',
+  Status: 'Failed',
+  Message: 'Transaction failed due to an error with the Payment Processor',
+  merchantResult: { ok: true, failed: true }
+}
+============================================</pre>
 
   <h2>5. Sample Transaction Status Check — Paid</h2>
   <p class="muted">GET https://api-txnstatus.hubtel.com/transactions/{Collection_Account_Number}/status?clientReference=…</p>

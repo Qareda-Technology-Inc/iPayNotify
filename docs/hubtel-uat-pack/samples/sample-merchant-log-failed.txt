@@ -1,0 +1,24 @@
+========== HUBTEL CALLBACK FAILED ==========
+[hubtel.hit] POST /api/payments/hubtel/callback ua= …
+[hubtel.payments] POST /api/payments/hubtel/callback ip=… ct=application/json …
+[hubtel.callback] received POST QF-4158bc782798436d23a56bc6 keys=ResponseCode,Status,Message,Data,ClientReference
+[hubtel.callback] payload=
+{
+  "ResponseCode": "2001",
+  "Status": "Failed",
+  "Message": "Transaction failed due to an error with the Payment Processor",
+  "Data": {
+    "ClientReference": "QF-4158bc782798436d23a56bc6",
+    "Amount": 1,
+    "PaymentMethod": "mobilemoney"
+  },
+  "ClientReference": "QF-4158bc782798436d23a56bc6"
+}
+[hubtel.callback.FAILED] {
+  clientReference: 'QF-4158bc782798436d23a56bc6',
+  ResponseCode: '2001',
+  Status: 'Failed',
+  Message: 'Transaction failed due to an error with the Payment Processor',
+  merchantResult: { ok: true, reason: undefined, failed: true }
+}
+============================================

@@ -27,10 +27,11 @@ We use your Checkout JS SDK (`@hubteljs/checkout`, modal) for customer payments 
 1. `02-integration-flow.md` — predesigned flow of how our app interfaces with Hubtel (also available as printable HTML).  
 2. `samples/sample-callback-success.json` — callback payload format our system processes (success).  
 3. `samples/sample-callback-failed.json` — callback payload format (failed / unpaid).  
-4. `samples/sample-transaction-status-paid.json` — Transaction Status Check response (Paid).  
-5. `samples/sample-transaction-status-unpaid.json` — Transaction Status Check response (Unpaid).  
-6. `03-ip-whitelist-request.md` — request to whitelist our server IP(s) for Status Check.  
-7. `04-uat-meeting-script.md` — end-user test script for the UAT meeting.
+4. `samples/sample-merchant-log-success.txt` / `sample-merchant-log-failed.txt` — merchant server logs for success and failed callbacks (Render).  
+5. `samples/sample-transaction-status-paid.json` — Transaction Status Check response (Paid).  
+6. `samples/sample-transaction-status-unpaid.json` — Transaction Status Check response (Unpaid).  
+7. `03-ip-whitelist-request.md` — request to whitelist our server IP(s) for Status Check.  
+8. `04-uat-meeting-script.md` — end-user test script for the UAT meeting.
 
 ## Notes
 

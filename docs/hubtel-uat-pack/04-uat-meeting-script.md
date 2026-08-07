@@ -26,11 +26,22 @@
 - Checkout branding / merchant account  
 - Successful payment  
 - Callback delivered to our HTTPS endpoint  
+- **Merchant success log** on Render (`HUBTEL CALLBACK SUCCESS` / `[hubtel.callback.SUCCESS]`)  
+- **Merchant failed log** on Render (`HUBTEL CALLBACK FAILED` / `[hubtel.callback.FAILED]`) — cancel/decline one payment or POST the sample failed body  
 - Service fulfilled on our side  
+
+## Capture logs during / after the call
+
+1. Keep Render → your API service → **Logs** open  
+2. Filter / search: `hubtel.callback`  
+3. Success payment → screenshot `HUBTEL CALLBACK SUCCESS` block (full payload)  
+4. Failed/declined payment (or curl `samples/sample-callback-failed.json`) → screenshot `HUBTEL CALLBACK FAILED`  
+5. Attach both screenshots + raw JSON to Hubtel  
 
 ## After the meeting
 
 Attach to Hubtel (addendum):
 
 1. Raw callback JSON from the successful UAT payment  
-2. Status Check JSON for the same `clientReference` (after IP whitelist)  
+2. Merchant Render logs — **success** and **failed**  
+3. Status Check JSON for the same `clientReference` (after IP whitelist)  

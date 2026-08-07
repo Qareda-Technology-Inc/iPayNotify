@@ -1,0 +1,27 @@
+========== HUBTEL CALLBACK SUCCESS ==========
+[hubtel.hit] POST /api/payments/hubtel/callback ua= …
+[hubtel.payments] POST /api/payments/hubtel/callback ip=… ct=application/json …
+[hubtel.callback] received POST QF-f13b21d32ea0c37a438c648c keys=ResponseCode,Status,Message,Data,ClientReference
+[hubtel.callback] payload=
+{
+  "ResponseCode": "0000",
+  "Status": "Success",
+  "Message": "Transaction successful",
+  "Data": {
+    "ClientReference": "QF-f13b21d32ea0c37a438c648c",
+    "TransactionId": "7fd01221faeb41469daec7b3561bddc5",
+    "ExternalTransactionId": "0000006824852622",
+    "Amount": 1,
+    "PaymentMethod": "mobilemoney",
+    "CustomerPhoneNumber": "233200000000"
+  },
+  "ClientReference": "QF-f13b21d32ea0c37a438c648c"
+}
+[hubtel.callback.SUCCESS] {
+  clientReference: 'QF-f13b21d32ea0c37a438c648c',
+  ResponseCode: '0000',
+  Status: 'Success',
+  TransactionId: '7fd01221faeb41469daec7b3561bddc5',
+  merchantResult: { ok: true, duplicate: false, reason: undefined, paid: true }
+}
+=============================================

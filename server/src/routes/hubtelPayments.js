@@ -13,6 +13,14 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 
 export const hubtelPaymentsRouter = express.Router();
 
+function safeJson(value) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 /** Every hit under /api/payments/hubtel — use console.log so Render always surfaces it. */
 hubtelPaymentsRouter.use((req, _res, next) => {
   const bodyKeys =
@@ -46,12 +54,13 @@ async function handleCallback(req, res) {
   const clientReference = extractHubtelClientReference(payload);
   const keys = payload && typeof payload === 'object' ? Object.keys(payload) : [];
   console.log(
-    '[hubtel.callback]',
+    '[hubtel.callback] received',
     req.method,
     clientReference || '(no ClientReference)',
     'keys=',
     keys.slice(0, 20).join(',') || '(empty body/query)'
   );
+  console.log('[hubtel.callback] payload=\n' + safeJson(payload));
 
   if (!clientReference) {
     console.warn('[hubtel.callback] rejected: missing ClientReference', {
@@ -69,11 +78,20 @@ async function handleCallback(req, res) {
       TransactionId: hubtelProviderReference(payload) || undefined,
     };
     const result = await markTransactionPaidByReference(clientReference, enriched);
-    console.log('[hubtel.callback] success → paid', clientReference, {
-      ok: result.ok,
-      duplicate: result.duplicate,
-      reason: result.reason,
+    console.log('========== HUBTEL CALLBACK SUCCESS ==========');
+    console.log('[hubtel.callback.SUCCESS]', {
+      clientReference,
+      ResponseCode: payload.ResponseCode ?? payload.responseCode,
+      Status: payload.Status ?? payload.status,
+      TransactionId: hubtelProviderReference(payload) || null,
+      merchantResult: {
+        ok: result.ok,
+        duplicate: result.duplicate,
+        reason: result.reason,
+        paid: result.ok !== false && result.reason !== 'not_found',
+      },
     });
+    console.log('=============================================');
     return res.status(200).json({
       received: true,
       paid: result.ok !== false && result.reason !== 'not_found',
@@ -82,9 +100,21 @@ async function handleCallback(req, res) {
   }
 
   if (hubtelPaymentExplicitlyFailed(payload)) {
-    await markTransactionFailedByReference(clientReference, payload);
-    console.log('[hubtel.callback] explicit fail', clientReference);
-    return res.status(200).json({ received: true, paid: false, failed: true, clientReference });
+    const result = await markTransactionFailedByReference(clientReference, payload);
+    console.log('========== HUBTEL CALLBACK FAILED ==========');
+    console.log('[hubtel.callback.FAILED]', {
+      clientReference,
+      ResponseCode: payload.ResponseCode ?? payload.responseCode,
+      Status: payload.Status ?? payload.status,
+      Message: payload.Message ?? payload.message,
+      merchantResult: {
+        ok: result.ok,
+        reason: result.reason,
+        failed: true,
+      },
+    });
+    console.log('============================================');
+    return res.status(200).json({ received: true, paid: false, failed: true, clientReference, ...result });
   }
 
   console.log('[hubtel.callback] pending/unknown status', clientReference);
