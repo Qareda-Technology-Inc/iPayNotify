@@ -85,8 +85,26 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Organization-Id'],
   })
 );
-app.use(express.json());
+/** Accept JSON even when Hubtel sends text/plain (common) or omits content-type. */
+app.use(
+  express.json({
+    limit: '1mb',
+    type: (req) => {
+      const ct = String(req.headers['content-type'] || '').toLowerCase();
+      if (!ct) return true;
+      return ct.includes('json') || ct.startsWith('text/plain');
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
+
+/** Earliest signal that Hubtel (or a smoke test) hit the API — always console.log. */
+app.use((req, _res, next) => {
+  if (/\/api\/payments\/(hubtel|momo)/i.test(req.originalUrl || '')) {
+    console.log('[hubtel.hit]', req.method, req.originalUrl, 'ua=', (req.get('user-agent') || '').slice(0, 80));
+  }
+  next();
+});
 
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
@@ -108,4 +126,36 @@ startBillingScheduler();
 
 app.listen(config.port, () => {
   console.log(`QareFi Billing API http://localhost:${config.port}`);
+  const cb = String(config.hubtel?.callbackUrl || '').trim();
+  const apiUrl = String(config.publicApiUrl || '').trim();
+  if (config.hubtel?.mock) {
+    console.warn(
+      '[hubtel] HUBTEL_MOCK=true — checkout uses /portal/pay/mock; Hubtel will NOT send callbacks.'
+    );
+  } else if (config.paymentDraftCheckout) {
+    console.warn(
+      '[hubtel] PAYMENT_DRAFT_CHECKOUT=true — draft UI only; Hubtel will NOT send callbacks.'
+    );
+  } else if (!cb && !apiUrl) {
+    console.warn(
+      '[hubtel] Set HUBTEL_CALLBACK_URL=https://YOUR-API.onrender.com/api/payments/hubtel/callback (Render API, NOT Vercel). PUBLIC_APP_URL is the frontend and must not receive callbacks.'
+    );
+  } else if (!cb && apiUrl) {
+    console.log(
+      `[hubtel] HUBTEL_CALLBACK_URL empty — using PUBLIC_API_URL → ${apiUrl}/api/payments/hubtel/callback`
+    );
+  } else if (/localhost|127\.0\.0\.1/i.test(cb)) {
+    console.warn(
+      `[hubtel] Callback is ${cb} — Hubtel cannot reach localhost. Use a public HTTPS API URL.`
+    );
+  } else if (/vercel\.app|netlify\.app/i.test(cb)) {
+    console.error(
+      `[hubtel] Callback points at a frontend host (${cb}). Hubtel posts will never hit this API. Fix HUBTEL_CALLBACK_URL.`
+    );
+  } else {
+    console.log(`[hubtel] Callback URL: ${cb}`);
+  }
+  console.log(
+    '[hubtel] Smoke-test callback logging: GET /api/payments/hubtel/callback/ping (then check these logs)'
+  );
 });

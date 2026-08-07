@@ -1,0 +1,18 @@
+{
+  "_comment": "Sample Transaction Status Check API response (Unpaid).",
+  "message": "Successful",
+  "responseCode": "0000",
+  "data": {
+    "date": "2026-07-24T15:46:00.000Z",
+    "status": "Unpaid",
+    "transactionId": "7fd01221faeb41469daec7b3561bddc5",
+    "externalTransactionId": null,
+    "paymentMethod": "mobilemoney",
+    "clientReference": "QF-8facb922a9867c8aab317799",
+    "currencyCode": null,
+    "amount": 1.0,
+    "charges": 0.0,
+    "amountAfterCharges": 1.0,
+    "isFulfilled": null
+  }
+}

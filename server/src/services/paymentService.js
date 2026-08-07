@@ -7,7 +7,13 @@ import { normalizeRenewCode } from '../utils/renewCode.js';
 import { config } from '../config.js';
 import { syncPppoeAccountToRouter } from './pppoeService.js';
 import { generateVouchers } from './hotspotService.js';
-import { buildHubtelCheckoutSession } from '../integrations/hubtel.js';
+import {
+  buildHubtelCheckoutSession,
+  fetchHubtelTransactionStatus,
+  hubtelPaymentSucceeded,
+  hubtelProviderReference,
+  resolveHubtelCallbackUrl,
+} from '../integrations/hubtel.js';
 import { extendPaidUntilByPackage } from '../utils/duration.js';
 import { notifyTransactionPaidSms } from './paymentSmsService.js';
 import { notifyTransactionPaidAdminEmail } from './paymentAdminNotifyService.js';
@@ -285,7 +291,10 @@ export async function createPppoeRenewalCheckout({
     err.status = 502;
     throw err;
   }
-  mergeTxMeta(tx, { hubtelCheckout: true });
+  mergeTxMeta(tx, {
+    hubtelCheckout: true,
+    hubtelCallbackUrl: session.config?.callbackUrl || resolveHubtelCallbackUrl(billing.hubtel),
+  });
   await tx.save();
   return checkoutResponseFromHubtel(tx, session, {
     amountCents: quote.amountCents,
@@ -398,7 +407,10 @@ export async function createHotspotPurchaseCheckout({
     err.status = 502;
     throw err;
   }
-  mergeTxMeta(tx, { hubtelCheckout: true });
+  mergeTxMeta(tx, {
+    hubtelCheckout: true,
+    hubtelCallbackUrl: session.config?.callbackUrl || resolveHubtelCallbackUrl(billing.hubtel),
+  });
   await tx.save();
   return checkoutResponseFromHubtel(tx, session, {
     amountCents,
@@ -409,6 +421,86 @@ export async function createHotspotPurchaseCheckout({
 
 export async function getTransactionByReference(clientReference) {
   return Transaction.findOne({ clientReference }).lean();
+}
+
+/**
+ * If Hubtel merchant callback is delayed/missing, confirm via Status Check then mark paid.
+ * Status Check often 403 until Render egress IP is whitelisted by Hubtel.
+ */
+export async function reconcilePaymentFromHubtelStatus(clientReference) {
+  const ref = String(clientReference || '').trim();
+  if (!ref) return { ok: false, reason: 'missing_ref' };
+
+  const tx = await Transaction.findOne({ clientReference: ref });
+  if (!tx) return { ok: false, reason: 'not_found' };
+  if (tx.status === 'paid') return { ok: true, status: 'paid', alreadyPaid: true };
+  if (tx.status !== 'pending') return { ok: false, reason: 'not_pending', status: tx.status };
+
+  const billing = await resolveOrgBilling(tx.organizationId);
+  const check = await fetchHubtelTransactionStatus(ref, billing.hubtel);
+  mergeTxMeta(tx, {
+    statusCheckAt: new Date().toISOString(),
+    statusCheckHttp: check.httpStatus,
+    statusCheck: check.body,
+  });
+  await tx.save();
+
+  if (!check.ok) {
+    return {
+      ok: false,
+      reason: check.httpStatus === 403 ? 'status_check_ip_blocked' : 'status_check_failed',
+      httpStatus: check.httpStatus,
+      status: tx.status,
+    };
+  }
+
+  const payload = check.body && typeof check.body === 'object' ? check.body : {};
+  if (!hubtelPaymentSucceeded(payload)) {
+    return { ok: false, reason: 'not_paid_at_hubtel', status: tx.status, httpStatus: check.httpStatus };
+  }
+
+  const enriched = {
+    ...payload,
+    TransactionId: hubtelProviderReference(payload) || undefined,
+    reconciledVia: 'hubtel_status_check',
+  };
+  const result = await markTransactionPaidByReference(ref, enriched);
+  console.log('[hubtel.reconcile] marked paid via status check', ref, result);
+  return { ok: true, status: 'paid', via: 'status_check', ...result };
+}
+
+/**
+ * Browser SDK success/failure — always logs on the API host so Render shows activity
+ * even when Hubtel's server-to-server callback never arrives.
+ */
+export async function recordHubtelClientCheckoutEvent({
+  clientReference,
+  event,
+  payload = {},
+}) {
+  const ref = String(clientReference || '').trim();
+  const kind = String(event || 'unknown').trim() || 'unknown';
+  console.log('[hubtel.clientEvent]', kind, ref || '(no ref)', 'keys=', Object.keys(payload || {}).slice(0, 15).join(','));
+
+  if (!ref) return { ok: false, reason: 'missing_ref' };
+  const tx = await Transaction.findOne({ clientReference: ref });
+  if (!tx) return { ok: false, reason: 'not_found' };
+
+  mergeTxMeta(tx, {
+    clientCheckoutEvent: {
+      at: new Date().toISOString(),
+      event: kind,
+      payload,
+    },
+  });
+  await tx.save();
+
+  if (kind === 'success' && tx.status === 'pending') {
+    const reconciled = await reconcilePaymentFromHubtelStatus(ref);
+    return { ok: true, recorded: true, status: (await Transaction.findOne({ clientReference: ref }).lean())?.status, reconciled };
+  }
+
+  return { ok: true, recorded: true, status: tx.status };
 }
 
 async function notifyPaidChannels(tx, context) {

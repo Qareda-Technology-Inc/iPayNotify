@@ -1,0 +1,18 @@
+{
+  "_comment": "Sample Transaction Status Check API response (Paid). Endpoint: GET https://api-txnstatus.hubtel.com/transactions/{Collection_Account_Number}/status?clientReference=… — live capture pending IP whitelist (currently 403 from non-whitelisted IPs).",
+  "message": "Successful",
+  "responseCode": "0000",
+  "data": {
+    "date": "2026-07-24T15:50:00.000Z",
+    "status": "Paid",
+    "transactionId": "7fd01221faeb41469daec7b3561bddc5",
+    "externalTransactionId": "0000006824852622",
+    "paymentMethod": "mobilemoney",
+    "clientReference": "QF-f13b21d32ea0c37a438c648c",
+    "currencyCode": null,
+    "amount": 1.0,
+    "charges": 0.02,
+    "amountAfterCharges": 0.98,
+    "isFulfilled": null
+  }
+}

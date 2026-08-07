@@ -1,0 +1,20 @@
+{
+  "_comment": "Representative Hubtel Checkout callback (success) as processed by iPay. Field names may arrive PascalCase or camelCase; our API accepts both. Replace example references with a live UAT payment capture when available.",
+  "ResponseCode": "0000",
+  "Status": "Success",
+  "Message": "Transaction successful",
+  "Data": {
+    "ClientReference": "QF-f13b21d32ea0c37a438c648c",
+    "TransactionId": "7fd01221faeb41469daec7b3561bddc5",
+    "ExternalTransactionId": "0000006824852622",
+    "Amount": 1.0,
+    "Charges": 0.02,
+    "AmountAfterCharges": 0.98,
+    "PaymentMethod": "mobilemoney",
+    "CustomerPhoneNumber": "233200000000",
+    "Description": "QareFi Billing: PPPoE renewal — demo-user",
+    "Date": "2026-07-24T15:50:00.000Z"
+  },
+  "ClientReference": "QF-f13b21d32ea0c37a438c648c",
+  "TransactionId": "7fd01221faeb41469daec7b3561bddc5"
+}

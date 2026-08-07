@@ -9,7 +9,8 @@
     "db:sync-indexes": "node src/db/syncIndexes.js",
     "db:backfill-organization": "node scripts/backfillOrganization.mjs",
     "db:backfill-admin-roles": "node scripts/backfillAdminRoles.mjs",
-    "db:backfill-pppoe-renew-codes": "node scripts/backfillPppoeRenewCodes.mjs"
+    "db:backfill-pppoe-renew-codes": "node scripts/backfillPppoeRenewCodes.mjs",
+    "db:backfill-wallet-settlements": "node scripts/backfillWalletSettlements.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

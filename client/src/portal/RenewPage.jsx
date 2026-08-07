@@ -160,14 +160,27 @@ export function RenewPage() {
         purchaseInfo={hubtelSession?.purchaseInfo}
         hubtelConfig={hubtelSession?.hubtelConfig}
         onClose={() => setHubtelSession(null)}
-        onFailure={() => {
+        onFailure={(payload) => {
+          const ref = hubtelSession?.clientReference;
+          if (ref) {
+            publicFetch('/api/public/payment/hubtel-client-event', {
+              method: 'POST',
+              body: JSON.stringify({ clientReference: ref, event: 'failure', payload }),
+            }).catch(() => {});
+          }
           setError('Payment was not completed. You can try again.');
           setHubtelSession(null);
         }}
-        onSuccess={() => {
+        onSuccess={(payload) => {
           const ref = hubtelSession?.clientReference;
           setHubtelSession(null);
-          if (ref) navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`);
+          if (ref) {
+            publicFetch('/api/public/payment/hubtel-client-event', {
+              method: 'POST',
+              body: JSON.stringify({ clientReference: ref, event: 'success', payload }),
+            }).catch(() => {});
+            navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`);
+          }
         }}
       />
       <PortalBrandHeader

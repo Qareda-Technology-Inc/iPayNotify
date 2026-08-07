@@ -13,6 +13,69 @@ export function hubtelBasicAuth(clientId, clientSecret) {
   return Buffer.from(`${id}:${secret}`).toString('base64');
 }
 
+/**
+ * Absolute merchant callback URL Hubtel must POST/GET.
+ * Never fall back to PUBLIC_APP_URL (Vercel SPA) — that swallows callbacks as index.html.
+ */
+export function resolveHubtelCallbackUrl(hubtel = config.hubtel) {
+  const h = hubtel || config.hubtel;
+  const explicit = String(h.callbackUrl || '').trim();
+  if (explicit) return explicit.replace(/\/$/, '');
+
+  const apiBase = String(config.publicApiUrl || '').trim().replace(/\/$/, '');
+  if (apiBase) return `${apiBase}/api/payments/hubtel/callback`;
+
+  const app = String(config.publicAppUrl || '').trim().replace(/\/$/, '');
+  if (app && /vercel\.app|netlify\.app|pages\.dev/i.test(app)) {
+    console.error(
+      '[hubtel] Refusing PUBLIC_APP_URL as callback host (frontend). Set HUBTEL_CALLBACK_URL or PUBLIC_API_URL to your Render API.'
+    );
+    return '';
+  }
+  if (app) return `${app}/api/payments/hubtel/callback`;
+  return '';
+}
+
+/**
+ * Transaction Status Check API (requires Hubtel IP whitelist on caller egress).
+ * GET …/transactions/{Collection_Account}/status?clientReference=
+ */
+export async function fetchHubtelTransactionStatus(clientReference, hubtel = config.hubtel) {
+  const h = hubtel || config.hubtel;
+  const ref = String(clientReference || '').trim();
+  const account = String(h.merchantAccount || '').trim();
+  const auth = hubtelBasicAuth(h.clientId, h.clientSecret);
+  if (!ref || !account || !auth) {
+    return { ok: false, error: 'missing_config_or_ref', httpStatus: 0, body: null };
+  }
+  const base = String(h.statusCheckBaseUrl || 'https://api-txnstatus.hubtel.com/transactions').replace(
+    /\/$/,
+    ''
+  );
+  const url = `${base}/${encodeURIComponent(account)}/status?clientReference=${encodeURIComponent(ref)}`;
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Basic ${auth}`,
+        Accept: 'application/json',
+      },
+    });
+    const text = await res.text();
+    let body = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = { raw: text?.slice?.(0, 500) || text };
+    }
+    console.log('[hubtel.statusCheck]', ref, 'http=', res.status, 'ok=', res.ok);
+    return { ok: res.ok, httpStatus: res.status, body, url };
+  } catch (e) {
+    console.error('[hubtel.statusCheck] network error', ref, e?.message || e);
+    return { ok: false, error: e?.message || 'network_error', httpStatus: 0, body: null };
+  }
+}
+
 export function hubtelLiveReady(hubtel = config.hubtel) {
   const h = hubtel || config.hubtel;
   if (h.mock) return false;
@@ -66,9 +129,15 @@ export function buildHubtelCheckoutSession({
     };
   }
 
-  const callbackUrl =
-    String(h.callbackUrl || '').trim() ||
-    `${String(config.publicAppUrl || '').replace(/\/$/, '')}/api/payments/hubtel/callback`;
+  const callbackUrl = resolveHubtelCallbackUrl(h);
+  if (!callbackUrl) {
+    return {
+      ok: false,
+      error:
+        'Hubtel callback URL is not configured. Set HUBTEL_CALLBACK_URL=https://YOUR-API.onrender.com/api/payments/hubtel/callback (API host, not the Vercel frontend).',
+    };
+  }
+  console.log('[hubtel.checkout] clientReference=', clientReference, 'callbackUrl=', callbackUrl);
 
   const purchaseDescription = String(description || 'Payment').slice(0, 160);
 

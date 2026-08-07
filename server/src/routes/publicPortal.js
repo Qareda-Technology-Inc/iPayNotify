@@ -7,6 +7,8 @@ import {
   createHotspotPurchaseCheckout,
   getTransactionByReference,
   markTransactionPaidByReference,
+  reconcilePaymentFromHubtelStatus,
+  recordHubtelClientCheckoutEvent,
 } from '../services/paymentService.js';
 import {
   resolvePortalRouter,
@@ -186,8 +188,19 @@ publicPortalRouter.post(
 publicPortalRouter.get(
   '/payment/:ref/status',
   asyncHandler(async (req, res) => {
-    const tx = await getTransactionByReference(req.params.ref);
+    let tx = await getTransactionByReference(req.params.ref);
     if (!tx) return res.status(404).json({ error: 'Not found' });
+
+    /** If merchant callback never arrived, try Hubtel Status Check while the customer waits. */
+    if (tx.status === 'pending') {
+      try {
+        await reconcilePaymentFromHubtelStatus(req.params.ref);
+        tx = await getTransactionByReference(req.params.ref);
+      } catch (e) {
+        console.warn('[hubtel.reconcile] status poll failed', req.params.ref, e?.message || e);
+      }
+    }
+
     res.json({
       status: tx.status,
       kind: tx.kind,
@@ -197,6 +210,23 @@ publicPortalRouter.get(
       renewedUntil: tx.meta?.renewedUntil,
       fulfillment: tx.meta?.fulfillment,
     });
+  })
+);
+
+/**
+ * Called from the portal when Hubtel SDK fires onPaymentSuccess / onPaymentFailure.
+ * Guarantees a Render log line even if Hubtel never POSTs the merchant callback.
+ */
+publicPortalRouter.post(
+  '/payment/hubtel-client-event',
+  asyncHandler(async (req, res) => {
+    const { clientReference, event, payload } = req.body || {};
+    const out = await recordHubtelClientCheckoutEvent({
+      clientReference,
+      event,
+      payload: payload && typeof payload === 'object' ? payload : {},
+    });
+    res.json(out);
   })
 );
 

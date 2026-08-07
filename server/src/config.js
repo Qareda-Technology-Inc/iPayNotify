@@ -34,6 +34,11 @@ export const config = {
   publicAppUrl:
     process.env.PUBLIC_APP_URL || process.env.CLIENT_ORIGIN || 'http://localhost:5173',
   /**
+   * Public origin of THIS API (Render). Used for Hubtel callback fallback.
+   * Never use PUBLIC_APP_URL (Vercel SPA) — Hubtel posts must hit the API host.
+   */
+  publicApiUrl: (process.env.PUBLIC_API_URL || '').trim().replace(/\/$/, ''),
+  /**
    * When true, PPPoE renew + hotspot checkout skip Hubtel and return `mode: draft_hubtel`
    * for an in-app test prompt. Prefer HUBTEL_MOCK for redirect-to-mock-page testing.
    */
@@ -50,6 +55,13 @@ export const config = {
     clientId: (process.env.HUBTEL_CLIENT_ID || '').trim(),
     clientSecret: (process.env.HUBTEL_CLIENT_SECRET || '').trim(),
     callbackUrl: (process.env.HUBTEL_CALLBACK_URL || '').trim(),
+    /** Status Check base (collection account is appended). */
+    statusCheckBaseUrl: (
+      process.env.HUBTEL_STATUS_CHECK_URL ||
+      'https://api-txnstatus.hubtel.com/transactions'
+    )
+      .trim()
+      .replace(/\/$/, ''),
     mock: process.env.HUBTEL_MOCK === 'true',
     allowedChannels: String(process.env.HUBTEL_ALLOWED_CHANNELS || 'mobileMoney,bankCard')
       .split(',')
