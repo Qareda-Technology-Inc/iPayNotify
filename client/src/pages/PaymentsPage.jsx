@@ -40,6 +40,7 @@ function kindLabel(kind) {
 export function PaymentsPage() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('');
   const [kind, setKind] = useState('');
@@ -47,6 +48,8 @@ export function PaymentsPage() {
   const [qDraft, setQDraft] = useState('');
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
+  const [checkingRef, setCheckingRef] = useState('');
+  const [statusDetail, setStatusDetail] = useState(null);
 
   const filterParams = useCallback(() => {
     const params = new URLSearchParams();
@@ -94,6 +97,30 @@ export function PaymentsPage() {
     }
   }
 
+  async function checkHubtelStatus(clientReference) {
+    const ref = String(clientReference || '').trim();
+    if (!ref) return;
+    setCheckingRef(ref);
+    setErr('');
+    setInfo('');
+    setStatusDetail(null);
+    try {
+      const result = await apiFetch('/api/transactions/hubtel-status-check', {
+        method: 'POST',
+        body: JSON.stringify({ clientReference: ref, apply: true }),
+      });
+      setStatusDetail(result);
+      setInfo(result.message || `Hubtel: ${result.hubtelStatus || 'Unknown'}`);
+      if (result.applied || result.localStatus === 'paid') {
+        await load();
+      }
+    } catch (e) {
+      setErr(e.message || 'Status check failed');
+    } finally {
+      setCheckingRef('');
+    }
+  }
+
   useEffect(() => {
     load();
   }, [load]);
@@ -112,7 +139,8 @@ export function PaymentsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Payments</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Hubtel checkout (Qaretech settles). Fee and your net credit are shown for paid sales.
+            Hubtel checkout (Qaretech settles). Use Check status on pending rows when a callback is
+            delayed — calls Hubtel Transaction Status Check and fulfills if Paid.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -214,9 +242,25 @@ export function PaymentsPage() {
           {err}
         </p>
       )}
+      {info && !err && (
+        <p className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-3 text-sm text-sky-100">
+          {info}
+        </p>
+      )}
+      {statusDetail?.body && (
+        <details className="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-slate-300">
+          <summary className="cursor-pointer text-slate-200">
+            Last Hubtel Status Check — {statusDetail.hubtelStatus || 'Unknown'}
+            {statusDetail.clientReference ? ` · ${statusDetail.clientReference}` : ''}
+          </summary>
+          <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-slate-400">
+            {JSON.stringify(statusDetail.body, null, 2)}
+          </pre>
+        </details>
+      )}
 
       <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/40">
-        <table className="w-full min-w-[880px] text-left text-sm">
+        <table className="w-full min-w-[980px] text-left text-sm">
           <thead className="border-b border-slate-800 bg-slate-950/80 text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-4 py-3">When</th>
@@ -228,18 +272,19 @@ export function PaymentsPage() {
               <th className="px-4 py-3">Fee</th>
               <th className="px-4 py-3">Your net</th>
               <th className="px-4 py-3">Reference</th>
+              <th className="px-4 py-3">Hubtel</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/80">
             {loading && !data ? (
               <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
+                <td colSpan={10} className="px-4 py-10 text-center text-slate-500">
                   Loading…
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
+                <td colSpan={10} className="px-4 py-10 text-center text-slate-500">
                   No payments match these filters.
                 </td>
               </tr>
@@ -255,6 +300,11 @@ export function PaymentsPage() {
                     >
                       {t.status}
                     </span>
+                    {t.lastHubtelStatus ? (
+                      <div className="mt-1 text-[10px] text-slate-500">
+                        Hubtel: {t.lastHubtelStatus}
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-xs">{kindLabel(t.kind)}</td>
                   <td className="px-4 py-3">
@@ -280,6 +330,17 @@ export function PaymentsPage() {
                         {t.providerReference}
                       </div>
                     ) : null}
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      disabled={!t.clientReference || checkingRef === t.clientReference}
+                      onClick={() => checkHubtelStatus(t.clientReference)}
+                      className="rounded-lg border border-sky-700/50 bg-sky-950/40 px-2.5 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-950/70 disabled:opacity-40"
+                      title="Call Hubtel Transaction Status Check"
+                    >
+                      {checkingRef === t.clientReference ? 'Checking…' : 'Check status'}
+                    </button>
                   </td>
                 </tr>
               ))

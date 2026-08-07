@@ -10,7 +10,6 @@ import { generateVouchers } from './hotspotService.js';
 import {
   buildHubtelCheckoutSession,
   fetchHubtelTransactionStatus,
-  hubtelPaymentSucceeded,
   hubtelProviderReference,
   resolveHubtelCallbackUrl,
 } from '../integrations/hubtel.js';
@@ -424,49 +423,122 @@ export async function getTransactionByReference(clientReference) {
 }
 
 /**
- * If Hubtel merchant callback is delayed/missing, confirm via Status Check then mark paid.
+ * Call Hubtel Transaction Status Check and optionally fulfill if Paid.
  * Status Check often 403 until Render egress IP is whitelisted by Hubtel.
+ *
+ * @param {string} clientReference
+ * @param {{ apply?: boolean }} [opts] apply=true marks local tx paid when Hubtel says Paid
  */
-export async function reconcilePaymentFromHubtelStatus(clientReference) {
+export async function checkTransactionStatusWithHubtel(clientReference, opts = {}) {
+  const apply = opts.apply !== false;
   const ref = String(clientReference || '').trim();
   if (!ref) return { ok: false, reason: 'missing_ref' };
 
   const tx = await Transaction.findOne({ clientReference: ref });
   if (!tx) return { ok: false, reason: 'not_found' };
-  if (tx.status === 'paid') return { ok: true, status: 'paid', alreadyPaid: true };
-  if (tx.status !== 'pending') return { ok: false, reason: 'not_pending', status: tx.status };
 
   const billing = await resolveOrgBilling(tx.organizationId);
   const check = await fetchHubtelTransactionStatus(ref, billing.hubtel);
+
+  const checkedAt = new Date().toISOString();
   mergeTxMeta(tx, {
-    statusCheckAt: new Date().toISOString(),
+    statusCheckAt: checkedAt,
     statusCheckHttp: check.httpStatus,
     statusCheck: check.body,
+    statusCheckResult: {
+      hubtelStatus: check.hubtelStatus || 'Unknown',
+      paid: Boolean(check.paid),
+      unpaid: Boolean(check.unpaid),
+      transactionId: check.transactionId || '',
+      error: check.error || null,
+    },
   });
   await tx.save();
 
+  const base = {
+    ok: Boolean(check.ok),
+    clientReference: ref,
+    localStatus: tx.status,
+    hubtelStatus: check.hubtelStatus || 'Unknown',
+    hubtelPaid: Boolean(check.paid),
+    hubtelUnpaid: Boolean(check.unpaid),
+    httpStatus: check.httpStatus,
+    transactionId: check.transactionId || '',
+    amount: check.amount,
+    checkedAt,
+    body: check.body,
+    url: check.url,
+  };
+
   if (!check.ok) {
+    const reason =
+      check.httpStatus === 403
+        ? 'status_check_ip_blocked'
+        : check.error === 'missing_config_or_ref'
+          ? 'hubtel_not_configured'
+          : 'status_check_failed';
     return {
+      ...base,
       ok: false,
-      reason: check.httpStatus === 403 ? 'status_check_ip_blocked' : 'status_check_failed',
-      httpStatus: check.httpStatus,
-      status: tx.status,
+      reason,
+      message:
+        reason === 'status_check_ip_blocked'
+          ? 'Hubtel Status Check returned 403. Ask Hubtel to whitelist this server’s outbound IP.'
+          : reason === 'hubtel_not_configured'
+            ? 'Hubtel Status Check is not configured (merchant account / credentials).'
+            : `Hubtel Status Check failed (HTTP ${check.httpStatus || 0}).`,
+      applied: false,
     };
   }
 
-  const payload = check.body && typeof check.body === 'object' ? check.body : {};
-  if (!hubtelPaymentSucceeded(payload)) {
-    return { ok: false, reason: 'not_paid_at_hubtel', status: tx.status, httpStatus: check.httpStatus };
+  let applied = false;
+  let applyResult = null;
+  if (apply && check.paid && tx.status === 'pending') {
+    const payload = check.body && typeof check.body === 'object' ? check.body : {};
+    const enriched = {
+      ...payload,
+      TransactionId: check.transactionId || hubtelProviderReference(payload) || undefined,
+      reconciledVia: 'hubtel_status_check',
+    };
+    applyResult = await markTransactionPaidByReference(ref, enriched);
+    applied = Boolean(applyResult?.ok);
+    console.log('[hubtel.reconcile] marked paid via status check', ref, applyResult);
+  } else if (apply && check.paid && tx.status === 'paid') {
+    applyResult = { ok: true, duplicate: true };
   }
 
-  const enriched = {
-    ...payload,
-    TransactionId: hubtelProviderReference(payload) || undefined,
-    reconciledVia: 'hubtel_status_check',
+  const fresh = await Transaction.findOne({ clientReference: ref }).lean();
+  return {
+    ...base,
+    ok: true,
+    localStatus: fresh?.status || tx.status,
+    applied,
+    applyResult,
+    message: check.paid
+      ? applied
+        ? 'Hubtel reports Paid — local transaction marked paid and fulfilled.'
+        : fresh?.status === 'paid'
+          ? 'Hubtel reports Paid — already paid locally.'
+          : 'Hubtel reports Paid.'
+      : check.unpaid
+        ? 'Hubtel reports Unpaid — customer has not completed payment.'
+        : `Hubtel status: ${check.hubtelStatus || 'Unknown'}.`,
   };
-  const result = await markTransactionPaidByReference(ref, enriched);
-  console.log('[hubtel.reconcile] marked paid via status check', ref, result);
-  return { ok: true, status: 'paid', via: 'status_check', ...result };
+}
+
+/** @deprecated use checkTransactionStatusWithHubtel — kept for pay-return / client-event paths */
+export async function reconcilePaymentFromHubtelStatus(clientReference) {
+  const out = await checkTransactionStatusWithHubtel(clientReference, { apply: true });
+  if (out.localStatus === 'paid') {
+    return { ok: true, status: 'paid', alreadyPaid: !out.applied, via: 'status_check', ...out };
+  }
+  return {
+    ok: false,
+    reason: out.reason || (out.hubtelUnpaid ? 'not_paid_at_hubtel' : 'status_check_failed'),
+    httpStatus: out.httpStatus,
+    status: out.localStatus,
+    ...out,
+  };
 }
 
 /**

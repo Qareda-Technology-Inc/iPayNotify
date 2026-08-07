@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { Transaction } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
+import { checkTransactionStatusWithHubtel } from '../services/paymentService.js';
 
 export const transactionsRouter = express.Router();
 
@@ -80,6 +81,8 @@ function mapTransactionRow(t) {
     feeBps: t.feeBps ?? t.meta?.feeBps ?? null,
     platformFeeCents: t.platformFeeCents ?? t.meta?.platformFeeCents ?? null,
     orgNetCents: t.orgNetCents ?? t.meta?.orgNetCents ?? null,
+    lastHubtelStatus: t.meta?.statusCheckResult?.hubtelStatus || null,
+    lastHubtelStatusAt: t.meta?.statusCheckAt || null,
   };
 }
 
@@ -127,6 +130,46 @@ function formatTransactionsCsv(rows) {
   }
   return lines.join('\n');
 }
+
+/**
+ * POST /api/transactions/hubtel-status-check
+ * Body: { clientReference, apply?: boolean }
+ * Calls Hubtel Transaction Status Check; when apply≠false and Hubtel says Paid, fulfills locally.
+ */
+transactionsRouter.post(
+  '/hubtel-status-check',
+  requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'),
+  asyncHandler(async (req, res) => {
+    const clientReference = String(req.body?.clientReference || '').trim();
+    if (!clientReference) {
+      return res.status(400).json({ error: 'clientReference required' });
+    }
+
+    const tx = await Transaction.findOne({ clientReference }).select('organizationId').lean();
+    if (!tx) return res.status(404).json({ error: 'Transaction not found' });
+
+    const orgId = req.organizationId != null ? String(req.organizationId) : '';
+    if (
+      orgId &&
+      mongoose.isValidObjectId(orgId) &&
+      tx.organizationId &&
+      String(tx.organizationId) !== orgId &&
+      req.user?.role !== 'super_admin'
+    ) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    const apply = req.body?.apply !== false && req.body?.apply !== 'false';
+    const result = await checkTransactionStatusWithHubtel(clientReference, { apply });
+    const status =
+      result.reason === 'not_found'
+        ? 404
+        : result.reason === 'hubtel_not_configured'
+          ? 503
+          : 200;
+    res.status(status).json(result);
+  })
+);
 
 /**
  * GET /api/transactions

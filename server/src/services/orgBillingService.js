@@ -32,6 +32,7 @@ export async function resolveOrgBilling(organizationId) {
     clientId: config.hubtel.clientId,
     clientSecret: config.hubtel.clientSecret,
     callbackUrl: config.hubtel.callbackUrl,
+    statusCheckBaseUrl: config.hubtel.statusCheckBaseUrl,
     mock: config.hubtel.mock,
     allowedChannels: config.hubtel.allowedChannels,
   };
