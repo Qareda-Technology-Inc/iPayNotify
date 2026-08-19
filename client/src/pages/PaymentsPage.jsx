@@ -107,11 +107,20 @@ export function PaymentsPage() {
     try {
       const result = await apiFetch('/api/transactions/hubtel-status-check', {
         method: 'POST',
-        body: JSON.stringify({ clientReference: ref, apply: true }),
+        body: JSON.stringify({
+          clientReference: ref,
+          apply: true,
+          applyUnpaidAsFailed: true,
+        }),
       });
       setStatusDetail(result);
       setInfo(result.message || `Hubtel: ${result.hubtelStatus || 'Unknown'}`);
-      if (result.applied || result.localStatus === 'paid') {
+      if (
+        result.applied ||
+        result.localStatus === 'paid' ||
+        result.localStatus === 'failed' ||
+        result.hubtelUnpaid
+      ) {
         await load();
       }
     } catch (e) {
@@ -243,14 +252,37 @@ export function PaymentsPage() {
         </p>
       )}
       {info && !err && (
-        <p className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-3 text-sm text-sky-100">
+        <p
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            statusDetail?.hubtelPaid
+              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
+              : statusDetail?.hubtelUnpaid
+                ? 'border-amber-500/40 bg-amber-500/10 text-amber-100'
+                : 'border-sky-500/40 bg-sky-500/10 text-sky-100'
+          }`}
+        >
           {info}
         </p>
       )}
       {statusDetail?.body && (
         <details className="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-slate-300">
           <summary className="cursor-pointer text-slate-200">
-            Last Hubtel Status Check — {statusDetail.hubtelStatus || 'Unknown'}
+            Hubtel payment status:{' '}
+            <span
+              className={
+                statusDetail.hubtelPaid
+                  ? 'text-emerald-300'
+                  : statusDetail.hubtelUnpaid
+                    ? 'text-amber-300'
+                    : 'text-slate-200'
+              }
+            >
+              {statusDetail.hubtelStatus || 'Unknown'}
+            </span>
+            <span className="text-slate-500">
+              {' '}
+              (ignore responseCode/message “Successful” — that only means the API call worked)
+            </span>
             {statusDetail.clientReference ? ` · ${statusDetail.clientReference}` : ''}
           </summary>
           <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-slate-400">

@@ -95,7 +95,16 @@ export function HotspotBuyPage() {
         open={!!hubtelSession}
         purchaseInfo={hubtelSession?.purchaseInfo}
         hubtelConfig={hubtelSession?.hubtelConfig}
-        onClose={() => setHubtelSession(null)}
+        onClose={() => {
+          const ref = hubtelSession?.clientReference;
+          if (ref) {
+            publicFetch('/api/public/payment/hubtel-client-event', {
+              method: 'POST',
+              body: JSON.stringify({ clientReference: ref, event: 'cancelled', payload: {} }),
+            }).catch(() => {});
+          }
+          setHubtelSession(null);
+        }}
         onFailure={(payload) => {
           const ref = hubtelSession?.clientReference;
           if (ref) {

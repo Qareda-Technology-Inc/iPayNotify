@@ -160,7 +160,13 @@ transactionsRouter.post(
     }
 
     const apply = req.body?.apply !== false && req.body?.apply !== 'false';
-    const result = await checkTransactionStatusWithHubtel(clientReference, { apply });
+    /** Admin check: Unpaid (cancelled/abandoned) → mark failed so it does not stay “pending”. */
+    const applyUnpaidAsFailed =
+      req.body?.applyUnpaidAsFailed !== false && req.body?.applyUnpaidAsFailed !== 'false';
+    const result = await checkTransactionStatusWithHubtel(clientReference, {
+      apply,
+      applyUnpaidAsFailed,
+    });
     const status =
       result.reason === 'not_found'
         ? 404

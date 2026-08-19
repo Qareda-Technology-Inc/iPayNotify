@@ -423,14 +423,17 @@ export async function getTransactionByReference(clientReference) {
 }
 
 /**
- * Call Hubtel Transaction Status Check and optionally fulfill if Paid.
+ * Call Hubtel Transaction Status Check and optionally sync local status.
  * Status Check often 403 until Render egress IP is whitelisted by Hubtel.
  *
  * @param {string} clientReference
- * @param {{ apply?: boolean }} [opts] apply=true marks local tx paid when Hubtel says Paid
+ * @param {{ apply?: boolean, applyUnpaidAsFailed?: boolean }} [opts]
+ *   apply — mark paid when Hubtel says Paid (default true)
+ *   applyUnpaidAsFailed — mark failed when Hubtel says Unpaid (admin default true; pay-return false)
  */
 export async function checkTransactionStatusWithHubtel(clientReference, opts = {}) {
   const apply = opts.apply !== false;
+  const applyUnpaidAsFailed = Boolean(opts.applyUnpaidAsFailed);
   const ref = String(clientReference || '').trim();
   if (!ref) return { ok: false, reason: 'missing_ref' };
 
@@ -505,30 +508,48 @@ export async function checkTransactionStatusWithHubtel(clientReference, opts = {
     console.log('[hubtel.reconcile] marked paid via status check', ref, applyResult);
   } else if (apply && check.paid && tx.status === 'paid') {
     applyResult = { ok: true, duplicate: true };
+  } else if (applyUnpaidAsFailed && check.unpaid && tx.status === 'pending') {
+    applyResult = await markTransactionFailedByReference(ref, {
+      ...(check.body && typeof check.body === 'object' ? check.body : {}),
+      failedVia: 'hubtel_status_check_unpaid',
+      Message: 'Unpaid at Hubtel (customer cancelled or never completed payment)',
+    });
+    applied = Boolean(applyResult?.ok);
+    console.log('[hubtel.reconcile] marked failed — Hubtel Unpaid', ref, applyResult);
   }
 
   const fresh = await Transaction.findOne({ clientReference: ref }).lean();
+  let message;
+  if (check.paid) {
+    message = applied
+      ? 'Hubtel: Paid — local transaction marked paid and fulfilled.'
+      : fresh?.status === 'paid'
+        ? 'Hubtel: Paid — already paid locally.'
+        : 'Hubtel: Paid.';
+  } else if (check.unpaid) {
+    message = applied
+      ? 'Hubtel: Unpaid (not paid) — local transaction marked failed (cancelled / abandoned).'
+      : 'Hubtel: Unpaid — payment was not completed. Note: responseCode 0000 only means the Status Check API call succeeded, not that the customer paid.';
+  } else {
+    message = `Hubtel status: ${check.hubtelStatus || 'Unknown'}.`;
+  }
+
   return {
     ...base,
     ok: true,
     localStatus: fresh?.status || tx.status,
     applied,
     applyResult,
-    message: check.paid
-      ? applied
-        ? 'Hubtel reports Paid — local transaction marked paid and fulfilled.'
-        : fresh?.status === 'paid'
-          ? 'Hubtel reports Paid — already paid locally.'
-          : 'Hubtel reports Paid.'
-      : check.unpaid
-        ? 'Hubtel reports Unpaid — customer has not completed payment.'
-        : `Hubtel status: ${check.hubtelStatus || 'Unknown'}.`,
+    message,
   };
 }
 
-/** @deprecated use checkTransactionStatusWithHubtel — kept for pay-return / client-event paths */
+/** Pay-return / SDK success path — only promote to paid; never fail on Unpaid (customer may still pay). */
 export async function reconcilePaymentFromHubtelStatus(clientReference) {
-  const out = await checkTransactionStatusWithHubtel(clientReference, { apply: true });
+  const out = await checkTransactionStatusWithHubtel(clientReference, {
+    apply: true,
+    applyUnpaidAsFailed: false,
+  });
   if (out.localStatus === 'paid') {
     return { ok: true, status: 'paid', alreadyPaid: !out.applied, via: 'status_check', ...out };
   }
@@ -542,8 +563,7 @@ export async function reconcilePaymentFromHubtelStatus(clientReference) {
 }
 
 /**
- * Browser SDK success/failure — always logs on the API host so Render shows activity
- * even when Hubtel's server-to-server callback never arrives.
+ * Browser SDK success / failure / cancel — logs on API host; cancel/fail marks local tx failed.
  */
 export async function recordHubtelClientCheckoutEvent({
   clientReference,
@@ -551,7 +571,7 @@ export async function recordHubtelClientCheckoutEvent({
   payload = {},
 }) {
   const ref = String(clientReference || '').trim();
-  const kind = String(event || 'unknown').trim() || 'unknown';
+  const kind = String(event || 'unknown').trim().toLowerCase() || 'unknown';
   console.log('[hubtel.clientEvent]', kind, ref || '(no ref)', 'keys=', Object.keys(payload || {}).slice(0, 15).join(','));
 
   if (!ref) return { ok: false, reason: 'missing_ref' };
@@ -569,7 +589,25 @@ export async function recordHubtelClientCheckoutEvent({
 
   if (kind === 'success' && tx.status === 'pending') {
     const reconciled = await reconcilePaymentFromHubtelStatus(ref);
-    return { ok: true, recorded: true, status: (await Transaction.findOne({ clientReference: ref }).lean())?.status, reconciled };
+    return {
+      ok: true,
+      recorded: true,
+      status: (await Transaction.findOne({ clientReference: ref }).lean())?.status,
+      reconciled,
+    };
+  }
+
+  if ((kind === 'failure' || kind === 'failed' || kind === 'cancelled' || kind === 'canceled' || kind === 'close') && tx.status === 'pending') {
+    const result = await markTransactionFailedByReference(ref, {
+      ...(payload && typeof payload === 'object' ? payload : {}),
+      failedVia: `client_${kind}`,
+      Message:
+        kind === 'close' || kind === 'cancelled' || kind === 'canceled'
+          ? 'Customer closed / cancelled Hubtel checkout'
+          : 'Customer payment failed in Hubtel checkout',
+    });
+    console.log('[hubtel.clientEvent] marked failed', kind, ref, result);
+    return { ok: true, recorded: true, status: 'failed', failed: true, ...result };
   }
 
   return { ok: true, recorded: true, status: tx.status };
