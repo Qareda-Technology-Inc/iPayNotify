@@ -45,6 +45,17 @@ export const config = {
   paymentDraftCheckout:
     process.env.PAYMENT_DRAFT_CHECKOUT === 'true' ||
     process.env.PAYMENT_DRAFT_MOMO === 'true',
+  /**
+   * Allows POST /api/public/payment/mock-complete.
+   * In production this is false unless explicitly set true (dangerous — test only).
+   * Non-production also allows it when HUBTEL_MOCK or PAYMENT_DRAFT_CHECKOUT is on.
+   */
+  allowPaymentSimulation:
+    process.env.ALLOW_PAYMENT_SIMULATION === 'true' ||
+    (process.env.NODE_ENV !== 'production' &&
+      (process.env.HUBTEL_MOCK === 'true' ||
+        process.env.PAYMENT_DRAFT_CHECKOUT === 'true' ||
+        process.env.PAYMENT_DRAFT_MOMO === 'true')),
   /** Shown on checkout description / draft UI */
   merchant: {
     displayName: (process.env.MERCHANT_DISPLAY_NAME || 'QareFi Billing').trim(),

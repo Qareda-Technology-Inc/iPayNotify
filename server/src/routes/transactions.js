@@ -83,6 +83,8 @@ function mapTransactionRow(t) {
     orgNetCents: t.orgNetCents ?? t.meta?.orgNetCents ?? null,
     lastHubtelStatus: t.meta?.statusCheckResult?.hubtelStatus || null,
     lastHubtelStatusAt: t.meta?.statusCheckAt || null,
+    walletSettled: Boolean(t.meta?.walletSettled),
+    walletSettleFailed: t.meta?.walletSettleFailed || null,
   };
 }
 

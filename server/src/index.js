@@ -155,6 +155,11 @@ app.listen(config.port, () => {
   } else {
     console.log(`[hubtel] Callback URL: ${cb}`);
   }
+  if (config.allowPaymentSimulation) {
+    console.warn(
+      '[hubtel] ALLOW_PAYMENT_SIMULATION (or draft/mock in non-prod) — POST /api/public/payment/mock-complete can mark txs paid without Hubtel.'
+    );
+  }
   console.log(
     '[hubtel] Smoke-test callback logging: GET /api/payments/hubtel/callback/ping (then check these logs)'
   );

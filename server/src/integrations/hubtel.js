@@ -340,6 +340,34 @@ export function hubtelProviderReference(payload) {
   return '';
 }
 
+/** Extract GHS amount from Hubtel callback / status payloads (if present). */
+export function hubtelPayloadAmountGhs(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const nested = payload.Data || payload.data || {};
+  const raw =
+    nested.Amount ??
+    nested.amount ??
+    payload.Amount ??
+    payload.amount ??
+    null;
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Compare Hubtel-reported amount to our pending tx (cents).
+ * Returns { ok: true } when amount missing (cannot verify) or within 1 pesewa.
+ */
+export function hubtelAmountMatchesTx(payload, amountCents) {
+  const ghs = hubtelPayloadAmountGhs(payload);
+  if (ghs == null) return { ok: true, skipped: true };
+  const expected = Number(amountCents) || 0;
+  const gotCents = Math.round(ghs * 100);
+  const ok = Math.abs(gotCents - expected) <= 1;
+  return { ok, skipped: false, expectedCents: expected, gotCents, amountGhs: ghs };
+}
+
 /** Silent auto-debit is not available via Online Checkout; keep auto-renew job no-op. */
 export async function chargeForRenewal() {
   return {

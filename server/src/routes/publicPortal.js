@@ -1,6 +1,7 @@
 import express from 'express';
 import { PlanPackage } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { config } from '../config.js';
 import {
   quotePppoeRenewal,
   createPppoeRenewalCheckout,
@@ -191,13 +192,20 @@ publicPortalRouter.get(
     let tx = await getTransactionByReference(req.params.ref);
     if (!tx) return res.status(404).json({ error: 'Not found' });
 
-    /** If merchant callback never arrived, try Hubtel Status Check while the customer waits. */
+    /**
+     * If merchant callback never arrived, try Hubtel Status Check while the customer waits.
+     * Throttle: at most once per 12s per tx (PayReturn polls every 1.5s).
+     */
     if (tx.status === 'pending') {
-      try {
-        await reconcilePaymentFromHubtelStatus(req.params.ref);
-        tx = await getTransactionByReference(req.params.ref);
-      } catch (e) {
-        console.warn('[hubtel.reconcile] status poll failed', req.params.ref, e?.message || e);
+      const lastCheck = tx.meta?.statusCheckAt ? new Date(tx.meta.statusCheckAt).getTime() : 0;
+      const due = !lastCheck || Date.now() - lastCheck >= 12_000;
+      if (due) {
+        try {
+          await reconcilePaymentFromHubtelStatus(req.params.ref);
+          tx = await getTransactionByReference(req.params.ref);
+        } catch (e) {
+          console.warn('[hubtel.reconcile] status poll failed', req.params.ref, e?.message || e);
+        }
       }
     }
 
@@ -209,6 +217,7 @@ publicPortalRouter.get(
       voucherCode: tx.meta?.voucherCode,
       renewedUntil: tx.meta?.renewedUntil,
       fulfillment: tx.meta?.fulfillment,
+      hubtelStatus: tx.meta?.statusCheckResult?.hubtelStatus || null,
     });
   })
 );
@@ -233,9 +242,20 @@ publicPortalRouter.post(
 publicPortalRouter.post(
   '/payment/mock-complete',
   asyncHandler(async (req, res) => {
+    if (!config.allowPaymentSimulation) {
+      return res.status(403).json({
+        error:
+          'Payment simulation is disabled. Set ALLOW_PAYMENT_SIMULATION=true (or use HUBTEL_MOCK / PAYMENT_DRAFT_CHECKOUT in non-production).',
+      });
+    }
     const { clientReference } = req.body;
     if (!clientReference) {
       return res.status(400).json({ error: 'clientReference required' });
+    }
+    const existing = await getTransactionByReference(clientReference);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    if (existing.status !== 'pending') {
+      return res.status(409).json({ error: 'Transaction is not pending', status: existing.status });
     }
     const result = await markTransactionPaidByReference(clientReference, {
       mock: true,

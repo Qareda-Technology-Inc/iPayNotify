@@ -563,7 +563,9 @@ export async function reconcilePaymentFromHubtelStatus(clientReference) {
 }
 
 /**
- * Browser SDK success / failure / cancel — logs on API host; cancel/fail marks local tx failed.
+ * Browser SDK success / failure / cancel — logs on API host.
+ * Soft cancel (close/cancelled) only records meta — keeps pending so a late MoMo success
+ * or merchant callback can still mark paid. Hard failure marks failed.
  */
 export async function recordHubtelClientCheckoutEvent({
   clientReference,
@@ -578,6 +580,12 @@ export async function recordHubtelClientCheckoutEvent({
   const tx = await Transaction.findOne({ clientReference: ref });
   if (!tx) return { ok: false, reason: 'not_found' };
 
+  /** Ignore griefing on stale checkouts (refs older than 6h). */
+  const ageMs = Date.now() - new Date(tx.createdAt || 0).getTime();
+  if (ageMs > 6 * 60 * 60 * 1000 && kind !== 'success') {
+    return { ok: false, reason: 'checkout_expired', status: tx.status };
+  }
+
   mergeTxMeta(tx, {
     clientCheckoutEvent: {
       at: new Date().toISOString(),
@@ -587,8 +595,10 @@ export async function recordHubtelClientCheckoutEvent({
   });
   await tx.save();
 
-  if (kind === 'success' && tx.status === 'pending') {
+  if (kind === 'success' && (tx.status === 'pending' || tx.status === 'failed')) {
     const reconciled = await reconcilePaymentFromHubtelStatus(ref);
+    /* If Status Check blocked, still try mark paid only when we already trust callback path —
+       here we only reconcile; SDK success alone does not force paid without Hubtel confirmation. */
     return {
       ok: true,
       recorded: true,
@@ -597,17 +607,24 @@ export async function recordHubtelClientCheckoutEvent({
     };
   }
 
-  if ((kind === 'failure' || kind === 'failed' || kind === 'cancelled' || kind === 'canceled' || kind === 'close') && tx.status === 'pending') {
+  if ((kind === 'failure' || kind === 'failed') && tx.status === 'pending') {
     const result = await markTransactionFailedByReference(ref, {
       ...(payload && typeof payload === 'object' ? payload : {}),
       failedVia: `client_${kind}`,
-      Message:
-        kind === 'close' || kind === 'cancelled' || kind === 'canceled'
-          ? 'Customer closed / cancelled Hubtel checkout'
-          : 'Customer payment failed in Hubtel checkout',
+      Message: 'Customer payment failed in Hubtel checkout',
     });
     console.log('[hubtel.clientEvent] marked failed', kind, ref, result);
     return { ok: true, recorded: true, status: 'failed', failed: true, ...result };
+  }
+
+  if (kind === 'cancelled' || kind === 'canceled' || kind === 'close') {
+    /* Soft cancel: do not mark failed — Hubtel may still complete MoMo after UI close. */
+    mergeTxMeta(tx, {
+      clientCancelledAt: new Date().toISOString(),
+      clientCancelledSoft: true,
+    });
+    await tx.save();
+    return { ok: true, recorded: true, status: tx.status, softCancel: true };
   }
 
   return { ok: true, recorded: true, status: tx.status };
@@ -767,8 +784,17 @@ export async function markTransactionPaidByReference(clientReference, providerDa
     await fulfillPaidTransaction(tx);
     try {
       await settlePaidTransactionToWallet(tx);
+      mergeTxMeta(tx, { walletSettleFailed: null });
+      await tx.save();
     } catch (e) {
       console.error('[wallet] settle duplicate path failed', e?.message || e);
+      mergeTxMeta(tx, {
+        walletSettleFailed: {
+          at: new Date().toISOString(),
+          error: e?.message || 'settle_failed',
+        },
+      });
+      await tx.save();
     }
     return { ok: true, duplicate: true };
   }
@@ -782,13 +808,51 @@ export async function markTransactionPaidByReference(clientReference, providerDa
     providerData.providerRef ||
     tx.providerReference ||
     '';
-  mergeTxMeta(tx, { callback: providerData });
+  mergeTxMeta(tx, { callback: providerData, paymentFailed: false });
   await tx.save();
   const result = await fulfillPaidTransaction(tx);
   try {
     await settlePaidTransactionToWallet(tx);
+    mergeTxMeta(tx, { walletSettleFailed: null });
+    await tx.save();
   } catch (e) {
     console.error('[wallet] settle failed', e?.message || e);
+    mergeTxMeta(tx, {
+      walletSettleFailed: {
+        at: new Date().toISOString(),
+        error: e?.message || 'settle_failed',
+      },
+    });
+    await tx.save();
   }
   return { ok: true, ...result };
+}
+
+/**
+ * Mark abandoned Hubtel checkouts as failed (pending longer than maxAgeHours).
+ * Safe for cron — does not touch paid txs.
+ */
+export async function expireStalePendingPayments({ maxAgeHours = 24, limit = 200 } = {}) {
+  const cutoff = new Date(Date.now() - Math.max(1, Number(maxAgeHours) || 24) * 60 * 60 * 1000);
+  const stale = await Transaction.find({
+    status: 'pending',
+    createdAt: { $lt: cutoff },
+  })
+    .sort({ createdAt: 1 })
+    .limit(Math.min(500, Math.max(1, Number(limit) || 200)))
+    .select('clientReference')
+    .lean();
+
+  let expired = 0;
+  for (const row of stale) {
+    const r = await markTransactionFailedByReference(row.clientReference, {
+      failedVia: 'stale_pending_expiry',
+      Message: `Abandoned pending checkout (older than ${maxAgeHours}h)`,
+    });
+    if (r.ok) expired += 1;
+  }
+  if (expired > 0) {
+    console.log('[payments] expired stale pending', { expired, cutoff: cutoff.toISOString() });
+  }
+  return { scanned: stale.length, expired, cutoff: cutoff.toISOString() };
 }

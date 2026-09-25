@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../api.js';
 
 function IconRefresh({ className }) {
@@ -15,10 +15,20 @@ function IconRefresh({ className }) {
   );
 }
 
+function fmtMem(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return '—';
+  if (n < 1024) return `${n} B`;
+  if (n < 1048576) return `${(n / 1024).toFixed(0)} KiB`;
+  if (n < 1073741824) return `${(n / 1048576).toFixed(1)} MiB`;
+  return `${(n / 1073741824).toFixed(2)} GiB`;
+}
+
 export function ActiveUsersPage() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
+  const [routerFilter, setRouterFilter] = useState('');
 
   const load = useCallback(async () => {
     setErr('');
@@ -39,7 +49,11 @@ export function ActiveUsersPage() {
   }, [load]);
 
   const totals = data?.totals;
-  const routers = data?.routers || [];
+  const routers = useMemo(() => {
+    const all = data?.routers || [];
+    if (!routerFilter) return all;
+    return all.filter((r) => r.routerId === routerFilter);
+  }, [data, routerFilter]);
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -47,23 +61,37 @@ export function ActiveUsersPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Active users</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Live sessions per MikroTik router. <strong className="text-slate-300">Hotspot</strong> uses{' '}
-            <span className="font-mono text-slate-500">/ip/hotspot/active</span>;{' '}
-            <strong className="text-slate-300">PPP</strong> uses <span className="font-mono text-slate-500">/ppp/active</span>{' '}
-            (PPPoE, L2TP, etc.). Hotspot and PPP are queried separately — if Hotspot is not installed or the API user cannot
-            read it, PPP sessions can still appear. With transport SSH, long lists use{' '}
-            <span className="font-mono text-slate-500">print as-value</span>. Add every site as its own router row to see all customers.
+            Live from each MikroTik site: hotspot sessions (
+            <span className="font-mono text-slate-500">/ip/hotspot/active</span>) and PPP (
+            <span className="font-mono text-slate-500">/ppp/active</span>), plus board identity / uptime.
           </p>
         </div>
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => load()}
-          className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-600/80 bg-slate-800/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800 disabled:opacity-50"
-        >
-          <IconRefresh className={loading ? 'animate-spin text-slate-400' : 'text-slate-400'} />
-          {loading ? 'Refreshing…' : 'Refresh'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-sm text-slate-400">
+            Site
+            <select
+              value={routerFilter}
+              onChange={(e) => setRouterFilter(e.target.value)}
+              className="ml-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-200"
+            >
+              <option value="">All sites</option>
+              {(data?.routers || []).map((r) => (
+                <option key={r.routerId} value={r.routerId}>
+                  {r.routerName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => load()}
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-600/80 bg-slate-800/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800 disabled:opacity-50"
+          >
+            <IconRefresh className={loading ? 'animate-spin text-slate-400' : 'text-slate-400'} />
+            {loading ? 'Refreshing…' : 'Refresh live'}
+          </button>
+        </div>
       </div>
 
       {err && (
@@ -98,7 +126,7 @@ export function ActiveUsersPage() {
 
       <div className="mt-8 space-y-6">
         {loading && !data ? (
-          <p className="text-sm text-slate-500">Loading routers…</p>
+          <p className="text-sm text-slate-500">Connecting to sites…</p>
         ) : (
           routers.map((r) => (
             <section
@@ -106,8 +134,49 @@ export function ActiveUsersPage() {
               className="overflow-hidden rounded-2xl border border-slate-800/90 bg-slate-900/40 shadow-lg shadow-black/20"
             >
               <div className="border-b border-slate-800 bg-slate-900/80 px-5 py-4">
-                <h2 className="text-lg font-medium text-white">{r.routerName}</h2>
-                <p className="mt-0.5 font-mono text-xs text-slate-500">{r.host}</p>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-medium text-white">{r.routerName}</h2>
+                    <p className="mt-0.5 font-mono text-xs text-slate-500">{r.host}</p>
+                  </div>
+                  {r.details && (
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 sm:grid-cols-4">
+                      <div>
+                        <span className="text-slate-600">Identity</span>
+                        <p className="font-medium text-slate-200">{r.details.identity}</p>
+                      </div>
+                      <div>
+                        <span className="text-slate-600">Board</span>
+                        <p className="font-medium text-slate-200">{r.details.boardName}</p>
+                      </div>
+                      <div>
+                        <span className="text-slate-600">Version</span>
+                        <p className="font-medium text-slate-200">{r.details.version}</p>
+                      </div>
+                      <div>
+                        <span className="text-slate-600">Uptime</span>
+                        <p className="font-medium text-slate-200">{r.details.uptime}</p>
+                      </div>
+                      {r.details.cpuLoad != null && (
+                        <div>
+                          <span className="text-slate-600">CPU</span>
+                          <p className="font-medium text-slate-200">{r.details.cpuLoad}%</p>
+                        </div>
+                      )}
+                      {r.details.freeMemoryBytes != null && (
+                        <div>
+                          <span className="text-slate-600">Free mem</span>
+                          <p className="font-medium text-slate-200">
+                            {fmtMem(r.details.freeMemoryBytes)}
+                            {r.details.totalMemoryBytes != null
+                              ? ` / ${fmtMem(r.details.totalMemoryBytes)}`
+                              : ''}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {r.error && (
                   <p className="mt-2 rounded-lg border border-amber-500/35 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
                     {r.error}
@@ -128,23 +197,20 @@ export function ActiveUsersPage() {
                     Hotspot active ({r.hotspotActive?.length ?? 0})
                   </h3>
                   <div className="mt-2 overflow-x-auto rounded-xl border border-slate-800">
-                    <table className="w-full table-fixed text-left text-sm">
-                      <colgroup>
-                        <col className="w-[28%]" />
-                        <col className="w-[22%]" />
-                        <col className="w-[50%]" />
-                      </colgroup>
+                    <table className="w-full min-w-[420px] text-left text-sm">
                       <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
                         <tr>
                           <th className="px-3 py-2">User</th>
+                          <th className="px-3 py-2">Address</th>
+                          <th className="px-3 py-2">MAC</th>
                           <th className="px-3 py-2">Uptime</th>
-                          <th className="px-3 py-2">Statistics</th>
+                          <th className="px-3 py-2">Traffic</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/80 text-slate-300">
                         {(r.hotspotActive || []).length === 0 ? (
                           <tr>
-                            <td colSpan={3} className="px-3 py-6 text-center text-slate-500">
+                            <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
                               No hotspot sessions
                             </td>
                           </tr>
@@ -152,6 +218,10 @@ export function ActiveUsersPage() {
                           r.hotspotActive.map((row, i) => (
                             <tr key={row.id || `${row.user}-${i}`}>
                               <td className="px-3 py-2 font-mono text-sm text-cyan-200/90">{row.user}</td>
+                              <td className="px-3 py-2 font-mono text-xs">{row.address || '—'}</td>
+                              <td className="px-3 py-2 font-mono text-xs text-slate-500">
+                                {row.macAddress || '—'}
+                              </td>
                               <td className="px-3 py-2 text-xs text-slate-400">{row.uptime}</td>
                               <td className="px-3 py-2 font-mono text-xs text-slate-400">{row.statistics}</td>
                             </tr>
@@ -167,23 +237,19 @@ export function ActiveUsersPage() {
                     PPP active ({r.pppActive?.length ?? 0})
                   </h3>
                   <div className="mt-2 overflow-x-auto rounded-xl border border-slate-800">
-                    <table className="w-full table-fixed text-left text-sm">
-                      <colgroup>
-                        <col className="w-[32%]" />
-                        <col className="w-[28%]" />
-                        <col className="w-[40%]" />
-                      </colgroup>
+                    <table className="w-full min-w-[420px] text-left text-sm">
                       <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
                         <tr>
                           <th className="px-3 py-2">Secret</th>
                           <th className="px-3 py-2">Address</th>
+                          <th className="px-3 py-2">Service</th>
                           <th className="px-3 py-2">Uptime</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/80 text-slate-300">
                         {(r.pppActive || []).length === 0 ? (
                           <tr>
-                            <td colSpan={3} className="px-3 py-6 text-center text-slate-500">
+                            <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
                               No PPP sessions
                             </td>
                           </tr>
@@ -192,6 +258,7 @@ export function ActiveUsersPage() {
                             <tr key={row.id || `${row.secret}-${i}`}>
                               <td className="px-3 py-2 font-mono text-sm text-violet-200/90">{row.secret}</td>
                               <td className="px-3 py-2 font-mono text-xs">{row.address}</td>
+                              <td className="px-3 py-2 text-xs text-slate-400">{row.service || '—'}</td>
                               <td className="px-3 py-2 text-xs text-slate-400">{row.uptime}</td>
                             </tr>
                           ))

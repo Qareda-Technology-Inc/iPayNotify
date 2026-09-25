@@ -93,12 +93,20 @@ export function HubtelCheckout({ open, purchaseInfo, hubtelConfig, onSuccess, on
     let effectAlive = true;
 
     const finish = (kind, payload) => {
-      if (finished.current || !effectAlive) return;
+      if (!effectAlive) return;
+      /** Late Hubtel success must always win — even after user hit Cancel. */
+      if (kind === 'success') {
+        finished.current = true;
+        dismissCheckout(checkoutRef.current);
+        checkoutRef.current = null;
+        onSuccessRef.current?.(payload);
+        return;
+      }
+      if (finished.current) return;
       finished.current = true;
       dismissCheckout(checkoutRef.current);
       checkoutRef.current = null;
-      if (kind === 'success') onSuccessRef.current?.(payload);
-      else if (kind === 'failure') onFailureRef.current?.(payload);
+      if (kind === 'failure') onFailureRef.current?.(payload);
       else onCloseRef.current?.(payload);
     };
 

@@ -4,11 +4,13 @@ import {
   enforceExpiredPppoeAccounts,
 } from '../services/renewalService.js';
 import { runExpiryReminderSmsJob } from '../services/expiryReminderSmsService.js';
+import { expireStalePendingPayments } from '../services/paymentService.js';
 import { config } from '../config.js';
 
 let task;
 let pppoeExpiryTask;
 let expiryReminderSmsTask;
+let stalePaymentsTask;
 
 export function startBillingScheduler() {
   if (!task) {
@@ -73,6 +75,24 @@ export function startBillingScheduler() {
       `[billing] Expiry reminder SMS cron "${expr}" (${config.cronTz}) — tiers ${config.expiryReminderSms.daysThresholds.join('/')}d (on by default)`
     );
   }
+
+  if (!stalePaymentsTask) {
+    stalePaymentsTask = cron.schedule(
+      '15 * * * *',
+      async () => {
+        try {
+          const summary = await expireStalePendingPayments({ maxAgeHours: 24, limit: 200 });
+          if (summary.expired > 0) {
+            console.log('[billing] stale pending payments', summary);
+          }
+        } catch (e) {
+          console.error('[billing] stale pending payments failed', e);
+        }
+      },
+      { timezone: config.cronTz }
+    );
+    console.log(`[billing] Stale pending payments hourly (@ :15) (${config.cronTz})`);
+  }
 }
 
 export function stopBillingScheduler() {
@@ -87,5 +107,9 @@ export function stopBillingScheduler() {
   if (expiryReminderSmsTask) {
     expiryReminderSmsTask.stop();
     expiryReminderSmsTask = null;
+  }
+  if (stalePaymentsTask) {
+    stalePaymentsTask.stop();
+    stalePaymentsTask = null;
   }
 }

@@ -4,10 +4,12 @@ import {
   hubtelPaymentSucceeded,
   hubtelPaymentExplicitlyFailed,
   hubtelProviderReference,
+  hubtelAmountMatchesTx,
 } from '../integrations/hubtel.js';
 import {
   markTransactionPaidByReference,
   markTransactionFailedByReference,
+  getTransactionByReference,
 } from '../services/paymentService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 
@@ -73,6 +75,24 @@ async function handleCallback(req, res) {
   }
 
   if (hubtelPaymentSucceeded(payload)) {
+    const tx = await getTransactionByReference(clientReference);
+    if (tx) {
+      const amt = hubtelAmountMatchesTx(payload, tx.amountCents);
+      if (!amt.ok) {
+        console.error('[hubtel.callback] amount mismatch — refusing to mark paid', {
+          clientReference,
+          expectedCents: amt.expectedCents,
+          gotCents: amt.gotCents,
+        });
+        return res.status(200).json({
+          received: true,
+          paid: false,
+          error: 'amount_mismatch',
+          expectedCents: amt.expectedCents,
+          gotCents: amt.gotCents,
+        });
+      }
+    }
     const enriched = {
       ...payload,
       TransactionId: hubtelProviderReference(payload) || undefined,

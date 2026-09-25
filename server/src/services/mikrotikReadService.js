@@ -109,7 +109,7 @@ function formatTrafficStats(bytesInRaw, bytesOutRaw) {
 }
 
 /**
- * Hotspot active: only user, uptime, traffic (bytes in/out). Drops empty placeholder rows.
+ * Hotspot active: user, address, MAC, uptime, traffic.
  */
 function mapHotspotActiveRow(r) {
   const user = rosFirstStr(r, [
@@ -126,6 +126,8 @@ function mapHotspotActiveRow(r) {
   return {
     id: r['.id'] ?? r.numbers ?? null,
     user,
+    address: rosFirstStr(r, ['address', 'login-by']) || '—',
+    macAddress: rosFirstStr(r, ['mac-address', 'mac']) || '—',
     uptime: rosFirstStr(r, ['uptime', 'session-time']) || '—',
     statistics: formatTrafficStats(bi, bo),
   };
@@ -165,6 +167,59 @@ function mapPppActiveRow(r) {
     secret,
     address: address || '—',
     uptime: uptime || '—',
+    service: rosFirstStr(r, ['service']) || '—',
+    callerId: rosFirstStr(r, ['caller-id', 'caller-id-value']) || '—',
+  };
+}
+
+function mapHotspotUserRow(r) {
+  const name = rosFirstStr(r, ['name', 'user']);
+  if (!name) return null;
+  return {
+    id: r['.id'] ?? r.numbers ?? null,
+    name,
+    profile: rosFirstStr(r, ['profile']) || '—',
+    disabled: r.disabled === 'true' || r.disabled === true,
+    comment: rosFirstStr(r, ['comment']) || '',
+    limitUptime: rosFirstStr(r, ['limit-uptime']) || '',
+    bytesIn: rosFirstNumber(r, ['bytes-in']),
+    bytesOut: rosFirstNumber(r, ['bytes-out']),
+  };
+}
+
+function mapPppSecretRow(r) {
+  const name = rosFirstStr(r, ['name']);
+  if (!name) return null;
+  return {
+    id: r['.id'] ?? r.numbers ?? null,
+    name,
+    profile: rosFirstStr(r, ['profile']) || '—',
+    service: rosFirstStr(r, ['service']) || '—',
+    disabled: r.disabled === 'true' || r.disabled === true,
+    comment: rosFirstStr(r, ['comment']) || '',
+    remoteAddress: rosFirstStr(r, ['remote-address']) || '',
+  };
+}
+
+function mapRouterDetails(identityRows, resourceRows, boardRows) {
+  const id = identityRows?.[0] || {};
+  const res = resourceRows?.[0] || {};
+  const board = boardRows?.[0] || {};
+  const freeMem = rosFirstNumber(res, ['free-memory', 'free_memory']);
+  const totalMem = rosFirstNumber(res, ['total-memory', 'total_memory']);
+  return {
+    identity: rosFirstStr(id, ['name']) || 'MikroTik',
+    version: rosFirstStr(res, ['version']) || '—',
+    boardName: rosFirstStr(res, ['board-name']) || rosFirstStr(board, ['board-name', 'model']) || '—',
+    architecture: rosFirstStr(res, ['architecture-name', 'cpu']) || '—',
+    uptime: rosFirstStr(res, ['uptime']) || '—',
+    cpuLoad: (() => {
+      const n = rosFirstNumber(res, ['cpu-load', 'cpu']);
+      return Number.isFinite(n) ? n : null;
+    })(),
+    freeMemoryBytes: Number.isFinite(freeMem) ? freeMem : null,
+    totalMemoryBytes: Number.isFinite(totalMem) ? totalMem : null,
+    platform: rosFirstStr(res, ['platform']) || '—',
   };
 }
 
@@ -189,7 +244,20 @@ async function readActiveSessionsOnRouter(router) {
   return withRouterMikrotik(router, async (api) => {
     let hotspotActive = [];
     let pppActive = [];
+    let details = null;
     const errs = [];
+    try {
+      const rawId = await api.write('/system/identity/print');
+      let rawRes = [];
+      try {
+        rawRes = await api.write('/system/resource/print');
+      } catch {
+        /* optional */
+      }
+      details = mapRouterDetails(normalizePrintRows(rawId), normalizePrintRows(rawRes), []);
+    } catch (e) {
+      errs.push(`Details: ${String(e.message || e)}`);
+    }
     try {
       const rows = await hs.printHotspotActive(api);
       hotspotActive = rows.map(mapHotspotActiveRow).filter(Boolean);
@@ -203,9 +271,111 @@ async function readActiveSessionsOnRouter(router) {
       errs.push(`PPP: ${String(e.message || e)}`);
     }
     return {
+      details,
       hotspotActive,
       pppActive,
       error: errs.length ? errs.join(' ') : null,
+    };
+  });
+}
+
+/**
+ * Full live snapshot from one site: router details + registered users + active sessions.
+ * One MikroTik session for everything.
+ */
+export async function getRouterLiveSnapshot(routerId, organizationId) {
+  const router = await loadRouter(routerId, organizationId);
+  const at = new Date().toISOString();
+  const label = routerDisplayName(router) || router.name || router.host || String(router._id);
+
+  return withRouterMikrotik(router, async (api) => {
+    const errs = [];
+    let details = {
+      identity: '—',
+      version: '—',
+      boardName: '—',
+      architecture: '—',
+      uptime: '—',
+      cpuLoad: null,
+      freeMemoryBytes: null,
+      totalMemoryBytes: null,
+      platform: '—',
+    };
+    let pppSecrets = [];
+    let hotspotUsers = [];
+    let pppActive = [];
+    let hotspotActive = [];
+
+    try {
+      const rawId = await api.write('/system/identity/print');
+      let rawRes = [];
+      let rawBoard = [];
+      try {
+        rawRes = await api.write('/system/resource/print');
+      } catch (e) {
+        errs.push(`Resource: ${String(e.message || e)}`);
+      }
+      try {
+        rawBoard = await api.write('/system/routerboard/print');
+      } catch {
+        /* CHR / some boards lack routerboard */
+      }
+      details = mapRouterDetails(
+        normalizePrintRows(rawId),
+        normalizePrintRows(rawRes),
+        normalizePrintRows(rawBoard)
+      );
+    } catch (e) {
+      errs.push(`Identity: ${String(e.message || e)}`);
+    }
+
+    try {
+      const rows = await ppp.printPppSecrets(api);
+      pppSecrets = rows.map(mapPppSecretRow).filter(Boolean);
+    } catch (e) {
+      errs.push(`PPP secrets: ${String(e.message || e)}`);
+    }
+
+    try {
+      const rows = await hs.printHotspotUsers(api);
+      hotspotUsers = rows.map(mapHotspotUserRow).filter(Boolean);
+    } catch (e) {
+      errs.push(`Hotspot users: ${String(e.message || e)}`);
+    }
+
+    try {
+      const rows = await ppp.printPppActive(api);
+      pppActive = rows.map(mapPppActiveRow).filter(Boolean);
+    } catch (e) {
+      errs.push(`PPP active: ${String(e.message || e)}`);
+    }
+
+    try {
+      const rows = await hs.printHotspotActive(api);
+      hotspotActive = rows.map(mapHotspotActiveRow).filter(Boolean);
+    } catch (e) {
+      errs.push(`Hotspot active: ${String(e.message || e)}`);
+    }
+
+    return {
+      at,
+      routerId: String(router._id),
+      routerName: label,
+      host: router.host,
+      transport: router.transport || 'ssh',
+      reachable: !errs.length || Boolean(details.identity && details.identity !== '—'),
+      details,
+      counts: {
+        pppSecrets: pppSecrets.length,
+        hotspotUsers: hotspotUsers.length,
+        pppActive: pppActive.length,
+        hotspotActive: hotspotActive.length,
+      },
+      pppSecrets,
+      hotspotUsers,
+      pppActive,
+      hotspotActive,
+      error: errs.length ? errs.join(' · ') : null,
     };
   });
 }
@@ -235,6 +405,7 @@ export async function listActiveSessionsAllRouters(organizationId) {
           routerName: label,
           host: r.host,
           reachable: !session.error || session.hotspotActive.length > 0 || session.pppActive.length > 0,
+          details: session.details,
           hotspotActive: session.hotspotActive,
           pppActive: session.pppActive,
           error: session.error,

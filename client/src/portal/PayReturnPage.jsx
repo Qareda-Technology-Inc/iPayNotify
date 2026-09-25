@@ -1,12 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { publicFetch } from '../api.js';
+
+const MAX_TRIES = 40;
 
 export function PayReturnPage() {
   const [params] = useSearchParams();
   const ref = params.get('ref');
   const [status, setStatus] = useState(null);
   const [error, setError] = useState('');
+  const [timedOut, setTimedOut] = useState(false);
+  const [checking, setChecking] = useState(false);
+
+  const pollOnce = useCallback(async () => {
+    const data = await publicFetch(`/api/public/payment/${encodeURIComponent(ref)}/status`);
+    setStatus(data);
+    return data;
+  }, [ref]);
 
   useEffect(() => {
     if (!ref) {
@@ -15,14 +25,16 @@ export function PayReturnPage() {
     }
     let cancelled = false;
     let tries = 0;
+    setTimedOut(false);
     const tick = async () => {
       try {
-        const data = await publicFetch(`/api/public/payment/${encodeURIComponent(ref)}/status`);
+        const data = await pollOnce();
         if (cancelled) return;
-        setStatus(data);
-        if (data.status === 'pending' && tries < 40) {
-          tries++;
+        if (data.status === 'pending' && tries < MAX_TRIES) {
+          tries += 1;
           setTimeout(tick, 1500);
+        } else if (data.status === 'pending') {
+          setTimedOut(true);
         }
       } catch (e) {
         if (!cancelled) setError(e.message);
@@ -32,7 +44,21 @@ export function PayReturnPage() {
     return () => {
       cancelled = true;
     };
-  }, [ref]);
+  }, [ref, pollOnce]);
+
+  async function checkAgain() {
+    setChecking(true);
+    setError('');
+    try {
+      const data = await pollOnce();
+      if (data.status === 'pending') setTimedOut(true);
+      else setTimedOut(false);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setChecking(false);
+    }
+  }
 
   if (!ref) {
     return (
@@ -59,10 +85,30 @@ export function PayReturnPage() {
   if (status.status === 'pending') {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center">
-        <p className="text-slate-300">Waiting for payment confirmation…</p>
-        <p className="mt-2 text-sm text-slate-500">
-          If you already paid, this can take a minute. You can keep this page open.
+        <p className="text-slate-300">
+          {timedOut ? 'Still waiting for confirmation' : 'Waiting for payment confirmation…'}
         </p>
+        <p className="mt-2 text-sm text-slate-500">
+          {timedOut
+            ? 'If you already paid, your service will activate when Hubtel confirms. You can check again or contact your ISP with this reference.'
+            : 'If you already paid, this can take a minute. You can keep this page open.'}
+        </p>
+        {timedOut ? (
+          <>
+            <p className="mt-4 font-mono text-xs text-slate-500 break-all">{ref}</p>
+            <button
+              type="button"
+              disabled={checking}
+              onClick={checkAgain}
+              className="mt-6 rounded-lg border border-emerald-600/50 bg-emerald-950/40 px-4 py-2 text-sm text-emerald-200 disabled:opacity-50"
+            >
+              {checking ? 'Checking…' : 'Check again'}
+            </button>
+            <Link to="/portal/renew" className="mt-4 block text-sm text-slate-400 hover:text-emerald-400">
+              Back to renew
+            </Link>
+          </>
+        ) : null}
       </div>
     );
   }

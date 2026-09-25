@@ -337,6 +337,13 @@ export function PaymentsPage() {
                         Hubtel: {t.lastHubtelStatus}
                       </div>
                     ) : null}
+                    {t.walletSettleFailed ? (
+                      <div className="mt-1 text-[10px] text-red-300" title={t.walletSettleFailed.error}>
+                        Wallet settle failed
+                      </div>
+                    ) : t.status === 'paid' && !t.walletSettled ? (
+                      <div className="mt-1 text-[10px] text-amber-300">Wallet unsettled</div>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-xs">{kindLabel(t.kind)}</td>
                   <td className="px-4 py-3">

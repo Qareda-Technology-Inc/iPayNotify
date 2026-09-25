@@ -5,6 +5,7 @@ import { requireRoles } from '../middleware/requireRoles.js';
 import {
   getRouterPppProfiles,
   getRouterPppSecrets,
+  getRouterLiveSnapshot,
   listActiveSessionsAllRouters,
   pingRouterApi,
 } from '../services/mikrotikReadService.js';
@@ -189,7 +190,7 @@ routersApi.get(
   '/:id/mikrotik/ping',
   asyncHandler(async (req, res) => {
     const { identity } = await pingRouterApi(req.params.id, req.organizationId);
-    const out = { ok: true, message: `Connected to ${identity}` };
+    const out = { ok: true, message: `Connected to ${identity}`, identity };
     if (config.walledGarden.syncOnPing) {
       try {
         out.walledGarden = await syncPaymentWalledGarden(req.params.id, req.organizationId);
@@ -198,6 +199,17 @@ routersApi.get(
       }
     }
     res.json(out);
+  })
+);
+
+/**
+ * Live from site: identity/resource + PPP secrets + hotspot users + active sessions.
+ */
+routersApi.get(
+  '/:id/mikrotik/live',
+  asyncHandler(async (req, res) => {
+    const snap = await getRouterLiveSnapshot(req.params.id, req.organizationId);
+    res.json(snap);
   })
 );
 

@@ -65,6 +65,51 @@ function hostnameFromViteApiBase() {
   }
 }
 
+function LiveTable({ title, accent, columns, rows, empty }) {
+  const titleClass =
+    accent === 'cyan' ? 'text-cyan-500/90' : accent === 'violet' ? 'text-violet-500/90' : 'text-slate-400';
+  return (
+    <div>
+      <h5 className={`text-xs font-semibold uppercase tracking-wider ${titleClass}`}>{title}</h5>
+      <div className="mt-2 max-h-72 overflow-auto rounded-xl border border-slate-800">
+        <table className="w-full min-w-[360px] text-left text-sm">
+          <thead className="sticky top-0 border-b border-slate-800 bg-slate-950/95 text-xs text-slate-500">
+            <tr>
+              {columns.map((c) => (
+                <th key={c} className="px-3 py-2 font-medium">
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/80 text-slate-300">
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length} className="px-3 py-6 text-center text-slate-500">
+                  {empty}
+                </td>
+              </tr>
+            ) : (
+              rows.map((cells, i) => (
+                <tr key={i}>
+                  {cells.map((cell, j) => (
+                    <td
+                      key={j}
+                      className={`px-3 py-2 text-xs ${j === 0 ? 'font-mono text-slate-200' : 'text-slate-400'}`}
+                    >
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 
 export function RoutersPanel() {
   const [routers, setRouters] = useState([]);
@@ -77,6 +122,10 @@ export function RoutersPanel() {
   const [wgSyncing, setWgSyncing] = useState(false);
   const [billingChecklist, setBillingChecklist] = useState(null);
   const [billingChecklistErr, setBillingChecklistErr] = useState('');
+  const [liveSnap, setLiveSnap] = useState(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState('');
+  const [liveTab, setLiveTab] = useState('active');
 
   const [addComment, setAddComment] = useState('');
   const [addConnect, setAddConnect] = useState('');
@@ -202,6 +251,29 @@ export function RoutersPanel() {
       setAddError(err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setLiveSnap(null);
+    setLiveError('');
+    setLiveTab('active');
+  }, [selectedId]);
+
+  async function fetchLiveFromSite() {
+    if (!selectedId) return;
+    setLiveLoading(true);
+    setLiveError('');
+    setConnError('');
+    try {
+      const snap = await apiFetch(`/api/routers/${selectedId}/mikrotik/live`);
+      setLiveSnap(snap);
+      if (snap.error) setLiveError(snap.error);
+    } catch (e) {
+      setLiveSnap(null);
+      setLiveError(e.message || 'Could not fetch live data from site');
+    } finally {
+      setLiveLoading(false);
     }
   }
 
@@ -481,11 +553,156 @@ export function RoutersPanel() {
             >
               {wgSyncing ? 'Syncing walled garden…' : 'Sync walled garden only'}
             </button>
+            <button
+              type="button"
+              disabled={liveLoading || !selectedId}
+              onClick={fetchLiveFromSite}
+              className="rounded-lg border border-sky-700/50 bg-sky-950/40 px-4 py-2 text-sm font-medium text-sky-100 hover:bg-sky-950/70 disabled:opacity-50"
+            >
+              {liveLoading ? 'Fetching from site…' : 'Fetch live from site'}
+            </button>
           </div>
 
           {connMessage && <p className="mt-3 text-sm text-emerald-400">{connMessage}</p>}
           {connError && (
             <p className="mt-3 whitespace-pre-wrap text-sm text-amber-200">{connError}</p>
+          )}
+          {liveError && !liveSnap && (
+            <p className="mt-3 whitespace-pre-wrap text-sm text-amber-200">{liveError}</p>
+          )}
+
+          {liveSnap && (
+            <div className="mt-6 space-y-4 rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-medium text-white">Live from site</h4>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {liveSnap.routerName} · {liveSnap.host}
+                    {liveSnap.at ? ` · ${new Date(liveSnap.at).toLocaleString()}` : ''}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className="rounded-md border border-violet-500/30 bg-violet-950/30 px-2 py-1 text-violet-200">
+                    PPP secrets {liveSnap.counts?.pppSecrets ?? 0}
+                  </span>
+                  <span className="rounded-md border border-cyan-500/30 bg-cyan-950/30 px-2 py-1 text-cyan-200">
+                    Hotspot users {liveSnap.counts?.hotspotUsers ?? 0}
+                  </span>
+                  <span className="rounded-md border border-violet-500/30 bg-violet-950/30 px-2 py-1 text-violet-100">
+                    PPP online {liveSnap.counts?.pppActive ?? 0}
+                  </span>
+                  <span className="rounded-md border border-cyan-500/30 bg-cyan-950/30 px-2 py-1 text-cyan-100">
+                    Hotspot online {liveSnap.counts?.hotspotActive ?? 0}
+                  </span>
+                </div>
+              </div>
+
+              {liveSnap.details && (
+                <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4 lg:grid-cols-6">
+                  {[
+                    ['Identity', liveSnap.details.identity],
+                    ['Board', liveSnap.details.boardName],
+                    ['Version', liveSnap.details.version],
+                    ['Uptime', liveSnap.details.uptime],
+                    ['CPU', liveSnap.details.cpuLoad != null ? `${liveSnap.details.cpuLoad}%` : '—'],
+                    ['Arch', liveSnap.details.architecture],
+                  ].map(([k, v]) => (
+                    <div key={k} className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
+                      <p className="text-slate-600">{k}</p>
+                      <p className="mt-0.5 font-medium text-slate-200">{v || '—'}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {liveError && (
+                <p className="rounded-lg border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+                  Partial: {liveError}
+                </p>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                {[
+                  ['active', 'Online sessions'],
+                  ['ppp', 'PPP secrets'],
+                  ['hotspot', 'Hotspot users'],
+                ].map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setLiveTab(id)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+                      liveTab === id
+                        ? 'bg-slate-100 text-slate-900'
+                        : 'border border-slate-700 text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {liveTab === 'active' && (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <LiveTable
+                    title={`Hotspot active (${liveSnap.hotspotActive?.length ?? 0})`}
+                    accent="cyan"
+                    columns={['User', 'Address', 'MAC', 'Uptime']}
+                    rows={(liveSnap.hotspotActive || []).map((r) => [
+                      r.user,
+                      r.address,
+                      r.macAddress,
+                      r.uptime,
+                    ])}
+                    empty="No hotspot sessions"
+                  />
+                  <LiveTable
+                    title={`PPP active (${liveSnap.pppActive?.length ?? 0})`}
+                    accent="violet"
+                    columns={['Secret', 'Address', 'Service', 'Uptime']}
+                    rows={(liveSnap.pppActive || []).map((r) => [
+                      r.secret,
+                      r.address,
+                      r.service,
+                      r.uptime,
+                    ])}
+                    empty="No PPP sessions"
+                  />
+                </div>
+              )}
+
+              {liveTab === 'ppp' && (
+                <LiveTable
+                  title={`PPP secrets on router (${liveSnap.pppSecrets?.length ?? 0})`}
+                  accent="violet"
+                  columns={['Name', 'Profile', 'Service', 'Disabled', 'Comment']}
+                  rows={(liveSnap.pppSecrets || []).map((r) => [
+                    r.name,
+                    r.profile,
+                    r.service,
+                    r.disabled ? 'yes' : 'no',
+                    r.comment || '—',
+                  ])}
+                  empty="No PPP secrets on this router"
+                />
+              )}
+
+              {liveTab === 'hotspot' && (
+                <LiveTable
+                  title={`Hotspot users on router (${liveSnap.hotspotUsers?.length ?? 0})`}
+                  accent="cyan"
+                  columns={['Name', 'Profile', 'Disabled', 'Limit uptime', 'Comment']}
+                  rows={(liveSnap.hotspotUsers || []).map((r) => [
+                    r.name,
+                    r.profile,
+                    r.disabled ? 'yes' : 'no',
+                    r.limitUptime || '—',
+                    r.comment || '—',
+                  ])}
+                  empty="No hotspot users on this router"
+                />
+              )}
+            </div>
           )}
 
           {selected && (
