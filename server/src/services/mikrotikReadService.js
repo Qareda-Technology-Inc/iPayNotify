@@ -138,16 +138,17 @@ function mapHotspotActiveRow(r) {
  * interface `name` is present. `name` on /ppp/active is often the dynamic interface id, not the secret.
  */
 function mapPppActiveRow(r) {
-  let secret = rosFirstStr(r, [
-    'user',
-    'login',
-    'account',
-    'caller-id',
-    'caller-id-value',
-    'name',
-    'interface',
-  ]);
-  const id = r['.id'] ?? r.numbers ?? null;
+  let secret = rosFirstStr(r, ['user', 'login', 'account']);
+  if (!secret) {
+    const iface = rosFirstStr(r, ['name', 'interface']);
+    const fromIface = /^<pppoe-(.+)>$/i.exec(iface);
+    if (fromIface) secret = fromIface[1];
+    else if (iface && !/^</.test(iface)) secret = iface;
+  }
+  if (!secret) {
+    secret = rosFirstStr(r, ['caller-id', 'caller-id-value']);
+  }
+  const id = r['.id'] ?? r.id ?? r.numbers ?? null;
   if (!secret) {
     if (id != null && String(id).trim() !== '') {
       secret = `(session ${String(id).trim()})`;
@@ -441,3 +442,6 @@ export async function listActiveSessionsAllRouters(organizationId) {
     routers: rows,
   };
 }
+
+/** @deprecated alias — kept for any older imports */
+export const getRouterLiveDetails = getRouterLiveSnapshot;

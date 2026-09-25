@@ -205,8 +205,7 @@ export function parseDetailPrintOutput(stdout) {
 
 /**
  * RouterOS `print as-value without-paging` (one logical record per line): `key=value;key=value`.
- * Safer than `print detail` for long session lists where wrapped lines can be dropped by
- * {@link parseDetailPrintOutput}.
+ * Also accepts space-separated `key=value` (terse-like) on a single line.
  */
 export function parseAsValuePrintOutput(stdout) {
   const rows = [];
@@ -216,13 +215,8 @@ export function parseAsValuePrintOutput(stdout) {
     let line = raw.replace(/\r$/, '').trim();
     if (!line || line.startsWith(';;;')) continue;
     if (/^flags:/i.test(line)) continue;
-    /* Strip optional prompt / column header noise */
     line = line.replace(/^#\s*\d+:\s*/, '').replace(/^>\s*/, '');
     if (!line) continue;
-    /**
-     * Export / `print as-value` often prefixes each row with `!`. Stripping restores `key=value;…`.
-     * Skip only bare `!` or `!re` markers with no property data.
-     */
     if (line.startsWith('!')) {
       const rest = line.slice(1).trim();
       if (!rest.includes('=')) continue;
@@ -233,30 +227,190 @@ export function parseAsValuePrintOutput(stdout) {
     const retEq = /^ret\s*=\s*(.+)$/i.exec(line);
     if (retEq) line = retEq[1].trim();
 
+    /* Drop leading row index: `0 name=…` or `0;.id=*1;…` */
+    line = line.replace(/^\d+\s+/, '').replace(/^\d+;/, '');
+
     const obj = {};
-    for (const segment of line.split(';')) {
-      const seg = segment.trim();
-      if (!seg.includes('=')) continue;
-      const eq = seg.indexOf('=');
-      const k = seg.slice(0, eq).trim();
-      if (!k || k === 'ret') continue;
-      let v = seg.slice(eq + 1).trim();
-      if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) {
-        v = v.slice(1, -1).replace(/\\"/g, '"');
+    const parts = line.includes(';') ? line.split(';') : null;
+    if (parts) {
+      for (const segment of parts) {
+        const seg = segment.trim();
+        if (!seg.includes('=')) continue;
+        const eq = seg.indexOf('=');
+        const k = seg.slice(0, eq).trim().replace(/^\./, '');
+        if (!k || k === 'ret') continue;
+        let v = seg.slice(eq + 1).trim();
+        if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) {
+          v = v.slice(1, -1).replace(/\\"/g, '"');
+        }
+        obj[k] = v;
+        /* Keep dotted form too for callers that expect `.id` */
+        if (k === 'id' && !obj['.id']) obj['.id'] = v.startsWith('*') ? v : v;
       }
-      obj[k] = v;
+    } else if (line.includes('=')) {
+      /* Terse / detail one-liner: space-separated key=value (values may be quoted) */
+      Object.assign(obj, parseRosKvSegment(line));
+      /* Normalize `.id` / leading dots */
+      for (const k of Object.keys(obj)) {
+        if (k.startsWith('.') && k.length > 1) {
+          const bare = k.slice(1);
+          if (obj[bare] == null) obj[bare] = obj[k];
+        }
+      }
     }
+
     if (Object.keys(obj).length > 0) rows.push(obj);
   }
   return rows;
+}
+
+/**
+ * Default `print` (no detail/as-value) for /ppp active and /ip hotspot active —
+ * column table under a Flags: header. Previously mis-detected as "empty list".
+ */
+export function parseTabularActivePrint(stdout, kind = 'ppp') {
+  const rows = [];
+  if (!stdout || typeof stdout !== 'string') return rows;
+
+  const lines = stdout.split(/\r?\n/).map((l) => l.replace(/\r$/, ''));
+  let headerIdx = -1;
+  let headers = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t || /^flags:/i.test(t) || t.startsWith(';;;')) continue;
+    /* Header row often starts with # */
+    if (/^#\s+/i.test(t) || (/NAME/i.test(t) && /UPTIME/i.test(t))) {
+      headerIdx = i;
+      headers = t.split(/\s+/).filter(Boolean);
+      /* Drop leading # column label */
+      if (headers[0] === '#') headers = headers.slice(1);
+      break;
+    }
+  }
+
+  const dataLines = headerIdx >= 0 ? lines.slice(headerIdx + 1) : lines;
+
+  for (const line of dataLines) {
+    const trimmed = line.trim();
+    if (!trimmed || /^flags:/i.test(trimmed) || trimmed.startsWith(';;;')) continue;
+    if (!/^\d+/.test(trimmed) && !/^[A-Z]{0,3}\s+\S/.test(trimmed)) continue;
+
+    /* `0 R name …` or `0 name …` — strip index + optional flag letters */
+    let rest = trimmed.replace(/^\d+\s+/, '');
+    rest = rest.replace(/^[A-Z]{1,4}\s+/, '');
+    if (!rest) continue;
+
+    const cols = rest.split(/\s+/).filter(Boolean);
+    if (cols.length === 0) continue;
+
+    const obj = { numbers: String(rows.length) };
+
+    if (kind === 'hotspot') {
+      /*
+       * Typical: USER ADDRESS MAC-ADDRESS UPTIME [SERVER …]
+       * Empty USER collapses in split(/\s+/) → detect IP/MAC/uptime shapes.
+       */
+      const looksIp = (s) => /^\d{1,3}(\.\d{1,3}){3}$/.test(s);
+      const looksMac = (s) => /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i.test(s);
+      const looksUptime = (s) => /^\d+[wdhms]/i.test(s) || /^\d+:\d+/.test(s);
+
+      if (cols.length >= 4 && !looksIp(cols[0]) && !looksMac(cols[0])) {
+        obj.user = cols[0];
+        obj.address = cols[1];
+        obj['mac-address'] = cols[2];
+        obj.uptime = cols[3];
+      } else if (cols.length >= 3 && looksIp(cols[0])) {
+        obj.user = cols[1] && looksMac(cols[1]) ? cols[1] : cols[0];
+        obj.address = cols[0];
+        obj['mac-address'] = looksMac(cols[1]) ? cols[1] : cols[2] || '';
+        obj.uptime = looksUptime(cols[cols.length - 1]) ? cols[cols.length - 1] : cols[2] || '';
+      } else if (headers.length >= 3) {
+        const map = zipTabular(headers, cols);
+        obj.user = map.USER || map.NAME || cols[0] || '';
+        obj.address = map.ADDRESS || '';
+        obj['mac-address'] = map['MAC-ADDRESS'] || map.MAC || '';
+        obj.uptime = map.UPTIME || '';
+        obj.server = map.SERVER || '';
+      } else {
+        obj.user = cols[0] || '';
+        obj.address = cols[1] || '';
+        obj['mac-address'] = cols[2] || '';
+        obj.uptime = cols[3] || '';
+      }
+      if (!obj.user && obj['mac-address']) obj.user = obj['mac-address'];
+    } else {
+      /*
+       * Typical: NAME SERVICE CALLER-ID ADDRESS UPTIME ENCODING
+       * NAME is often <pppoe-login> interface; real login may be absent in tabular mode.
+       */
+      if (headers.length >= 3) {
+        const map = zipTabular(headers, cols);
+        obj.name = map.NAME || cols[0] || '';
+        obj.service = map.SERVICE || '';
+        obj['caller-id'] = map['CALLER-ID'] || map.CALLER || '';
+        obj.address = map.ADDRESS || '';
+        obj.uptime = map.UPTIME || '';
+        obj.user = map.USER || map.LOGIN || '';
+      } else {
+        obj.name = cols[0] || '';
+        obj.service = cols[1] || '';
+        obj['caller-id'] = cols[2] || '';
+        obj.address = cols[3] || '';
+        obj.uptime = cols[4] || '';
+      }
+      if (!obj.user && obj.name) {
+        const m = /^<pppoe-(.+)>$/i.exec(String(obj.name));
+        if (m) obj.user = m[1];
+      }
+    }
+
+    if (obj.user || obj.name || obj.address || obj['mac-address']) rows.push(obj);
+  }
+
+  return rows;
+}
+
+function zipTabular(headers, cols) {
+  const map = {};
+  /* Align from the right when caller-id / MAC has spaces — best-effort left fill */
+  const n = Math.min(headers.length, cols.length);
+  for (let i = 0; i < n; i++) {
+    map[String(headers[i]).toUpperCase()] = cols[i];
+  }
+  return map;
 }
 
 /** PPP / hotspot active lists: use `print as-value` over SSH for complete row counts. */
 export function isActiveSessionsListPrint(cmd) {
   return (
     typeof cmd === 'string' &&
-    (cmd === '/ppp/active/print' || cmd === '/ip/hotspot/active/print')
+    (cmd === '/ppp/active/print' ||
+      cmd === '/ip/hotspot/active/print' ||
+      cmd === '/ppp/secret/print' ||
+      cmd === '/ip/hotspot/user/print')
   );
+}
+
+/**
+ * Parse active/list print output with multiple RouterOS formats.
+ * @param {'ppp'|'hotspot'|'generic'} kind
+ */
+export function parseActiveListStdout(stdout, kind = 'generic') {
+  if (!stdout || !String(stdout).trim()) return [];
+
+  const asRows = parseAsValuePrintOutput(stdout);
+  if (asRows.length > 0) return asRows;
+
+  const detailRows = parseDetailPrintOutput(stdout);
+  if (detailRows.length > 0) return detailRows;
+
+  if (kind === 'ppp' || kind === 'hotspot') {
+    const tabRows = parseTabularActivePrint(stdout, kind);
+    if (tabRows.length > 0) return tabRows;
+  }
+
+  return [];
 }
 
 export function parseIdentityName(stdout) {

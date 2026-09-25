@@ -6,11 +6,70 @@ import {
   isSshAuthFailure,
   isActiveSessionsListPrint,
   normalizeRouterForSsh,
+  parseActiveListStdout,
   parseAsValuePrintOutput,
   parseDetailPrintOutput,
   parseIdentityName,
   sshLoginRejectedError,
 } from './rosSsh.js';
+
+function listKindFromPrintCmd(cmd) {
+  if (cmd === '/ppp/active/print') return 'ppp';
+  if (cmd === '/ip/hotspot/active/print') return 'hotspot';
+  if (cmd === '/ppp/secret/print') return 'ppp';
+  if (cmd === '/ip/hotspot/user/print') return 'hotspot';
+  return 'generic';
+}
+
+/**
+ * Fetch a print list using as-value → detail → terse → default table.
+ * Fixes empty results when RouterOS returns tabular `Flags:` output (no key=value).
+ */
+async function fetchPrintList(adapter, printCmd) {
+  const verb = apiPathToCliVerb(printCmd.replace(/\/print$/, ''));
+  const kind = listKindFromPrintCmd(printCmd);
+  const attempts = [
+    `${verb} print as-value without-paging`,
+    `${verb} print detail without-paging`,
+    `${verb} print terse without-paging`,
+    `${verb} print without-paging`,
+  ];
+
+  let lastOut = '';
+  let best = [];
+  for (const line of attempts) {
+    try {
+      const out = await execRos(adapter.conn, line);
+      lastOut = out || lastOut;
+      const rows = parseActiveListStdout(out, kind);
+      if (rows.length > best.length) best = rows;
+      if (rows.length > 0) {
+        /* Prefer as-value/detail when they return data; keep scanning if first pass was weak */
+        if (line.includes('as-value') || line.includes('detail') || rows.length >= 1) {
+          return rows;
+        }
+      }
+    } catch (e) {
+      /* try next format — some ROS builds dislike as-value/terse */
+      if (/syntax error|expected end of command|ambiguous|bad command/i.test(String(e.message || e))) {
+        continue;
+      }
+      /* Non-syntax failures (permission) — still try other formats once */
+      continue;
+    }
+  }
+
+  if (best.length > 0) return best;
+  if (lastOut && String(lastOut).trim()) {
+    console.warn(
+      '[mikrotik.print]',
+      printCmd,
+      'parsed 0 rows; stdout sample=',
+      String(lastOut).slice(0, 280).replace(/\s+/g, ' ')
+    );
+  }
+  return parseActiveListStdout(lastOut, kind);
+}
 
 /** Minimal RouterOS API-like surface over SSH exec (same CLI as Winbox terminal). */
 export class SshRosAdapter {
@@ -34,6 +93,10 @@ export class SshRosAdapter {
    * @param {...unknown} _rest unused (API compat)
    */
   async write(cmd, ..._rest) {
+    if (typeof cmd === 'string' && isActiveSessionsListPrint(cmd)) {
+      return fetchPrintList(this, cmd);
+    }
+
     const execLine = buildExecFromWriteArgs(cmd);
     let out;
     try {
@@ -49,24 +112,8 @@ export class SshRosAdapter {
       if (base === 'system identity') {
         return [{ name: parseIdentityName(out) }];
       }
-      if (isActiveSessionsListPrint(cmd)) {
-        const asRows = parseAsValuePrintOutput(out);
-        if (asRows.length > 0) return asRows;
-        const looksLikeEmptyList = /flags:/i.test(out) && !/=/.test(out);
-        if (looksLikeEmptyList || !String(out || '').trim()) {
-          if (looksLikeEmptyList) return [];
-          /* Empty stdout: retry detail (some ROS builds mishandle as-value). */
-        } else if (/=/.test(out)) {
-          return parseDetailPrintOutput(out);
-        }
-        const verb = apiPathToCliVerb(cmd.replace(/\/print$/, ''));
-        try {
-          const detailOut = await execRos(this.conn, `${verb} print detail without-paging`);
-          return parseDetailPrintOutput(detailOut);
-        } catch {
-          return parseDetailPrintOutput(out);
-        }
-      }
+      const asRows = parseAsValuePrintOutput(out);
+      if (asRows.length > 0) return asRows;
       return parseDetailPrintOutput(out);
     }
 
