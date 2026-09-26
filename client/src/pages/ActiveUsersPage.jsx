@@ -15,15 +15,6 @@ function IconRefresh({ className }) {
   );
 }
 
-function fmtMem(bytes) {
-  const n = Number(bytes);
-  if (!Number.isFinite(n) || n < 0) return '—';
-  if (n < 1024) return `${n} B`;
-  if (n < 1048576) return `${(n / 1024).toFixed(0)} KiB`;
-  if (n < 1073741824) return `${(n / 1048576).toFixed(1)} MiB`;
-  return `${(n / 1073741824).toFixed(2)} GiB`;
-}
-
 export function ActiveUsersPage() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -140,14 +131,10 @@ export function ActiveUsersPage() {
                     <p className="mt-0.5 font-mono text-xs text-slate-500">{r.host}</p>
                   </div>
                   {r.details && (
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 sm:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 sm:grid-cols-3">
                       <div>
                         <span className="text-slate-600">Identity</span>
                         <p className="font-medium text-slate-200">{r.details.identity}</p>
-                      </div>
-                      <div>
-                        <span className="text-slate-600">Board</span>
-                        <p className="font-medium text-slate-200">{r.details.boardName}</p>
                       </div>
                       <div>
                         <span className="text-slate-600">Version</span>
@@ -157,23 +144,6 @@ export function ActiveUsersPage() {
                         <span className="text-slate-600">Uptime</span>
                         <p className="font-medium text-slate-200">{r.details.uptime}</p>
                       </div>
-                      {r.details.cpuLoad != null && (
-                        <div>
-                          <span className="text-slate-600">CPU</span>
-                          <p className="font-medium text-slate-200">{r.details.cpuLoad}%</p>
-                        </div>
-                      )}
-                      {r.details.freeMemoryBytes != null && (
-                        <div>
-                          <span className="text-slate-600">Free mem</span>
-                          <p className="font-medium text-slate-200">
-                            {fmtMem(r.details.freeMemoryBytes)}
-                            {r.details.totalMemoryBytes != null
-                              ? ` / ${fmtMem(r.details.totalMemoryBytes)}`
-                              : ''}
-                          </p>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
@@ -197,12 +167,11 @@ export function ActiveUsersPage() {
                     Hotspot active ({r.hotspotActive?.length ?? 0})
                   </h3>
                   <div className="mt-2 overflow-x-auto rounded-xl border border-slate-800">
-                    <table className="w-full min-w-[420px] text-left text-sm">
+                    <table className="w-full min-w-[360px] text-left text-sm">
                       <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
                         <tr>
                           <th className="px-3 py-2">User</th>
-                          <th className="px-3 py-2">Address</th>
-                          <th className="px-3 py-2">MAC</th>
+                          <th className="px-3 py-2">IP</th>
                           <th className="px-3 py-2">Uptime</th>
                           <th className="px-3 py-2">Traffic</th>
                         </tr>
@@ -210,18 +179,15 @@ export function ActiveUsersPage() {
                       <tbody className="divide-y divide-slate-800/80 text-slate-300">
                         {(r.hotspotActive || []).length === 0 ? (
                           <tr>
-                            <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
+                            <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
                               No hotspot sessions
                             </td>
                           </tr>
                         ) : (
                           r.hotspotActive.map((row, i) => (
-                            <tr key={row.id || `${row.user}-${i}`}>
+                            <tr key={row.id || `${row.user}-${row.address}-${i}`}>
                               <td className="px-3 py-2 font-mono text-sm text-cyan-200/90">{row.user}</td>
                               <td className="px-3 py-2 font-mono text-xs">{row.address || '—'}</td>
-                              <td className="px-3 py-2 font-mono text-xs text-slate-500">
-                                {row.macAddress || '—'}
-                              </td>
                               <td className="px-3 py-2 text-xs text-slate-400">{row.uptime}</td>
                               <td className="px-3 py-2 font-mono text-xs text-slate-400">{row.statistics}</td>
                             </tr>
@@ -237,19 +203,18 @@ export function ActiveUsersPage() {
                     PPP active ({r.pppActive?.length ?? 0})
                   </h3>
                   <div className="mt-2 overflow-x-auto rounded-xl border border-slate-800">
-                    <table className="w-full min-w-[420px] text-left text-sm">
+                    <table className="w-full min-w-[320px] text-left text-sm">
                       <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
                         <tr>
-                          <th className="px-3 py-2">Secret</th>
-                          <th className="px-3 py-2">Address</th>
-                          <th className="px-3 py-2">Service</th>
+                          <th className="px-3 py-2">Username</th>
+                          <th className="px-3 py-2">IP</th>
                           <th className="px-3 py-2">Uptime</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/80 text-slate-300">
                         {(r.pppActive || []).length === 0 ? (
                           <tr>
-                            <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
+                            <td colSpan={3} className="px-3 py-6 text-center text-slate-500">
                               No PPP sessions
                             </td>
                           </tr>
@@ -258,7 +223,6 @@ export function ActiveUsersPage() {
                             <tr key={row.id || `${row.secret}-${i}`}>
                               <td className="px-3 py-2 font-mono text-sm text-violet-200/90">{row.secret}</td>
                               <td className="px-3 py-2 font-mono text-xs">{row.address}</td>
-                              <td className="px-3 py-2 text-xs text-slate-400">{row.service || '—'}</td>
                               <td className="px-3 py-2 text-xs text-slate-400">{row.uptime}</td>
                             </tr>
                           ))

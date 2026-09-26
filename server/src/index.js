@@ -8,6 +8,7 @@ import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { publicPortalRouter } from './routes/publicPortal.js';
 import { hubtelPaymentsRouter } from './routes/hubtelPayments.js';
+import { wireguardRegisterRouter } from './routes/wireguardRegister.js';
 import { protectedApiRouter } from './routes/protectedApi.js';
 import { superAdminApiRouter } from './routes/superAdminApi.js';
 import { startBillingScheduler } from './jobs/scheduler.js';
@@ -112,6 +113,11 @@ app.use('/api/public', publicPortalRouter);
 app.use('/api/payments/hubtel', hubtelPaymentsRouter);
 /** Legacy path kept so old MTN callback registrations still hit a handler if needed. */
 app.use('/api/payments/momo', hubtelPaymentsRouter);
+/**
+ * Public WireGuard self-registration (MikroTik /tool fetch).
+ * Mounted before protected /api/routers so no JWT is required.
+ */
+app.use('/api/routers', wireguardRegisterRouter);
 app.use('/api/super-admin', superAdminApiRouter);
 app.use('/api', protectedApiRouter);
 
@@ -163,4 +169,9 @@ app.listen(config.port, () => {
   console.log(
     '[hubtel] Smoke-test callback logging: GET /api/payments/hubtel/callback/ping (then check these logs)'
   );
+  if (config.wireguard?.enabled) {
+    console.log(`[wireguard] Registration ready → POST /api/routers/register (endpoint ${config.wireguard.endpoint})`);
+  } else {
+    console.log('[wireguard] Not configured (set WG_VPS_HOST, WG_SERVER_PUBLIC_KEY, WG_ENDPOINT, WG_VPS_SSH_KEY_PATH)');
+  }
 });

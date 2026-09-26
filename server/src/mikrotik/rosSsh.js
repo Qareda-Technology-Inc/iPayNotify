@@ -310,6 +310,7 @@ export function parseTabularActivePrint(stdout, kind = 'ppp') {
       /*
        * Typical: USER ADDRESS MAC-ADDRESS UPTIME [SERVER …]
        * Empty USER collapses in split(/\s+/) → detect IP/MAC/uptime shapes.
+       * Never put MAC into `user`.
        */
       const looksIp = (s) => /^\d{1,3}(\.\d{1,3}){3}$/.test(s);
       const looksMac = (s) => /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i.test(s);
@@ -321,24 +322,29 @@ export function parseTabularActivePrint(stdout, kind = 'ppp') {
         obj['mac-address'] = cols[2];
         obj.uptime = cols[3];
       } else if (cols.length >= 3 && looksIp(cols[0])) {
-        obj.user = cols[1] && looksMac(cols[1]) ? cols[1] : cols[0];
+        /* USER blank: ADDRESS MAC UPTIME */
+        obj.user = '';
         obj.address = cols[0];
-        obj['mac-address'] = looksMac(cols[1]) ? cols[1] : cols[2] || '';
-        obj.uptime = looksUptime(cols[cols.length - 1]) ? cols[cols.length - 1] : cols[2] || '';
+        obj['mac-address'] = looksMac(cols[1]) ? cols[1] : '';
+        obj.uptime = looksUptime(cols[cols.length - 1])
+          ? cols[cols.length - 1]
+          : looksUptime(cols[2])
+            ? cols[2]
+            : '';
       } else if (headers.length >= 3) {
         const map = zipTabular(headers, cols);
-        obj.user = map.USER || map.NAME || cols[0] || '';
+        const u = map.USER || map.NAME || '';
+        obj.user = looksMac(u) ? '' : u;
         obj.address = map.ADDRESS || '';
         obj['mac-address'] = map['MAC-ADDRESS'] || map.MAC || '';
         obj.uptime = map.UPTIME || '';
         obj.server = map.SERVER || '';
       } else {
-        obj.user = cols[0] || '';
-        obj.address = cols[1] || '';
-        obj['mac-address'] = cols[2] || '';
-        obj.uptime = cols[3] || '';
+        obj.user = looksMac(cols[0]) ? '' : cols[0] || '';
+        obj.address = looksIp(cols[0]) ? cols[0] : cols[1] || '';
+        obj['mac-address'] = cols.find((c) => looksMac(c)) || '';
+        obj.uptime = cols.find((c) => looksUptime(c)) || '';
       }
-      if (!obj.user && obj['mac-address']) obj.user = obj['mac-address'];
     } else {
       /*
        * Typical: NAME SERVICE CALLER-ID ADDRESS UPTIME ENCODING

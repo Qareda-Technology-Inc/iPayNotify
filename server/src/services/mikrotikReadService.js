@@ -108,26 +108,30 @@ function formatTrafficStats(bytesInRaw, bytesOutRaw) {
   return `↓ ${fmt(hasIn ? bi : 0)} · ↑ ${fmt(hasOut ? bo : 0)}`;
 }
 
+function looksLikeMac(s) {
+  return /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i.test(String(s || '').trim());
+}
+
 /**
- * Hotspot active: user, address, MAC, uptime, traffic.
+ * Hotspot active: real username only (never use MAC as the name).
  */
 function mapHotspotActiveRow(r) {
-  const user = rosFirstStr(r, [
-    'user',
-    'user-name',
-    'username',
-    'name',
-    'mac-address',
-    'caller-id',
-  ]);
-  if (!user) return null;
+  let user = rosFirstStr(r, ['user', 'user-name', 'username', 'name']);
+  /* Reject MAC / empty masquerading as username */
+  if (user && looksLikeMac(user)) user = '';
+
+  const mac = rosFirstStr(r, ['mac-address', 'mac']);
+  const address = rosFirstStr(r, ['address']);
   const bi = rosFirstNumber(r, ['bytes-in', 'bytes_in', 'rx-byte']);
   const bo = rosFirstNumber(r, ['bytes-out', 'bytes_out', 'tx-byte']);
+
+  if (!user && !address && !mac) return null;
+
   return {
-    id: r['.id'] ?? r.numbers ?? null,
-    user,
-    address: rosFirstStr(r, ['address', 'login-by']) || '—',
-    macAddress: rosFirstStr(r, ['mac-address', 'mac']) || '—',
+    id: r['.id'] ?? r.id ?? r.numbers ?? null,
+    user: user || '—',
+    address: address || '—',
+    macAddress: mac && looksLikeMac(mac) ? mac : mac || '—',
     uptime: rosFirstStr(r, ['uptime', 'session-time']) || '—',
     statistics: formatTrafficStats(bi, bo),
   };

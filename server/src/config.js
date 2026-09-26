@@ -177,4 +177,33 @@ export const config = {
    * Org admins for the paying tenant are always included when present.
    */
   paymentAdminNotifyEmails: (process.env.PAYMENT_ADMIN_NOTIFY_EMAIL || '').trim(),
+  /**
+   * Central WireGuard VPS — MikroTik routers self-register as peers (10.10.10.0/24).
+   * POST /api/routers/register (plain-text response for RouterOS).
+   */
+  wireguard: {
+    vpsHost: (process.env.WG_VPS_HOST || '').trim(),
+    vpsSshPort: Number(process.env.WG_VPS_SSH_PORT) || 22,
+    vpsSshUser: (process.env.WG_VPS_SSH_USER || 'root').trim(),
+    vpsSshKeyPath: (process.env.WG_VPS_SSH_KEY_PATH || '').trim(),
+    /** Inline PEM if key file is not mounted (e.g. some PaaS). Prefer KEY_PATH. */
+    vpsSshPrivateKey: (process.env.WG_VPS_SSH_PRIVATE_KEY || '').trim(),
+    vpsSshPassphrase: (process.env.WG_VPS_SSH_PASSPHRASE || '').trim(),
+    interfaceName: (process.env.WG_INTERFACE || 'wg0').trim() || 'wg0',
+    serverPublicKey: (process.env.WG_SERVER_PUBLIC_KEY || '').trim(),
+    /** host:port routers use as endpoint, e.g. qarefi.qaretech.com:51820 */
+    endpoint: (process.env.WG_ENDPOINT || '').trim(),
+    /** allowed-address on the MikroTik peer toward the VPS */
+    clientAllowedIps: (process.env.WG_CLIENT_ALLOWED_IPS || '10.10.10.0/24').trim(),
+    /** Optional shared secret routers must send as token= or X-Wg-Register-Token */
+    registerToken: (process.env.WG_REGISTER_TOKEN || '').trim(),
+    get enabled() {
+      return Boolean(
+        this.vpsHost &&
+          this.serverPublicKey &&
+          this.endpoint &&
+          (this.vpsSshKeyPath || this.vpsSshPrivateKey)
+      );
+    },
+  },
 };

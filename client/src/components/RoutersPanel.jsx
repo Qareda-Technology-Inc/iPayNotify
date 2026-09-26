@@ -598,14 +598,11 @@ export function RoutersPanel() {
               </div>
 
               {liveSnap.details && (
-                <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4 lg:grid-cols-6">
+                <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
                   {[
                     ['Identity', liveSnap.details.identity],
-                    ['Board', liveSnap.details.boardName],
                     ['Version', liveSnap.details.version],
                     ['Uptime', liveSnap.details.uptime],
-                    ['CPU', liveSnap.details.cpuLoad != null ? `${liveSnap.details.cpuLoad}%` : '—'],
-                    ['Arch', liveSnap.details.architecture],
                   ].map(([k, v]) => (
                     <div key={k} className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
                       <p className="text-slate-600">{k}</p>
@@ -647,11 +644,10 @@ export function RoutersPanel() {
                   <LiveTable
                     title={`Hotspot active (${liveSnap.hotspotActive?.length ?? 0})`}
                     accent="cyan"
-                    columns={['User', 'Address', 'MAC', 'Uptime']}
+                    columns={['User', 'IP', 'Uptime']}
                     rows={(liveSnap.hotspotActive || []).map((r) => [
                       r.user,
                       r.address,
-                      r.macAddress,
                       r.uptime,
                     ])}
                     empty="No hotspot sessions"
@@ -659,11 +655,10 @@ export function RoutersPanel() {
                   <LiveTable
                     title={`PPP active (${liveSnap.pppActive?.length ?? 0})`}
                     accent="violet"
-                    columns={['Secret', 'Address', 'Service', 'Uptime']}
+                    columns={['Username', 'IP', 'Uptime']}
                     rows={(liveSnap.pppActive || []).map((r) => [
                       r.secret,
                       r.address,
-                      r.service,
                       r.uptime,
                     ])}
                     empty="No PPP sessions"
@@ -675,13 +670,11 @@ export function RoutersPanel() {
                 <LiveTable
                   title={`PPP secrets on router (${liveSnap.pppSecrets?.length ?? 0})`}
                   accent="violet"
-                  columns={['Name', 'Profile', 'Service', 'Disabled', 'Comment']}
+                  columns={['Username', 'Profile', 'Disabled']}
                   rows={(liveSnap.pppSecrets || []).map((r) => [
                     r.name,
                     r.profile,
-                    r.service,
                     r.disabled ? 'yes' : 'no',
-                    r.comment || '—',
                   ])}
                   empty="No PPP secrets on this router"
                 />
@@ -691,13 +684,11 @@ export function RoutersPanel() {
                 <LiveTable
                   title={`Hotspot users on router (${liveSnap.hotspotUsers?.length ?? 0})`}
                   accent="cyan"
-                  columns={['Name', 'Profile', 'Disabled', 'Limit uptime', 'Comment']}
+                  columns={['Username', 'Profile', 'Disabled']}
                   rows={(liveSnap.hotspotUsers || []).map((r) => [
                     r.name,
                     r.profile,
                     r.disabled ? 'yes' : 'no',
-                    r.limitUptime || '—',
-                    r.comment || '—',
                   ])}
                   empty="No hotspot users on this router"
                 />

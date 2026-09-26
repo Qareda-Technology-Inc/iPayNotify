@@ -20,3 +20,4 @@ export { TicketSite } from './TicketSite.js';
 export { TicketSiteSeller } from './TicketSiteSeller.js';
 export { TicketType } from './TicketType.js';
 export { TicketSale } from './TicketSale.js';
+export { WireGuardPeer } from './WireGuardPeer.js';
