@@ -197,7 +197,7 @@ export function HotspotPanel() {
     try {
       const s = await apiFetch('/api/hotspot/vouchers/reconcile', { method: 'POST', body: '{}' });
       setInfo(
-        `Usage synced — marked used: ${s.markedUsed ?? 0}, bytes updated: ${s.updatedBytes ?? 0}, exhausted removed: ${s.exhausted ?? 0}.`
+        `Usage synced — marked used: ${s.markedUsed ?? 0}, MAC locked: ${s.macLocked ?? 0}, bytes updated: ${s.updatedBytes ?? 0}, exhausted removed: ${s.exhausted ?? 0}.`
       );
       await loadMeta();
     } catch (err) {

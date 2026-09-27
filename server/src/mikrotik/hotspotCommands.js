@@ -382,6 +382,31 @@ export async function setHotspotUserComment(api, username, comment) {
   ]);
 }
 
+/**
+ * Lock hotspot user to a MAC (MikroTicket-style device binding).
+ * Sets mac-address + comment in one CLI call when possible.
+ */
+export async function setHotspotUserMacAndComment(api, username, mac, comment) {
+  const nameLit = cliEscapeValue(username);
+  const macLit = cliEscapeValue(mac);
+  const commentLit = cliEscapeValue(comment);
+  if (typeof api?.execCli === 'function') {
+    const out = await api.execCli(
+      `/ip hotspot user set [find name=${nameLit}] mac-address=${macLit} comment=${commentLit}`
+    );
+    assertCliOk(out, 'Hotspot user mac/comment set');
+    return out;
+  }
+  const row = await findHotspotUserByName(api, username);
+  if (!row?.['.id']) return null;
+  return api.write([
+    '/ip/hotspot/user/set',
+    `=.id=${row['.id']}`,
+    `=mac-address=${mac}`,
+    `=comment=${comment}`,
+  ]);
+}
+
 export async function printHotspotUsers(api) {
   return normalizePrintRows(await api.write('/ip/hotspot/user/print'));
 }

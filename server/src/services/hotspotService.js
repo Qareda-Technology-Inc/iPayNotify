@@ -3,7 +3,10 @@ import mongoose from 'mongoose';
 import { HotspotVoucher, PlanPackage, Router } from '../models/index.js';
 import { withRouterMikrotik } from '../mikrotik/routeros.js';
 import * as hs from '../mikrotik/hotspotCommands.js';
-import { formatExpiryComment } from '../utils/expiryComment.js';
+import {
+  formatMikroTicketComment,
+  normalizeMacAddress,
+} from '../utils/mikroTicketComment.js';
 import { resolveRouter } from './routerResolver.js';
 import { cliEscapeValue } from '../mikrotik/rosSsh.js';
 import { organizationIdForRouter } from '../db/defaultOrganizationId.js';
@@ -218,9 +221,14 @@ function elapsedSecondsFromPackage(pkg) {
 
 export async function syncVoucherToRouter(voucher) {
   const router = await resolveRouter(voucher.routerId);
-  const comment = voucher.validUntil
-    ? formatExpiryComment(voucher.validUntil)
-    : 'QareFi hotspot voucher';
+  const comment = formatMikroTicketComment({
+    createdAt: voucher.createdAt || new Date(),
+    voucherId: voucher._id,
+    usersPerTicket: voucher.usersPerTicket,
+    activatedAt: voucher.usedAt,
+    mac: voucher.lockedMac,
+    validUntil: voucher.validUntil,
+  });
 
   await withRouterMikrotik(router, async (api) => {
     if (typeof api.execCli === 'function') {
@@ -244,6 +252,12 @@ export async function syncVoucherToRouter(voucher) {
       speedDownMbps: voucher.speedDownMbps,
       speedUpMbps: voucher.speedUpMbps,
     });
+    /* Re-apply MAC lock if already activated */
+    if (voucher.lockedMac) {
+      await hs.setHotspotUserMacAndComment(api, voucher.code, voucher.lockedMac, comment).catch(
+        () => {}
+      );
+    }
     voucher.password = '';
     voucher.mikrotikInternalId = row?.['.id'] || row?.id || undefined;
     await voucher.save();
@@ -257,7 +271,6 @@ export async function syncVoucherToRouter(voucher) {
 async function pushVoucherBatchToRouter(vouchers, router, pkg) {
   if (!vouchers.length) return;
   const profileName = hotspotProfileNameForPackage(pkg);
-  const comment = 'QareFi hotspot voucher';
 
   await withRouterMikrotik(router, async (api) => {
     await hs.upsertHotspotUserProfile(api, profileName, {
@@ -268,6 +281,12 @@ async function pushVoucherBatchToRouter(vouchers, router, pkg) {
     });
 
     for (const voucher of vouchers) {
+      const comment = formatMikroTicketComment({
+        createdAt: voucher.createdAt || new Date(),
+        voucherId: voucher._id,
+        usersPerTicket: voucher.usersPerTicket ?? pkg.usersPerTicket,
+        validUntil: voucher.validUntil,
+      });
       if (typeof api.execCli === 'function') {
         await api
           .execCli(`/ip hotspot user remove [find name=${cliEscapeValue(voucher.code)}]`)
@@ -472,6 +491,7 @@ export async function reconcileHotspotVoucherUsage(organizationId) {
   const summary = {
     routers: routerIds.length,
     markedUsed: 0,
+    macLocked: 0,
     updatedBytes: 0,
     exhausted: 0,
     errors: [],
@@ -504,6 +524,9 @@ export async function reconcileHotspotVoucherUsage(organizationId) {
           if (!user) continue;
           const v = byCode.get(user);
           if (!v) continue;
+          const mac = normalizeMacAddress(
+            row['mac-address'] || row.mac || row['mac-address'] || ''
+          );
           let justActivated = false;
           if (!v.usedAt) {
             v.usedAt = now;
@@ -514,15 +537,34 @@ export async function reconcileHotspotVoucherUsage(organizationId) {
               v.validUntil = new Date(now.getTime() + elapsed * 1000);
             }
           }
+          if (mac && !v.lockedMac) {
+            v.lockedMac = mac;
+            summary.macLocked++;
+            justActivated = true;
+          }
           v.lastSeenAt = now;
           await v.save();
-          if (justActivated && v.validUntil) {
+
+          /* On first activation: stamp da+mc in comment and lock MAC on MikroTik user */
+          if (justActivated && (v.lockedMac || v.validUntil)) {
             try {
-              await hs.setHotspotUserComment(api, v.code, formatExpiryComment(v.validUntil));
+              const comment = formatMikroTicketComment({
+                createdAt: v.createdAt,
+                voucherId: v._id,
+                usersPerTicket: v.usersPerTicket,
+                activatedAt: v.usedAt,
+                mac: v.lockedMac,
+                validUntil: v.validUntil,
+              });
+              if (v.lockedMac) {
+                await hs.setHotspotUserMacAndComment(api, v.code, v.lockedMac, comment);
+              } else {
+                await hs.setHotspotUserComment(api, v.code, comment);
+              }
             } catch (e) {
               summary.errors.push({
                 id: String(v._id),
-                message: `stamp comment: ${e.message}`,
+                message: `activate lock: ${e.message}`,
               });
             }
           }
