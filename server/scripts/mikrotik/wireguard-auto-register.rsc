@@ -160,7 +160,7 @@
   :error ("registration failed: " . $errMsg)
 }
 
-:if ([:len $allowedIps] = 0) do={ :set allowedIps "10.10.10.0/24" }
+:if ([:len $allowedIps] = 0) do={ :set allowedIps "10.66.54.0/24" }
 
 :local colon [:find $endpoint ":"]
 :if ($colon = nil) do={

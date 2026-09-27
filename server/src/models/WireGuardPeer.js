@@ -9,7 +9,7 @@ const wireGuardPeerSchema = new mongoose.Schema(
     siteName: { type: String, required: true, trim: true },
     /** WireGuard public key (base64), unique */
     publicKey: { type: String, required: true, trim: true, unique: true },
-    /** Tunnel address in 10.10.10.0/24, e.g. 10.10.10.5 */
+    /** Tunnel address in configured pool (default 10.66.54.0/24), e.g. 10.66.54.5 */
     tunnelIp: { type: String, required: true, trim: true, unique: true },
     /** Optional LAN CIDR behind the router, e.g. 192.168.88.0/24 */
     lanSubnet: { type: String, trim: true, default: '' },

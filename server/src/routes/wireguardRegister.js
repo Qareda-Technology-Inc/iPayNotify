@@ -27,7 +27,7 @@ function successLines(peer, wg) {
     `tunnelIp=${peer.tunnelIp}`,
     `serverPublicKey=${wg.serverPublicKey}`,
     `endpoint=${wg.endpoint}`,
-    `allowedIps=${wg.clientAllowedIps || '10.10.10.0/24'}`,
+    `allowedIps=${wg.clientAllowedIps || wg.tunnelPool || '10.66.54.0/24'}`,
     `siteName=${peer.siteName}`,
     `status=${peer.status || 'active'}`,
   ];
@@ -108,7 +108,7 @@ wireguardRegisterRouter.post(
         return plainText(res, 200, [...successLines(peer, wg), 'ok=true', 'existing=true']);
       }
 
-      const tunnelIp = await allocateNextTunnelIp();
+      const tunnelIp = await allocateNextTunnelIp({ kind: 'router' });
       try {
         peer = await WireGuardPeer.create({
           siteName,
@@ -171,7 +171,7 @@ wireguardRegisterRouter.get(
     plainText(res, 200, [
       `ok=${wg?.enabled ? 'true' : 'false'}`,
       `endpoint=${wg?.endpoint || ''}`,
-      `pool=10.10.10.0/24`,
+      `pool=${config.wireguard?.tunnelPool || '10.66.54.0/24'}`,
     ]);
   })
 );

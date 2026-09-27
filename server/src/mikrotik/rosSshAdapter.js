@@ -17,7 +17,9 @@ function listKindFromPrintCmd(cmd) {
   if (cmd === '/ppp/active/print') return 'ppp';
   if (cmd === '/ip/hotspot/active/print') return 'hotspot';
   if (cmd === '/ppp/secret/print') return 'ppp';
-  if (cmd === '/ip/hotspot/user/print') return 'hotspot';
+  /* Hotspot *users* and *user profiles* are not active sessions — keep as-value/detail */
+  if (cmd === '/ip/hotspot/user/print') return 'hotspot-user';
+  if (cmd === '/ip/hotspot/user/profile/print') return 'hotspot-profile';
   return 'generic';
 }
 

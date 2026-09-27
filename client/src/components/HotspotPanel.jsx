@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../api.js';
 import { routerDisplayName } from '../utils/routerDisplayName.js';
+import { downloadVouchersPdf } from '../utils/exportVouchersPdf.js';
 
 function formatBytes(n) {
   const v = Number(n);
@@ -19,6 +20,15 @@ function formatSession(seconds) {
   return `${(n / 86400).toFixed(n % 86400 === 0 ? 0 : 1)} day`;
 }
 
+function packageClockLabel(pkg) {
+  if (!pkg) return '';
+  const type = pkg.ticketDurationType || 'elapsed';
+  if (type === 'paused') {
+    return `Online ${formatSession(pkg.pausedSeconds ?? pkg.timeLimitSeconds)}`;
+  }
+  return `Valid ${formatSession(pkg.elapsedSeconds)}`;
+}
+
 function voucherStatus(v) {
   const now = Date.now();
   if (v.validUntil && new Date(v.validUntil).getTime() < now) return 'expired';
@@ -29,11 +39,17 @@ function voucherStatus(v) {
 export function HotspotPanel() {
   const [routers, setRouters] = useState([]);
   const [packages, setPackages] = useState([]);
+  const [servers, setServers] = useState([]);
+  const [serversLoading, setServersLoading] = useState(false);
   const [routerId, setRouterId] = useState('');
+  const [hotspotServer, setHotspotServer] = useState('');
   const [packageId, setPackageId] = useState('');
-  const [count, setCount] = useState(5);
+  const [count, setCount] = useState(10);
+  const [preview, setPreview] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [reconciling, setReconciling] = useState(false);
+  const [syncingScheduler, setSyncingScheduler] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [generated, setGenerated] = useState([]);
@@ -66,24 +82,106 @@ export function HotspotPanel() {
     loadMeta().catch((e) => setError(e.message));
   }, [loadMeta]);
 
-  async function onGenerate(e) {
+  useEffect(() => {
+    if (!routerId) {
+      setServers([]);
+      setHotspotServer('');
+      return;
+    }
+    let cancelled = false;
+    setServersLoading(true);
+    setError('');
+    apiFetch(`/api/hotspot/routers/${routerId}/servers`)
+      .then((data) => {
+        if (cancelled) return;
+        const list = Array.isArray(data?.servers) ? data.servers : [];
+        setServers(list);
+        setHotspotServer((cur) => {
+          if (cur && list.some((s) => s.name === cur)) return cur;
+          const first = list.find((s) => !s.disabled) || list[0];
+          return first?.name || '';
+        });
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setServers([]);
+        setHotspotServer('');
+        setError(e.message || 'Could not load hotspot servers');
+      })
+      .finally(() => {
+        if (!cancelled) setServersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [routerId]);
+
+  useEffect(() => {
+    setPreview(null);
+  }, [routerId, hotspotServer, packageId, count]);
+
+  async function onPreview(e) {
     e.preventDefault();
     setError('');
     setInfo('');
-    setLoading(true);
     setGenerated([]);
+    if (!routerId || !packageId) {
+      setError('Select a router and internet plan.');
+      return;
+    }
+    if (!hotspotServer) {
+      setError('Select a hotspot server on the router.');
+      return;
+    }
+    setPreviewing(true);
     try {
-      const rows = await apiFetch('/api/hotspot/vouchers/generate', {
+      const data = await apiFetch('/api/hotspot/vouchers/preview', {
         method: 'POST',
         body: JSON.stringify({
           count: Number(count) || 1,
           packageId,
-          routerId: routerId || undefined,
+          routerId,
+          hotspotServer,
+        }),
+      });
+      setPreview(data);
+      setInfo(`Preview ready — ${data.codes?.length || 0} unique 6-digit codes. Confirm to create.`);
+    } catch (err) {
+      setError(err.message);
+      setPreview(null);
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  async function onConfirmCreate() {
+    if (!preview?.codes?.length) {
+      setError('Preview codes first.');
+      return;
+    }
+    setError('');
+    setInfo('');
+    setLoading(true);
+    try {
+      const rows = await apiFetch('/api/hotspot/vouchers/generate', {
+        method: 'POST',
+        body: JSON.stringify({
+          count: preview.codes.length,
+          packageId,
+          routerId,
+          hotspotServer,
+          codes: preview.codes,
           pushToRouter: true,
         }),
       });
       setGenerated(rows);
-      setInfo(`Generated ${rows.length} voucher${rows.length === 1 ? '' : 's'} and pushed to the router.`);
+      setPreview(null);
+      const pushed = rows.filter((r) => r.pushedToRouter).length;
+      setInfo(
+        `Created ${rows.length} voucher${rows.length === 1 ? '' : 's'} on server “${hotspotServer}”. ` +
+          `Package profile “${rows[0]?.profileName || selectedPkg?.name || '—'}” pushed to router. ` +
+          `Users pushed: ${pushed}/${rows.length}.`
+      );
       await loadMeta();
     } catch (err) {
       setError(err.message);
@@ -109,41 +207,58 @@ export function HotspotPanel() {
     }
   }
 
-  function exportCodes(rows) {
-    const lines = ['code,profile,validUntil,status,dataLimit,sessionLimit,bytesIn,bytesOut,usedAt'];
-    for (const v of rows) {
-      lines.push(
-        [
-          v.code,
-          v.profileName || '',
-          v.validUntil || '',
-          voucherStatus(v),
-          v.dataLimitBytes ?? '',
-          v.timeLimitSeconds ?? '',
-          v.bytesIn ?? 0,
-          v.bytesOut ?? 0,
-          v.usedAt || '',
-        ].join(',')
-      );
+  async function onSyncExpiryScheduler() {
+    if (!routerId) {
+      setError('Select a router first.');
+      return;
     }
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `hotspot-vouchers-${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    setError('');
+    setInfo('');
+    setSyncingScheduler(true);
+    try {
+      const r = await apiFetch(`/api/hotspot/routers/${routerId}/sync-expiry-scheduler`, {
+        method: 'POST',
+        body: '{}',
+      });
+      setInfo(
+        `Expiry scheduler installed on ${r.routerName || 'router'} — script “${r.script}” runs every ${r.interval || '1m'}.`
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSyncingScheduler(false);
+    }
+  }
+
+  function exportVouchers(rows) {
+    setError('');
+    try {
+      const router = routers.find((r) => String(r._id) === String(routerId));
+      const pkg = packages.find((p) => String(p._id) === String(packageId));
+      downloadVouchersPdf(rows, {
+        title: 'Wi‑Fi Access',
+        venue: routerDisplayName(router) || '',
+        packageName: pkg?.name || '',
+        server: hotspotServer || '',
+        filename: `vouchers-${(pkg?.name || 'hotspot').replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.pdf`,
+      });
+      setInfo(`Downloaded ${rows.length} voucher${rows.length === 1 ? '' : 's'} as PDF.`);
+    } catch (err) {
+      setError(err.message || 'Could not create PDF');
+    }
   }
 
   const selectedPkg = packages.find((p) => String(p._id) === String(packageId));
+  const canPreview =
+    Boolean(routerId && packageId && hotspotServer) && !serversLoading && packages.length > 0;
 
   return (
     <div className="space-y-8">
       <div>
         <h2 className="text-lg font-semibold text-white">Hotspot & vouchers</h2>
         <p className="mt-1 max-w-2xl text-sm text-slate-400">
-          Launch branded hotspot experiences for cafés, campuses, communities and events. Generate
-          time / volume packages, sync codes to MikroTik, and track usage from live sessions.
+          Pick a router, its hotspot server, an internet plan, and quantity. Preview unique 6-digit
+          codes, then create and push them to MikroTik.
         </p>
       </div>
 
@@ -167,12 +282,12 @@ export function HotspotPanel() {
       )}
 
       <form
-        onSubmit={onGenerate}
+        onSubmit={onPreview}
         className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900/50 p-6 shadow-xl"
       >
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-sm">
-            <span className="mb-1.5 block font-medium text-slate-300">Router / venue</span>
+            <span className="mb-1.5 block font-medium text-slate-300">Router</span>
             <select
               className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-slate-100 outline-none ring-emerald-500/40 focus:ring-2"
               value={routerId}
@@ -186,8 +301,33 @@ export function HotspotPanel() {
               ))}
             </select>
           </label>
+
           <label className="block text-sm">
-            <span className="mb-1.5 block font-medium text-slate-300">Hotspot package</span>
+            <span className="mb-1.5 block font-medium text-slate-300">Hotspot server</span>
+            <select
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-slate-100 outline-none ring-emerald-500/40 focus:ring-2"
+              value={hotspotServer}
+              onChange={(e) => setHotspotServer(e.target.value)}
+              required
+              disabled={serversLoading || !servers.length}
+            >
+              {serversLoading ? (
+                <option value="">Loading servers…</option>
+              ) : servers.length === 0 ? (
+                <option value="">No hotspot server on this router</option>
+              ) : (
+                servers.map((s) => (
+                  <option key={s.name} value={s.name} disabled={s.disabled}>
+                    {s.name}
+                    {s.disabled ? ' (disabled)' : ''}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+
+          <label className="block text-sm">
+            <span className="mb-1.5 block font-medium text-slate-300">Internet plan (package)</span>
             <select
               className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-slate-100 outline-none ring-emerald-500/40 focus:ring-2"
               value={packageId}
@@ -199,35 +339,40 @@ export function HotspotPanel() {
               ) : (
                 packages.map((p) => (
                   <option key={p._id} value={p._id}>
-                    {p.name} — {p.activeProfile}
+                    {p.name}
                   </option>
                 ))
               )}
             </select>
             {selectedPkg && (
               <span className="mt-1.5 block text-xs text-slate-500">
-                Validity {selectedPkg.durationAmount ?? selectedPkg.durationDays ?? '—'}{' '}
-                {selectedPkg.durationUnit || 'day'}
+                {packageClockLabel(selectedPkg)}
                 {' · '}
                 data {formatBytes(selectedPkg.dataLimitBytes)}
                 {' · '}
-                session {formatSession(selectedPkg.timeLimitSeconds)}
+                profile {selectedPkg.activeProfile || selectedPkg.name || 'default'}
+                {selectedPkg.usersPerTicket > 1
+                  ? ` · ${selectedPkg.usersPerTicket} devices`
+                  : ''}
               </span>
             )}
           </label>
-        </div>
 
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium text-slate-300">How many codes</span>
-          <input
-            type="number"
-            min={1}
-            max={100}
-            value={count}
-            onChange={(e) => setCount(e.target.value)}
-            className="w-full max-w-xs rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 outline-none ring-emerald-500/40 focus:ring-2"
-          />
-        </label>
+          <label className="block text-sm">
+            <span className="mb-1.5 block font-medium text-slate-300">Quantity</span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={count}
+              onChange={(e) => setCount(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 outline-none ring-emerald-500/40 focus:ring-2"
+            />
+            <span className="mt-1.5 block text-xs text-slate-500">
+              Unique 6-digit numeric codes (100000–999999)
+            </span>
+          </label>
+        </div>
 
         {error && (
           <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
@@ -243,10 +388,18 @@ export function HotspotPanel() {
         <div className="flex flex-wrap gap-2">
           <button
             type="submit"
-            disabled={loading || !routers.length || !packages.length}
+            disabled={previewing || loading || !canPreview}
+            className="rounded-lg border border-emerald-600/60 bg-emerald-950/40 px-5 py-2.5 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {previewing ? 'Previewing…' : 'Preview codes'}
+          </button>
+          <button
+            type="button"
+            disabled={loading || !preview?.codes?.length}
+            onClick={onConfirmCreate}
             className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-900/30 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading ? 'Generating…' : 'Generate & push to router'}
+            {loading ? 'Creating…' : `Create ${preview?.codes?.length || ''} vouchers`}
           </button>
           <button
             type="button"
@@ -254,40 +407,72 @@ export function HotspotPanel() {
             onClick={onReconcile}
             className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
           >
-            {reconciling ? 'Syncing usage…' : 'Sync usage from routers'}
+            {reconciling ? 'Syncing usage…' : 'Sync usage'}
+          </button>
+          <button
+            type="button"
+            disabled={syncingScheduler || !routerId}
+            onClick={onSyncExpiryScheduler}
+            className="rounded-lg border border-amber-600/50 px-4 py-2.5 text-sm text-amber-100 hover:bg-amber-950/40 disabled:opacity-50"
+          >
+            {syncingScheduler ? 'Installing…' : 'Sync expiry scheduler'}
           </button>
         </div>
       </form>
+
+      {preview?.codes?.length > 0 && (
+        <section className="rounded-2xl border border-dashed border-emerald-700/50 bg-emerald-950/20 p-5">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-emerald-200">
+              Preview — {preview.codes.length} codes (not created yet)
+            </h3>
+            <p className="text-xs text-slate-400">
+              {preview.package?.name}
+              {preview.hotspotServer ? ` · ${preview.hotspotServer}` : ''}
+              {preview.router?.name ? ` · ${preview.router.name}` : ''}
+            </p>
+          </div>
+          <ul className="grid gap-2 sm:grid-cols-4 lg:grid-cols-6">
+            {preview.codes.map((code) => (
+              <li
+                key={code}
+                className="rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2 text-center font-mono text-lg tracking-widest text-emerald-300"
+              >
+                {code}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-slate-500">
+            Confirm to save these exact codes and push them to the router under the selected hotspot
+            server.
+          </p>
+        </section>
+      )}
 
       {generated.length > 0 && (
         <section>
           <div className="mb-3 flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-              New codes
+              Created codes
             </h3>
             <button
               type="button"
-              onClick={() => exportCodes(generated)}
+              onClick={() => exportVouchers(generated)}
               className="text-xs text-indigo-300 hover:text-indigo-200"
             >
-              Export CSV
+              Download PDF vouchers
             </button>
           </div>
-          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5">
             {generated.map((row) => (
               <li
                 key={row.id}
-                className="rounded-lg border border-slate-800 bg-slate-900/80 px-4 py-3 font-mono text-sm text-emerald-300"
+                className="rounded-lg border border-slate-800 bg-slate-900/80 px-4 py-3 text-center font-mono text-lg tracking-widest text-emerald-300"
               >
                 {row.code}
-                {row.validUntil && (
-                  <span className="mt-1 block text-xs font-sans text-slate-500">
-                    valid until {new Date(row.validUntil).toLocaleString()}
-                  </span>
-                )}
-                {(row.dataLimitBytes || row.timeLimitSeconds) && (
-                  <span className="mt-1 block text-xs font-sans text-slate-500">
-                    {formatBytes(row.dataLimitBytes)} · {formatSession(row.timeLimitSeconds)}
+                {row.hotspotServer && (
+                  <span className="mt-1 block text-xs font-sans tracking-normal text-slate-500">
+                    {row.hotspotServer}
                   </span>
                 )}
               </li>
@@ -314,11 +499,11 @@ export function HotspotPanel() {
             </select>
             <button
               type="button"
-              onClick={() => exportCodes(recent)}
+              onClick={() => exportVouchers(recent)}
               disabled={!recent.length}
               className="text-xs text-indigo-300 hover:text-indigo-200 disabled:opacity-40"
             >
-              Export CSV
+              Download PDF vouchers
             </button>
           </div>
         </div>
@@ -327,6 +512,7 @@ export function HotspotPanel() {
             <thead className="bg-slate-900 text-slate-400">
               <tr>
                 <th className="px-4 py-3 font-medium">Code</th>
+                <th className="px-4 py-3 font-medium">Server</th>
                 <th className="px-4 py-3 font-medium">Package</th>
                 <th className="px-4 py-3 font-medium">Limits</th>
                 <th className="px-4 py-3 font-medium">Usage</th>
@@ -337,7 +523,7 @@ export function HotspotPanel() {
             <tbody className="divide-y divide-slate-800 bg-slate-950/50">
               {recent.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
+                  <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
                     No vouchers yet.
                   </td>
                 </tr>
@@ -346,12 +532,20 @@ export function HotspotPanel() {
                   const st = voucherStatus(v);
                   return (
                     <tr key={v._id} className="text-slate-300">
-                      <td className="px-4 py-2 font-mono text-emerald-400">{v.code}</td>
+                      <td className="px-4 py-2 font-mono text-lg tracking-wider text-emerald-400">
+                        {v.code}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-slate-500">
+                        {v.hotspotServer || '—'}
+                      </td>
                       <td className="px-4 py-2 text-slate-400">
                         {v.packageId?.name || v.profileName || '—'}
                       </td>
                       <td className="px-4 py-2 text-xs text-slate-500">
-                        {formatBytes(v.dataLimitBytes)} · {formatSession(v.timeLimitSeconds)}
+                        {formatBytes(v.dataLimitBytes)} ·{' '}
+                        {v.elapsedSeconds
+                          ? formatSession(v.elapsedSeconds)
+                          : formatSession(v.timeLimitSeconds)}
                       </td>
                       <td className="px-4 py-2 text-xs text-slate-500">
                         ↓ {formatBytes(v.bytesIn)} · ↑ {formatBytes(v.bytesOut)}

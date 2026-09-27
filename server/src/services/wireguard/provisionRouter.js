@@ -251,7 +251,7 @@ async function ensureVpnManagementAccess(api) {
       '/ip/firewall/filter/add',
       '=chain=input',
       '=action=accept',
-      '=src-address=10.10.10.0/24',
+      '=src-address=' + (config.wireguard?.tunnelPool || '10.66.54.0/24'),
       `=comment=${VPN_MGMT_COMMENT}`,
       ...extra,
     ]);

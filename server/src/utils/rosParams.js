@@ -27,3 +27,40 @@ export function formatLimitUptime(totalSeconds) {
   if (s || parts.length === 0) parts.push(`${s}s`);
   return parts.join('');
 }
+
+/**
+ * MikroTik hotspot/PPP rate-limit: rx/tx from router view
+ * (rx = download to client, tx = upload from client).
+ * @param {number|null|undefined} downMbps
+ * @param {number|null|undefined} upMbps
+ */
+export function formatRateLimit(downMbps, upMbps) {
+  const down = Number(downMbps);
+  const up = Number(upMbps);
+  const hasDown = Number.isFinite(down) && down > 0;
+  const hasUp = Number.isFinite(up) && up > 0;
+  if (!hasDown && !hasUp) return undefined;
+  const fmt = (n) => {
+    if (n >= 1) return `${n}M`;
+    return `${Math.round(n * 1000)}k`;
+  };
+  return `${fmt(hasDown ? down : up)}/${fmt(hasUp ? up : down)}`;
+}
+
+/** Split seconds into { days, hours, minutes }. */
+export function splitDuration(totalSeconds) {
+  let s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const days = Math.floor(s / 86400);
+  s %= 86400;
+  const hours = Math.floor(s / 3600);
+  s %= 3600;
+  const minutes = Math.floor(s / 60);
+  return { days, hours, minutes };
+}
+
+export function combineDuration({ days = 0, hours = 0, minutes = 0 } = {}) {
+  const d = Math.max(0, Math.floor(Number(days) || 0));
+  const h = Math.max(0, Math.floor(Number(hours) || 0));
+  const m = Math.max(0, Math.floor(Number(minutes) || 0));
+  return d * 86400 + h * 3600 + m * 60;
+}

@@ -178,7 +178,7 @@ export const config = {
    */
   paymentAdminNotifyEmails: (process.env.PAYMENT_ADMIN_NOTIFY_EMAIL || '').trim(),
   /**
-   * Central WireGuard VPS — MikroTik routers self-register as peers (10.10.10.0/24).
+   * Central WireGuard VPS — MikroTik routers self-register as peers (default 10.66.54.0/24).
    * POST /api/routers/register (plain-text response for RouterOS).
    */
   wireguard: {
@@ -193,8 +193,20 @@ export const config = {
     serverPublicKey: (process.env.WG_SERVER_PUBLIC_KEY || '').trim(),
     /** host:port routers use as endpoint, e.g. qarefi.qaretech.com:51820 */
     endpoint: (process.env.WG_ENDPOINT || '').trim(),
-    /** allowed-address on the MikroTik peer toward the VPS */
-    clientAllowedIps: (process.env.WG_CLIENT_ALLOWED_IPS || '10.10.10.0/24').trim(),
+    /**
+     * Tunnel CIDR (VPS typically .1). Override with WG_TUNNEL_POOL or WG_CLIENT_ALLOWED_IPS.
+     * Example: 10.66.54.0/24
+     */
+    tunnelPool: (
+      process.env.WG_TUNNEL_POOL ||
+      process.env.WG_CLIENT_ALLOWED_IPS ||
+      '10.66.54.0/24'
+    )
+      .trim()
+      .split(',')[0]
+      .trim() || '10.66.54.0/24',
+    /** allowed-address on the MikroTik peer toward the VPS (may be comma-separated) */
+    clientAllowedIps: (process.env.WG_CLIENT_ALLOWED_IPS || '10.66.54.0/24').trim(),
     /** Optional shared secret routers must send as token= or X-Wg-Register-Token */
     registerToken: (process.env.WG_REGISTER_TOKEN || '').trim(),
     /** Core tunnel settings present (SSH key may come from admin DB generate). */
@@ -203,6 +215,11 @@ export const config = {
     },
     get hasEnvSshKey() {
       return Boolean(this.vpsSshKeyPath || this.vpsSshPrivateKey);
+    },
+    /** e.g. "10.66.54." from tunnelPool 10.66.54.0/24 */
+    get tunnelPrefix() {
+      const m = String(this.tunnelPool || '').match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)0\/24$/);
+      return m ? m[1] : '10.66.54.';
     },
   },
 };

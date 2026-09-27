@@ -55,7 +55,7 @@ export async function registerWireGuardPeer(input) {
     if (siteName && siteName !== peer.siteName) peer.siteName = siteName;
     if (lanSubnet !== peer.lanSubnet) peer.lanSubnet = lanSubnet;
   } else {
-    const tunnelIp = await allocateNextTunnelIp();
+    const tunnelIp = await allocateNextTunnelIp({ kind: 'router' });
     try {
       peer = await WireGuardPeer.create({
         siteName,
@@ -101,6 +101,6 @@ export async function registerWireGuardPeer(input) {
     existing,
     serverPublicKey: wg.serverPublicKey,
     endpoint: wg.endpoint,
-    clientAllowedIps: wg.clientAllowedIps || '10.10.10.0/24',
+    clientAllowedIps: wg.clientAllowedIps || wg.tunnelPool || '10.66.54.0/24',
   };
 }

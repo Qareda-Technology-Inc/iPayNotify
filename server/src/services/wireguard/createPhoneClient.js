@@ -29,7 +29,7 @@ export function generateWireGuardKeyPair() {
  * @param {{ includeLan?: boolean }} opts
  */
 export async function buildClientAllowedIps({ includeLan = true } = {}) {
-  const parts = new Set(['10.10.10.0/24']);
+  const parts = new Set([config.wireguard?.tunnelPool || '10.66.54.0/24']);
   const fromEnv = String(config.wireguard?.clientAllowedIps || '')
     .split(',')
     .map((s) => s.trim())
@@ -121,7 +121,7 @@ export async function createPhoneClientPeer(input = {}) {
 
   const includeLan = input.includeLan !== false;
   const { privateKey, publicKey } = generateWireGuardKeyPair();
-  const tunnelIp = await allocateNextTunnelIp();
+  const tunnelIp = await allocateNextTunnelIp({ kind: 'client' });
   const allowedIps = await buildClientAllowedIps({ includeLan });
 
   const peer = await WireGuardPeer.create({

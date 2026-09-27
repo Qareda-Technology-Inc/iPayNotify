@@ -394,7 +394,8 @@ export function isActiveSessionsListPrint(cmd) {
     (cmd === '/ppp/active/print' ||
       cmd === '/ip/hotspot/active/print' ||
       cmd === '/ppp/secret/print' ||
-      cmd === '/ip/hotspot/user/print')
+      cmd === '/ip/hotspot/user/print' ||
+      cmd === '/ip/hotspot/user/profile/print')
   );
 }
 
@@ -416,7 +417,65 @@ export function parseActiveListStdout(stdout, kind = 'generic') {
     if (tabRows.length > 0) return tabRows;
   }
 
+  /* Hotspot *users* table: # SERVER NAME … — map NAME → name for vouchers */
+  if (kind === 'hotspot-user') {
+    const tabRows = parseTabularHotspotUsersPrint(stdout);
+    if (tabRows.length > 0) return tabRows;
+  }
+
   return [];
+}
+
+/** Default `print` table for /ip/hotspot/user (not active sessions). */
+export function parseTabularHotspotUsersPrint(stdout) {
+  const rows = [];
+  if (!stdout || typeof stdout !== 'string') return rows;
+
+  const lines = stdout.split(/\r?\n/).map((l) => l.replace(/\r$/, ''));
+  let headerIdx = -1;
+  let headers = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t || /^flags:/i.test(t) || t.startsWith(';;;')) continue;
+    if (/^#\s+/i.test(t) && /NAME/i.test(t)) {
+      headerIdx = i;
+      headers = t.split(/\s+/).filter(Boolean);
+      if (headers[0] === '#') headers = headers.slice(1);
+      break;
+    }
+  }
+
+  const dataLines = headerIdx >= 0 ? lines.slice(headerIdx + 1) : lines;
+  for (const line of dataLines) {
+    const trimmed = line.trim();
+    if (!trimmed || /^flags:/i.test(trimmed) || trimmed.startsWith(';;;')) continue;
+    if (!/^\d+/.test(trimmed)) continue;
+
+    let rest = trimmed.replace(/^\d+\s+/, '');
+    rest = rest.replace(/^[A-Z]{1,4}\s+/, '');
+    const cols = rest.split(/\s+/).filter(Boolean);
+    if (!cols.length) continue;
+
+    const obj = { numbers: String(rows.length) };
+    if (headers.length >= 2) {
+      const map = zipTabular(headers, cols);
+      obj.name = map.NAME || cols[cols.length > 1 ? 1 : 0] || '';
+      obj.server = map.SERVER || (cols.length > 1 ? cols[0] : '') || '';
+      obj.profile = map.PROFILE || '';
+      obj.uptime = map.UPTIME || '';
+    } else {
+      /* SERVER NAME … or NAME alone */
+      if (cols.length >= 2) {
+        obj.server = cols[0];
+        obj.name = cols[1];
+      } else {
+        obj.name = cols[0];
+      }
+    }
+    if (obj.name) rows.push(obj);
+  }
+  return rows;
 }
 
 export function parseIdentityName(stdout) {
@@ -430,12 +489,12 @@ export function parseIdentityName(stdout) {
 /**
  * Quote a value for RouterOS CLI (SSH/terminal).
  * Unquoted `/` starts a new command path — WireGuard keys and CIDRs must be quoted.
+ * Alphanumeric names (including leading digits like 5MIN) stay unquoted — MikroTik accepts them.
  */
 export function cliEscapeValue(v) {
   const s = String(v);
   if (s === '') return '""';
-  // Safe unquoted token: letters, digits, and a few punctuation marks (no / + = space).
-  if (/^[A-Za-z0-9._:@-]+$/.test(s)) return s;
+  if (/^[A-Za-z0-9._@-]+$/.test(s)) return s;
   return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
@@ -494,7 +553,7 @@ export async function execRos(conn, command) {
         const stderr = errChunks.join('');
         const text = stdout + stderr;
         if (
-          /failure:\s|syntax error|expected end of command|ambiguous command|script error/i.test(
+          /failure:\s|syntax error|expected end of command|ambiguous command|script error|input does not match|no such item|invalid value|unknown parameter|already have/i.test(
             text
           )
         ) {

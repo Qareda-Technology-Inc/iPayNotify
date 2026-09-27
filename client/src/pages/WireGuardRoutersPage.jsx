@@ -346,7 +346,7 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
                 >
                   Routers
                 </Link>{' '}
-                using the tunnel IP (<span className="font-mono text-slate-300">10.10.10.x</span>).
+                using the tunnel IP (<span className="font-mono text-slate-300">{cfg?.pool || '10.66.54.x'}</span>).
                 VPN status and phone access live under{' '}
                 <Link
                   to="/devices/wireguard"
@@ -399,7 +399,13 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
             </div>
             <div>
               <dt className="text-xs uppercase tracking-wide text-slate-500">IP pool</dt>
-              <dd className="mt-1 font-mono text-xs text-slate-200">{cfg?.pool || '10.10.10.0/24'}</dd>
+              <dd className="mt-1 font-mono text-xs text-slate-200">{cfg?.pool || '10.66.54.0/24'}</dd>
+              {cfg?.poolSlices ? (
+                <dd className="mt-1 text-[11px] text-slate-500">
+                  VPS {cfg.poolSlices.vps} · routers {cfg.poolSlices.routers} · phones{' '}
+                  {cfg.poolSlices.clients}
+                </dd>
+              ) : null}
             </div>
             <div>
               <dt className="text-xs uppercase tracking-wide text-slate-500">Register token</dt>
@@ -496,7 +502,7 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
             </li>
             <li>
               Refresh this page — the peer should appear with a{' '}
-              <span className="font-mono">10.10.10.x</span> tunnel IP.
+              <span className="font-mono">{cfg?.pool || '10.66.54.0/24'}</span> tunnel IP.
             </li>
             <li>
               Open{' '}
@@ -555,7 +561,7 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
             Creates a WireGuard client on the platform VPN, syncs it to the VPS, and shows a QR +{' '}
             <span className="font-mono">.conf</span> once. Install the WireGuard app, scan the QR, turn
             the tunnel on, then open Winbox to the router&apos;s{' '}
-            <span className="font-mono text-slate-300">10.10.10.x:8291</span> from{' '}
+            <span className="font-mono text-slate-300">10.66.54.x:8291</span> from{' '}
             <Link
               to="/devices/routers"
               className="text-emerald-300 underline-offset-2 hover:underline"
@@ -687,7 +693,7 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
               <input
                 value={tunnelIp}
                 onChange={(e) => setTunnelIp(e.target.value)}
-                placeholder="auto 10.10.10.x"
+                placeholder={`auto ${(cfg?.pool || '10.66.54.0/24').replace(/\.0\/24$/, '.x')}`}
                 className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
               />
             </label>

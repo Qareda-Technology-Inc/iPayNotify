@@ -3,7 +3,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
 import { config } from '../config.js';
 import { WireGuardPeer } from '../models/WireGuardPeer.js';
-import { allocateNextTunnelIp } from '../services/wireguard/allocateTunnelIp.js';
+import { allocateNextTunnelIp, isValidTunnelIp, tunnelIpRangeHint, tunnelPoolSlices } from '../services/wireguard/allocateTunnelIp.js';
 import { syncWireGuardPeerToVps, testWgVpsSshConnection } from '../services/wireguard/wgPeerSync.js';
 import { buildWireGuardInstallScript } from '../services/wireguard/buildInstallScript.js';
 import {
@@ -125,7 +125,8 @@ wireguardAdminRouter.get(
         hasHost: Boolean(config.wireguard?.vpsHost),
         hasServerPublicKey: Boolean(config.wireguard?.serverPublicKey),
         endpoint: config.wireguard?.endpoint || '',
-        pool: '10.10.10.0/24',
+        pool: config.wireguard?.tunnelPool || '10.66.54.0/24',
+        poolSlices: tunnelPoolSlices(),
         registerUrl: '/api/routers/register',
         hasRegisterToken: Boolean(config.wireguard?.registerToken),
         vpsSsh: ssh,
@@ -161,13 +162,15 @@ wireguardAdminRouter.post(
 
     let tunnelIp = tunnelIpOverride;
     if (tunnelIp) {
-      if (!/^10\.10\.10\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4])$/.test(tunnelIp)) {
-        return res.status(400).json({ error: 'tunnelIp must be in 10.10.10.2–10.10.10.254' });
+      if (!isValidTunnelIp(tunnelIp, kind)) {
+        return res.status(400).json({
+          error: `tunnelIp must be in ${tunnelIpRangeHint(kind)}`,
+        });
       }
       const taken = await WireGuardPeer.findOne({ tunnelIp });
       if (taken) return res.status(409).json({ error: `tunnelIp ${tunnelIp} already in use` });
     } else {
-      tunnelIp = await allocateNextTunnelIp();
+      tunnelIp = await allocateNextTunnelIp({ kind });
     }
 
     const peer = await WireGuardPeer.create({

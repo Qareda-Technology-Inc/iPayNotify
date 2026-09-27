@@ -60,7 +60,7 @@ publicPortalRouter.get(
       isActive: true,
     })
       .select(
-        'name priceCents currency activeProfile durationDays durationAmount durationUnit dataLimitBytes timeLimitSeconds description'
+        'name priceCents currency activeProfile durationDays durationAmount durationUnit dataLimitBytes timeLimitSeconds elapsedSeconds pausedSeconds ticketDurationType usersPerTicket speedUpMbps speedDownMbps description'
       )
       .sort({ name: 1 })
       .lean();

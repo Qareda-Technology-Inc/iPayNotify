@@ -2,11 +2,14 @@ import express from 'express';
 import { HotspotVoucher } from '../models/index.js';
 import {
   generateVouchers,
+  listHotspotServersForRouter,
   listVouchers,
+  previewVouchers,
   reconcileHotspotVoucherUsage,
   removeVoucherFromRouter,
   syncVoucherToRouter,
 } from '../services/hotspotService.js';
+import { syncHotspotExpiryScheduler } from '../services/hotspotExpirySchedulerService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
 import { orgQuery } from '../utils/tenantScope.js';
@@ -15,6 +18,42 @@ export const hotspotRouter = express.Router();
 
 hotspotRouter.use(requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'));
 
+hotspotRouter.get(
+  '/routers/:id/servers',
+  asyncHandler(async (req, res) => {
+    res.json(await listHotspotServersForRouter(req.params.id, req.organizationId));
+  })
+);
+
+hotspotRouter.post(
+  '/routers/:id/sync-expiry-scheduler',
+  requireRoles('super_admin', 'org_admin', 'org_staff'),
+  asyncHandler(async (req, res) => {
+    const result = await syncHotspotExpiryScheduler(req.params.id, req.organizationId);
+    res.json(result);
+  })
+);
+
+hotspotRouter.post(
+  '/vouchers/preview',
+  asyncHandler(async (req, res) => {
+    const { count = 1, packageId, routerId, hotspotServer } = req.body;
+    if (!packageId) {
+      return res.status(400).json({ error: 'packageId is required' });
+    }
+    if (!routerId) {
+      return res.status(400).json({ error: 'routerId is required' });
+    }
+    const preview = await previewVouchers({
+      count,
+      packageId,
+      routerId,
+      hotspotServer,
+      organizationId: req.organizationId,
+    });
+    res.json(preview);
+  })
+);
 hotspotRouter.get(
   '/vouchers',
   asyncHandler(async (req, res) => {
@@ -56,26 +95,42 @@ hotspotRouter.get(
 hotspotRouter.post(
   '/vouchers/generate',
   asyncHandler(async (req, res) => {
-    const { count = 1, packageId, routerId, pushToRouter } = req.body;
+    const { count = 1, packageId, routerId, hotspotServer, codes, pushToRouter } = req.body;
     if (!packageId) {
       return res.status(400).json({ error: 'packageId is required' });
+    }
+    if (!routerId) {
+      return res.status(400).json({ error: 'routerId is required' });
     }
     const n = Math.min(100, Math.max(1, Number(count) || 1));
     const vouchers = await generateVouchers({
       count: n,
       packageId,
       routerId,
+      hotspotServer,
+      codes,
       pushToRouter: pushToRouter !== false,
       organizationId: req.organizationId,
     });
+    const pushed = pushToRouter !== false;
     res.status(201).json(
       vouchers.map((v) => ({
         id: v._id,
         code: v.code,
+        password: v.password && v.password !== v.code ? v.password : undefined,
+        codeType: v.codeType,
+        hotspotServer: v.hotspotServer || '',
         profileName: v.profileName,
         validUntil: v.validUntil,
         dataLimitBytes: v.dataLimitBytes,
         timeLimitSeconds: v.timeLimitSeconds,
+        elapsedSeconds: v.elapsedSeconds,
+        usersPerTicket: v.usersPerTicket,
+        speedUpMbps: v.speedUpMbps,
+        speedDownMbps: v.speedDownMbps,
+        packageId: v.packageId,
+        mikrotikInternalId: v.mikrotikInternalId || null,
+        pushedToRouter: pushed,
       }))
     );
   })
