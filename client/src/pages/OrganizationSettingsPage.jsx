@@ -141,6 +141,22 @@ export function OrganizationSettingsPage() {
     return <p className="text-sm text-slate-500">Loading organisation…</p>;
   }
 
+  if (org?.platformScope) {
+    return (
+      <div className="mx-auto max-w-xl space-y-4 rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
+        <h2 className="text-lg font-semibold text-white">Organisation settings</h2>
+        <p className="text-sm text-slate-400">
+          You are in platform mode (all organisations). Pick a tenant in the header switcher to edit
+          its settings, billing, and portal links — or{' '}
+          <Link to="/super/organizations" className="text-indigo-300 underline-offset-2 hover:underline">
+            manage organisations
+          </Link>
+          .
+        </p>
+      </div>
+    );
+  }
+
   if (!org) {
     return (
       <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
@@ -206,8 +222,8 @@ export function OrganizationSettingsPage() {
         <p className="mt-1 text-xs text-slate-500">
           Links use each router&apos;s <span className="font-mono">portal slug</span> (not the
           organisation slug). Set slugs under{' '}
-          <Link to="/devices/mikrotik" className="text-indigo-400 hover:text-indigo-300">
-            MikroTik
+          <Link to="/devices/routers" className="text-indigo-400 hover:text-indigo-300">
+            Routers
           </Link>
           .
         </p>

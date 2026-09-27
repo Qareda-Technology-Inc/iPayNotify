@@ -254,6 +254,7 @@ authRouter.get(
       organizationId: req.organizationId,
       organizationName: req.organizationName || null,
       organizationSlug: req.organizationSlug || null,
+      platformScope: Boolean(req.platformScope),
       modules: req.organizationModules || { tickets: false, remoteAccess: false },
     });
   })

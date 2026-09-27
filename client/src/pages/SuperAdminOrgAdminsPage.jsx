@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../api.js';
 
 const ROLE_LABEL = {
@@ -8,8 +8,21 @@ const ROLE_LABEL = {
   ticket_manager: 'Staff',
 };
 
+function formatExpiry(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return '';
+  }
+}
+
 export function SuperAdminOrgAdminsPage() {
   const { orgId } = useParams();
+  const [searchParams] = useSearchParams();
+  const inviteFocus = searchParams.get('invite') === '1';
+  const inviteFormRef = useRef(null);
+
   const [org, setOrg] = useState(null);
   const [admins, setAdmins] = useState([]);
   const [err, setErr] = useState('');
@@ -17,8 +30,10 @@ export function SuperAdminOrgAdminsPage() {
   const [loading, setLoading] = useState(true);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [role, setRole] = useState('org_admin');
   const [creating, setCreating] = useState(false);
+  const [lastAcceptUrl, setLastAcceptUrl] = useState('');
 
   const [editOpen, setEditOpen] = useState(false);
   const [editAdmin, setEditAdmin] = useState(null);
@@ -52,6 +67,11 @@ export function SuperAdminOrgAdminsPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!inviteFocus || loading) return;
+    inviteFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [inviteFocus, loading]);
+
   function openEdit(a) {
     setEditAdmin(a);
     setEditFullName(a.fullName || '');
@@ -67,11 +87,21 @@ export function SuperAdminOrgAdminsPage() {
     setEditAdmin(null);
   }
 
+  async function copyUrl(url) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setInfo('Invite link copied. Share it with them if email did not arrive.');
+    } catch {
+      setErr('Could not copy link — select it manually below.');
+    }
+  }
+
   async function inviteAdmin(e) {
     e.preventDefault();
     setCreating(true);
     setErr('');
     setInfo('');
+    setLastAcceptUrl('');
     try {
       const created = await apiFetch(`/api/super-admin/organizations/${orgId}/admins`, {
         method: 'POST',
@@ -79,19 +109,22 @@ export function SuperAdminOrgAdminsPage() {
           fullName: fullName.trim(),
           email: email.trim(),
           role,
+          ...(phone.trim() ? { phone: phone.trim() } : {}),
         }),
       });
       setFullName('');
       setEmail('');
+      setPhone('');
       setRole('org_admin');
+      if (created?.acceptUrl) setLastAcceptUrl(created.acceptUrl);
       setInfo(
         created?.emailSent
           ? `Invite emailed to ${created.email}. They will set their own password from the link.`
-          : `Invite saved for ${created.email}, but email did not send. Check SMTP, then use Resend.`
+          : `Invite saved for ${created.email}, but email did not send. Copy the invite link below (check SMTP).`
       );
       await load();
-    } catch (e) {
-      setErr(e.message || 'Invite failed');
+    } catch (e2) {
+      setErr(e2.message || 'Invite failed');
     } finally {
       setCreating(false);
     }
@@ -100,15 +133,17 @@ export function SuperAdminOrgAdminsPage() {
   async function resendInvite(adminId) {
     setErr('');
     setInfo('');
+    setLastAcceptUrl('');
     try {
       const r = await apiFetch(
         `/api/super-admin/organizations/${orgId}/admins/${adminId}/resend-invite`,
         { method: 'POST', body: JSON.stringify({}) }
       );
+      if (r?.acceptUrl) setLastAcceptUrl(r.acceptUrl);
       setInfo(
         r?.emailSent
           ? `Invite re-sent to ${r.email}`
-          : `Invite refreshed for ${r.email}. Email did not send — check SMTP.`
+          : `Invite refreshed for ${r.email}. Email did not send — copy the link below.`
       );
       await load();
     } catch (e) {
@@ -132,8 +167,8 @@ export function SuperAdminOrgAdminsPage() {
       });
       closeEdit();
       await load();
-    } catch (e) {
-      setErr(e.message || 'Save failed');
+    } catch (e2) {
+      setErr(e2.message || 'Save failed');
     } finally {
       setSavingEdit(false);
     }
@@ -162,8 +197,8 @@ export function SuperAdminOrgAdminsPage() {
         <p className="mt-1 text-sm text-slate-400">
           {org ? (
             <>
-              Invite people to manage <strong className="text-slate-200">{org.name}</strong>. They get an email and
-              create their own password.
+              Invite people to manage <strong className="text-slate-200">{org.name}</strong>. They get an
+              email and create their own password.
             </>
           ) : loading ? (
             'Loading…'
@@ -171,18 +206,45 @@ export function SuperAdminOrgAdminsPage() {
             'Organisation not found'
           )}
         </p>
+        {inviteFocus ? (
+          <p className="mt-2 rounded-lg border border-indigo-500/30 bg-indigo-950/30 px-3 py-2 text-xs text-indigo-100">
+            Organisation created — invite the first admin below so they can sign in.
+          </p>
+        ) : null}
       </div>
 
       {err && (
-        <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">{err}</p>
+        <p className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {err}
+        </p>
       )}
       {info && (
         <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
           {info}
         </p>
       )}
+      {lastAcceptUrl ? (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 px-4 py-3 text-sm">
+          <p className="font-medium text-amber-50">Invite link (share once)</p>
+          <p className="mt-1 break-all font-mono text-[11px] text-amber-100/90 select-all">
+            {lastAcceptUrl}
+          </p>
+          <button
+            type="button"
+            onClick={() => copyUrl(lastAcceptUrl)}
+            className="mt-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-50 hover:bg-amber-900/40"
+          >
+            Copy link
+          </button>
+        </div>
+      ) : null}
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+      <section
+        ref={inviteFormRef}
+        className={`rounded-2xl border bg-slate-900/40 p-6 ${
+          inviteFocus ? 'border-indigo-500/40 ring-1 ring-indigo-500/20' : 'border-slate-800'
+        }`}
+      >
         <h2 className="text-lg font-medium text-white">Send invite</h2>
         <form onSubmit={inviteAdmin} className="mt-4 space-y-4">
           <label className="block text-sm text-slate-300">
@@ -191,6 +253,7 @@ export function SuperAdminOrgAdminsPage() {
               type="text"
               required
               autoComplete="name"
+              autoFocus={inviteFocus}
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
@@ -203,6 +266,16 @@ export function SuperAdminOrgAdminsPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+            />
+          </label>
+          <label className="block text-sm text-slate-300">
+            Phone <span className="text-slate-500">(optional, Ghana)</span>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="024…"
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
             />
           </label>
@@ -242,6 +315,9 @@ export function SuperAdminOrgAdminsPage() {
                     {String(a.fullName || '').trim() || a.email}
                   </p>
                   <p className="truncate text-sm text-slate-400">{a.email}</p>
+                  {a.phone ? (
+                    <p className="mt-0.5 font-mono text-xs text-slate-500">{a.phone}</p>
+                  ) : null}
                   <p className="mt-1 flex flex-wrap gap-1.5 text-[10px] uppercase tracking-wide">
                     <span className="rounded bg-slate-800 px-1.5 py-0.5 text-slate-400">
                       {ROLE_LABEL[a.role] || a.role}
@@ -256,6 +332,11 @@ export function SuperAdminOrgAdminsPage() {
                       {a.status === 'invited' ? 'Pending invite' : 'Active'}
                     </span>
                   </p>
+                  {a.status === 'invited' && a.inviteExpiresAt ? (
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Expires {formatExpiry(a.inviteExpiresAt)}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 gap-2">
                   {a.status === 'invited' && (
@@ -264,7 +345,7 @@ export function SuperAdminOrgAdminsPage() {
                       onClick={() => resendInvite(a._id)}
                       className="rounded-lg border border-amber-500/40 px-2.5 py-1 text-xs text-amber-200 hover:bg-amber-950/30"
                     >
-                      Resend email
+                      Resend / copy link
                     </button>
                   )}
                   <button
@@ -305,7 +386,8 @@ export function SuperAdminOrgAdminsPage() {
             </h2>
             {editAdmin.status === 'invited' ? (
               <p className="mt-2 text-xs text-slate-500">
-                They still need to open the invite email to set a password. Use Resend email if they lost the link.
+                They still need to open the invite email to set a password. Use Resend / copy link if
+                they lost it.
               </p>
             ) : null}
             <form onSubmit={saveEdit} className="mt-4 space-y-4">

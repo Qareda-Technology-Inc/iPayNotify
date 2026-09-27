@@ -1,7 +1,8 @@
 import mongoose from 'mongoose';
 import { Organization, Admin } from '../models/index.js';
-import { resolveDefaultOrganizationId } from '../db/defaultOrganizationId.js';
 import { normalizeOrgModules } from '../services/orgModulesService.js';
+
+const PLATFORM_MODULES = { tickets: true, remoteAccess: true };
 
 async function attachOrganizationMeta(req) {
   if (req.organizationId && mongoose.isValidObjectId(String(req.organizationId))) {
@@ -9,18 +10,25 @@ async function attachOrganizationMeta(req) {
     req.organizationName = o?.name || null;
     req.organizationSlug = o?.slug || null;
     req.organizationModules = normalizeOrgModules(o?.modules, o?.slug);
+    req.platformScope = false;
+  } else if (req.admin?.role === 'super_admin') {
+    req.organizationName = null;
+    req.organizationSlug = null;
+    req.organizationModules = { ...PLATFORM_MODULES };
+    req.platformScope = true;
   } else {
     req.organizationName = null;
     req.organizationSlug = null;
     req.organizationModules = normalizeOrgModules(null, null);
+    req.platformScope = false;
   }
 }
 
 /**
  * After `requireAuth`, sets `req.organizationId` for tenant-scoped APIs.
- * - **org_admin / ticket_manager / org_staff**: always the organisation from their admin record (JWT may mirror it).
- * - **super_admin**: optional `X-Organization-Id` header or `?organizationId=` to act in one tenant;
- *   otherwise falls back to the default organisation (slug / env) so the main dashboard still works.
+ * - **org_admin / ticket_manager / org_staff**: always the organisation from their admin record.
+ * - **super_admin**: optional `X-Organization-Id` / `?organizationId=` to act in one tenant;
+ *   otherwise platform scope (`organizationId` null, all modules enabled, lists span all orgs).
  */
 export async function attachOrganization(req, res, next) {
   if (!req.admin) {
@@ -70,13 +78,8 @@ export async function attachOrganization(req, res, next) {
       return;
     }
 
-    req.organizationId = await resolveDefaultOrganizationId();
-    if (!req.organizationId) {
-      return res.status(503).json({
-        error:
-          'No organisation is configured. From the server folder run: npm run db:backfill-organization',
-      });
-    }
+    // Super admin platform mode — no forced default organisation.
+    req.organizationId = null;
     await attachOrganizationMeta(req);
     next();
   } catch (e) {

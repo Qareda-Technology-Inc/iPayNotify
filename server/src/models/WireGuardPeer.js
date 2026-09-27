@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 /**
- * WireGuard VPN peer registry (VPS wg0 ↔ MikroTik routers).
+ * WireGuard VPN peer registry (VPS wg0 ↔ MikroTik routers + phone/laptop clients).
  * Named WireGuardPeer so it does not collide with the existing MikroTik `Router` inventory model.
  */
 const wireGuardPeerSchema = new mongoose.Schema(
@@ -13,6 +13,13 @@ const wireGuardPeerSchema = new mongoose.Schema(
     tunnelIp: { type: String, required: true, trim: true, unique: true },
     /** Optional LAN CIDR behind the router, e.g. 192.168.88.0/24 */
     lanSubnet: { type: String, trim: true, default: '' },
+    /** router = site MikroTik; client = phone/laptop admin access */
+    kind: {
+      type: String,
+      enum: ['router', 'client'],
+      default: 'router',
+      index: true,
+    },
     status: {
       type: String,
       enum: ['active', 'disabled', 'error'],

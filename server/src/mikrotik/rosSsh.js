@@ -427,11 +427,16 @@ export function parseIdentityName(stdout) {
   return m ? String(m[1]).trim().replace(/^"|"$/g, '') : 'MikroTik';
 }
 
+/**
+ * Quote a value for RouterOS CLI (SSH/terminal).
+ * Unquoted `/` starts a new command path — WireGuard keys and CIDRs must be quoted.
+ */
 export function cliEscapeValue(v) {
   const s = String(v);
   if (s === '') return '""';
-  if (/[\s"'\\;]/.test(s)) return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-  return s;
+  // Safe unquoted token: letters, digits, and a few punctuation marks (no / + = space).
+  if (/^[A-Za-z0-9._:@-]+$/.test(s)) return s;
+  return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 /** API-style `=key=value` words → CLI args */

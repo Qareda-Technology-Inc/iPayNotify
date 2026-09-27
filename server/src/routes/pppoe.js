@@ -12,6 +12,7 @@ import { enforceExpiredPppoeAccounts } from '../services/renewalService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
+import { orgQuery } from '../utils/tenantScope.js';
 
 export const pppoeRouter = express.Router();
 
@@ -23,7 +24,7 @@ pppoeRouter.get(
     /* Do not await MikroTik expiry sync here — it runs sequentially per expired line and
        made this route 10×+ slower than DB-only lists (e.g. remote access). Expiry → router
        sync is handled by jobs/scheduler.js using PPPOE_EXPIRY_CRON from env (see config). */
-    const accounts = await listPppoeAccounts({ organizationId: req.organizationId });
+    const accounts = await listPppoeAccounts(orgQuery(req.organizationId));
     res.json(accounts);
   })
 );

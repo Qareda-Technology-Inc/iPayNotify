@@ -123,6 +123,9 @@ organizationRouter.get(
   asyncHandler(async (req, res) => {
     const oid = req.organizationId;
     if (!oid || !mongoose.isValidObjectId(String(oid))) {
+      if (req.admin?.role === 'super_admin') {
+        return res.json([]);
+      }
       return res.status(503).json({ error: 'No organisation context for this session' });
     }
     const wantsCsv = String(req.query.format || '').toLowerCase() === 'csv';
@@ -152,6 +155,18 @@ organizationRouter.get(
   asyncHandler(async (req, res) => {
     const oid = req.organizationId;
     if (!oid || !mongoose.isValidObjectId(String(oid))) {
+      if (req.admin?.role === 'super_admin') {
+        return res.json({
+          platformScope: true,
+          name: 'All organisations',
+          modules: { tickets: true, remoteAccess: true },
+          portalSites: [],
+          portal: {
+            baseUrl: publicAppBase(),
+            note: 'Select an organisation in the header to manage tenant settings and portal links.',
+          },
+        });
+      }
       return res.status(503).json({ error: 'No organisation context for this session' });
     }
     const doc = await Organization.findById(oid).lean();

@@ -7,6 +7,7 @@ import {
 } from '../services/hotspotService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
+import { orgQuery } from '../utils/tenantScope.js';
 
 export const hotspotRouter = express.Router();
 
@@ -16,7 +17,7 @@ hotspotRouter.get(
   '/vouchers',
   asyncHandler(async (req, res) => {
     const { routerId } = req.query;
-    const q = { organizationId: req.organizationId };
+    const q = { ...orgQuery(req.organizationId) };
     if (routerId) q.routerId = routerId;
     res.json(await listVouchers(q));
   })

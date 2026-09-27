@@ -4,6 +4,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
 import { normalizeOrgModules } from '../services/orgModulesService.js';
+import { orgQuery } from '../utils/tenantScope.js';
 
 export const packagesRouter = express.Router();
 
@@ -18,7 +19,7 @@ packagesRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const { kind: kindRaw, all } = req.query;
-    const q = { organizationId: req.organizationId };
+    const q = { ...orgQuery(req.organizationId) };
     if (all !== '1') q.isActive = true;
     const kind = Array.isArray(kindRaw) ? kindRaw[0] : kindRaw;
     if (kind != null && String(kind).trim() !== '') {

@@ -66,7 +66,7 @@ export function SuperAdminOrganizationsPage() {
     setCreating(true);
     setErr('');
     try {
-      await apiFetch('/api/super-admin/organizations', {
+      const created = await apiFetch('/api/super-admin/organizations', {
         method: 'POST',
         body: JSON.stringify({
           name: name.trim(),
@@ -75,6 +75,11 @@ export function SuperAdminOrganizationsPage() {
       });
       setName('');
       setSlug('');
+      const id = created?._id || created?.id;
+      if (id) {
+        navigate(`/super/organizations/${id}/admins?invite=1`);
+        return;
+      }
       await load();
     } catch (e) {
       setErr(e.message || 'Create failed');
@@ -212,8 +217,9 @@ export function SuperAdminOrganizationsPage() {
       <div>
         <h1 className="text-2xl font-semibold text-white">Organisations</h1>
         <p className="mt-1 text-sm text-slate-400">
-          Create tenants, enable optional modules, and open their dashboard with{' '}
-          <strong className="text-slate-300">Open dashboard</strong>.
+          Create tenants, enable optional modules, and manage them from the platform. Use the header
+          organisation switcher (or <strong className="text-slate-300">Open dashboard</strong>) when
+          you want to work inside one tenant.
         </p>
       </div>
 
@@ -258,6 +264,9 @@ export function SuperAdminOrganizationsPage() {
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
         <h2 className="text-lg font-medium text-white">New organisation</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          After create you will invite the first organisation admin.
+        </p>
         <form onSubmit={createOrg} className="mt-4 grid gap-4 sm:grid-cols-2">
           <label className="block text-sm text-slate-300 sm:col-span-2">
             Display name

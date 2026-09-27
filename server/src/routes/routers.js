@@ -22,10 +22,81 @@ import { parseRouterConnectString } from '../utils/routerConnect.js';
 import { routerDisplayName } from '../utils/routerLabel.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
 import { assertOrgLimit } from '../services/orgLimitsService.js';
+import { WireGuardPeer } from '../models/WireGuardPeer.js';
+import { provisionMikrotikRouter } from '../services/wireguard/provisionRouter.js';
+import { orgQuery } from '../utils/tenantScope.js';
 
 export const routersApi = express.Router();
 
 routersApi.use(requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'));
+
+/**
+ * Active WireGuard tunnel peers (platform VPN) — pick tunnel IP when adding a MikroTik.
+ * GET /api/routers/wireguard-peers
+ */
+routersApi.get(
+  '/wireguard-peers',
+  asyncHandler(async (_req, res) => {
+    const items = await WireGuardPeer.find({ status: { $ne: 'disabled' } })
+      .sort({ siteName: 1 })
+      .select('siteName tunnelIp lanSubnet status lastSeen')
+      .lean();
+    res.json({
+      items: items.map((p) => ({
+        id: String(p._id),
+        siteName: p.siteName,
+        tunnelIp: p.tunnelIp,
+        lanSubnet: p.lanSubnet || '',
+        status: p.status,
+        lastSeen: p.lastSeen,
+      })),
+    });
+  })
+);
+
+/**
+ * Guided add: SSH to public IP → create WireGuard → save router on tunnel IP.
+ * POST /api/routers/provision
+ */
+routersApi.post(
+  '/provision',
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await provisionMikrotikRouter({
+        organizationId: req.organizationId,
+        siteName: req.body?.siteName,
+        host: req.body?.host,
+        username: req.body?.username ?? req.body?.apiUser,
+        password: req.body?.password ?? req.body?.apiPassword,
+        transport: req.body?.transport,
+        allowRemoteAccess: req.body?.allowRemoteAccess !== false,
+        allowLanAccess: req.body?.allowLanAccess !== false,
+        lanSubnet: req.body?.lanSubnet,
+        sitePublicIp: req.body?.sitePublicIp,
+      });
+      void logOrgAudit({
+        organizationId: req.organizationId,
+        actorEmail: req.admin?.email,
+        action: 'router.provision',
+        meta: {
+          routerId: result.router.id,
+          tunnelIp: result.wireguard.tunnelIp,
+          siteName: req.body?.siteName,
+        },
+      });
+      res.status(201).json(result);
+    } catch (e) {
+      if (e?.code === 11000) {
+        return res.status(400).json({
+          error:
+            'A router with this site public IP already exists. Clear sitePublicIp on the other router or use a different WAN IP.',
+        });
+      }
+      const status = e.status && Number(e.status) >= 400 ? e.status : 500;
+      return res.status(status).json({ error: e.message || 'Provision failed' });
+    }
+  })
+);
 
 /**
  * Hostnames (and any literal IPs) the billing app and MoMo flow need over HTTPS — for operators
@@ -51,11 +122,47 @@ routersApi.get(
 routersApi.get(
   '/',
   asyncHandler(async (req, res) => {
-    const list = await MikrotikRouter.find({ organizationId: req.organizationId })
+    const list = await MikrotikRouter.find(orgQuery(req.organizationId))
       .select('-apiPassword -sshPassword')
       .sort({ createdAt: 1 })
       .lean();
-    res.json(list);
+
+    const tunnelHosts = [
+      ...new Set(list.map((r) => String(r.host || '').trim()).filter((h) => /^10\.10\.10\.\d+$/.test(h))),
+    ];
+    let peersByIp = new Map();
+    if (tunnelHosts.length) {
+      const peers = await WireGuardPeer.find({ tunnelIp: { $in: tunnelHosts } })
+        .select('siteName tunnelIp lanSubnet status lastSeen')
+        .lean();
+      peersByIp = new Map(peers.map((p) => [p.tunnelIp, p]));
+    }
+
+    res.json(
+      list.map((r) => {
+        const host = String(r.host || '').trim();
+        const peer = peersByIp.get(host);
+        const isTunnel = /^10\.10\.10\.\d+$/.test(host);
+        return {
+          ...r,
+          wireguard: isTunnel
+            ? {
+                tunnelIp: host,
+                lanSubnet: peer?.lanSubnet || '',
+                peerStatus: peer?.status || 'unknown',
+                siteName: peer?.siteName || '',
+                lastSeen: peer?.lastSeen || null,
+                /** Endpoints for Winbox / SSH / API over the VPN */
+                endpoints: {
+                  winbox: `${host}:8291`,
+                  ssh: `${host}:${Number(r.sshPort) || 22}`,
+                  api: `${host}:${Number(r.apiPort) || 8728}`,
+                },
+              }
+            : null,
+        };
+      })
+    );
   })
 );
 

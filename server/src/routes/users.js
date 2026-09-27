@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { User, PppoeAccount, RemoteAccessSubscription } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
+import { orgQuery } from '../utils/tenantScope.js';
 
 export const usersRouter = express.Router();
 
@@ -31,7 +32,7 @@ usersRouter.get(
   asyncHandler(async (req, res) => {
     const lim = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
     res.json(
-      await User.find({ organizationId: req.organizationId })
+      await User.find(orgQuery(req.organizationId))
         .sort({ createdAt: -1 })
         .limit(lim)
         .lean()
@@ -47,7 +48,7 @@ usersRouter.get(
     }
     const doc = await User.findOne({
       _id: req.params.id,
-      organizationId: req.organizationId,
+      ...orgQuery(req.organizationId),
     }).lean();
     if (!doc) return res.status(404).json({ error: 'Not found' });
     res.json(doc);

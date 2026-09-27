@@ -8,6 +8,8 @@ import {
   User,
   PppoeAccount,
   RemoteAccessSubscription,
+  Admin,
+  WithdrawalRequest,
 } from '../models/index.js';
 
 function orgMatch(organizationId) {
@@ -28,14 +30,49 @@ function sumPaidCentsSince(since, organizationId) {
   ]).then((r) => (r[0]?.total ?? 0));
 }
 
+async function getPlatformOverview() {
+  const [orgCount, statusRows, walletAgg, pendingWithdrawals, pendingInvites] = await Promise.all([
+    Organization.countDocuments({}),
+    Organization.aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]),
+    Organization.aggregate([
+      { $group: { _id: null, total: { $sum: { $ifNull: ['$walletBalanceCents', 0] } } } },
+    ]),
+    WithdrawalRequest.countDocuments({ status: 'pending' }),
+    Admin.countDocuments({
+      status: 'invited',
+      role: { $in: ['org_admin', 'org_staff', 'ticket_manager'] },
+    }),
+  ]);
+
+  const organizationsByStatus = {
+    active: 0,
+    trial: 0,
+    past_due: 0,
+    suspended: 0,
+  };
+  for (const row of statusRows) {
+    const key = String(row._id || '');
+    if (key in organizationsByStatus) organizationsByStatus[key] = Number(row.n) || 0;
+  }
+
+  return {
+    organizations: orgCount,
+    organizationsByStatus,
+    totalWalletBalanceCents: Number(walletAgg[0]?.total) || 0,
+    pendingWithdrawals,
+    pendingInvites,
+  };
+}
+
 export async function getDashboardSummary(organizationId) {
   const om = orgMatch(organizationId);
-  let organization = null;
-  if (
+  const scoped =
     organizationId != null &&
     String(organizationId).trim() &&
-    mongoose.isValidObjectId(String(organizationId).trim())
-  ) {
+    mongoose.isValidObjectId(String(organizationId).trim());
+
+  let organization = null;
+  if (scoped) {
     organization = await Organization.findById(String(organizationId).trim())
       .select('name slug status walletBalanceCents')
       .lean();
@@ -57,6 +94,7 @@ export async function getDashboardSummary(organizationId) {
     revenueTodayCents,
     revenueWeekCents,
     revenueMonthCents,
+    platform,
   ] = await Promise.all([
     Router.countDocuments(om),
     PlanPackage.countDocuments(om),
@@ -68,6 +106,7 @@ export async function getDashboardSummary(organizationId) {
     sumPaidCentsSince(dayStart, organizationId),
     sumPaidCentsSince(weekStart, organizationId),
     sumPaidCentsSince(monthStart, organizationId),
+    scoped ? Promise.resolve(null) : getPlatformOverview(),
   ]);
 
   return {
@@ -77,6 +116,8 @@ export async function getDashboardSummary(organizationId) {
           walletBalanceCents: Number(organization.walletBalanceCents) || 0,
         }
       : null,
+    platformScope: !scoped,
+    platform,
     counts: {
       routers,
       packages,

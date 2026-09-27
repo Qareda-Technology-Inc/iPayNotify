@@ -15,6 +15,14 @@ const platformSettingsSchema = new mongoose.Schema(
       min: 0,
       max: 10_000,
     },
+    /**
+     * SSH keypair for API → WireGuard VPS (peer sync).
+     * Public key is shown in admin UI for authorized_keys; private key never returned after create.
+     */
+    wgVpsSshPublicKey: { type: String, default: '' },
+    wgVpsSshPrivateKey: { type: String, default: '', select: false },
+    wgVpsSshKeyCreatedAt: { type: Date, default: null },
+    wgVpsSshKeyComment: { type: String, default: '' },
   },
   { timestamps: true }
 );

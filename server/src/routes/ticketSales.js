@@ -6,6 +6,7 @@ import { requireOrgModule } from '../middleware/requireOrgModule.js';
 import { Admin, TicketSale, TicketSite, TicketSiteSeller, TicketType } from '../models/index.js';
 import { notifyTicketTransactionUpdate } from '../services/ticketNotificationService.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
+import { orgQuery } from '../utils/tenantScope.js';
 
 export const ticketSalesRouter = express.Router();
 
@@ -21,7 +22,7 @@ ticketSalesRouter.use(requireOrgModule('tickets'));
 ticketSalesRouter.get(
   '/sites',
   asyncHandler(async (req, res) => {
-    const rows = await TicketSite.find({ organizationId: req.organizationId }).sort({ name: 1 }).lean();
+    const rows = await TicketSite.find(orgQuery(req.organizationId)).sort({ name: 1 }).lean();
     res.json(rows);
   })
 );
@@ -94,7 +95,7 @@ ticketSalesRouter.delete(
 ticketSalesRouter.get(
   '/types',
   asyncHandler(async (req, res) => {
-    const q = { organizationId: req.organizationId };
+    const q = { ...orgQuery(req.organizationId) };
     const siteId = String(req.query.siteId || '').trim();
     if (siteId && mongoose.isValidObjectId(siteId)) q.siteId = siteId;
     const rows = await TicketType.find(q).sort({ createdAt: -1 }).lean();
@@ -296,7 +297,7 @@ ticketSalesRouter.get(
 ticketSalesRouter.get(
   '/seller-names',
   asyncHandler(async (req, res) => {
-    const q = { organizationId: req.organizationId };
+    const q = { ...orgQuery(req.organizationId) };
     if (req.query.siteId && mongoose.isValidObjectId(String(req.query.siteId))) {
       q.siteId = String(req.query.siteId);
     }
@@ -505,7 +506,7 @@ ticketSalesRouter.post(
 ticketSalesRouter.get(
   '/issues/open',
   asyncHandler(async (req, res) => {
-    const matchIssued = { organizationId: req.organizationId, kind: 'issued' };
+    const matchIssued = { ...orgQuery(req.organizationId), kind: 'issued' };
     if (req.query.siteId && mongoose.isValidObjectId(String(req.query.siteId))) {
       matchIssued.siteId = String(req.query.siteId);
     }
@@ -522,14 +523,16 @@ ticketSalesRouter.get(
       .populate('ticketTypeId', 'label priceCents')
       .lean();
     const ids = issued.map((r) => r._id).filter(Boolean);
+    const sumMatch = {
+      kind: 'collected',
+      issueSaleId: { $in: ids.map((id) => new mongoose.Types.ObjectId(String(id))) },
+      ...orgQuery(req.organizationId),
+    };
+    if (sumMatch.organizationId) {
+      sumMatch.organizationId = new mongoose.Types.ObjectId(String(sumMatch.organizationId));
+    }
     const sums = await TicketSale.aggregate([
-      {
-        $match: {
-          organizationId: new mongoose.Types.ObjectId(req.organizationId),
-          kind: 'collected',
-          issueSaleId: { $in: ids.map((id) => new mongoose.Types.ObjectId(String(id))) },
-        },
-      },
+      { $match: sumMatch },
       { $group: { _id: '$issueSaleId', total: { $sum: '$amountCents' } } },
     ]);
     const m = new Map(sums.map((s) => [String(s._id), Number(s.total || 0)]));
@@ -552,7 +555,7 @@ ticketSalesRouter.get(
   '/sales',
   asyncHandler(async (req, res) => {
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
-    const q = { organizationId: req.organizationId };
+    const q = { ...orgQuery(req.organizationId) };
     if (req.admin.role === 'ticket_manager') {
       q.sellerAdminId = req.admin.id;
     } else if (req.query.sellerAdminId && mongoose.isValidObjectId(String(req.query.sellerAdminId))) {

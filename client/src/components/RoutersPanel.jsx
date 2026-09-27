@@ -1,50 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../api.js';
 import { routerDisplayName as routerLabel } from '../utils/routerDisplayName.js';
+import { AddRouterWizard } from './AddRouterWizard.jsx';
 
-/** Winbox (8291) vs RouterOS API (8728) — SSH uses port 22, same CLI as terminal. */
-function ApiPortHint({ port }) {
-  const n = Number(port);
-  if (Number.isNaN(n)) return null;
-  if (n === 8291) {
-    return (
-      <p className="mt-1.5 text-xs text-amber-300">
-        <strong>8291 is Winbox only.</strong> QareFi connects to the <strong>api</strong> service, not
-        Winbox. Use port <strong>8728</strong> unless you changed it under IP → Services → api.
-      </p>
-    );
-  }
-  if (n === 8729) {
-    return (
-      <p className="mt-1.5 text-xs text-amber-300">
-        <strong>8729</strong> is usually encrypted API (api-ssl). This app uses plain API on{' '}
-        <strong>8728</strong> unless your router uses a custom port for the non-SSL api service.
-      </p>
-    );
-  }
-  if (n !== 8728) {
-    return (
-      <p className="mt-1.5 text-xs text-slate-400">
-        If a provider (e.g. MikroTicket) gives a <strong>reachable IP and TCP port</strong> that
-        forwards to RouterOS API, use them here. The router may still use 8728 on the LAN; your
-        billing server only connects to this public/relay endpoint.
-      </p>
-    );
-  }
-  return null;
-}
-
-function routerEndpointLabel(r) {
-  if (!r?.host) return '';
-  if (r.transport === 'ssh') {
-    const p = Number(r.sshPort) || 22;
-    return `${r.host}:${p}`;
-  }
-  const p = Number(r.apiPort) || 8728;
-  return `${r.host}:${p}`;
-}
-
-/** Single "connect" field for forms — omit default ports (8728 / 22). */
 function connectDisplay(r) {
   if (!r?.host) return '';
   if (r.transport === 'ssh') {
@@ -55,99 +13,39 @@ function connectDisplay(r) {
   return p === 8728 ? r.host : `${r.host}:${p}`;
 }
 
-function hostnameFromViteApiBase() {
-  const raw = import.meta.env.VITE_API_BASE_URL;
-  if (!raw || typeof raw !== 'string') return '';
-  try {
-    return new URL(raw.trim()).hostname;
-  } catch {
-    return '';
-  }
+function fieldClass() {
+  return 'mt-1.5 w-full rounded-xl border border-slate-700/80 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20';
 }
-
-function LiveTable({ title, accent, columns, rows, empty }) {
-  const titleClass =
-    accent === 'cyan' ? 'text-cyan-500/90' : accent === 'violet' ? 'text-violet-500/90' : 'text-slate-400';
-  return (
-    <div>
-      <h5 className={`text-xs font-semibold uppercase tracking-wider ${titleClass}`}>{title}</h5>
-      <div className="mt-2 max-h-72 overflow-auto rounded-xl border border-slate-800">
-        <table className="w-full min-w-[360px] text-left text-sm">
-          <thead className="sticky top-0 border-b border-slate-800 bg-slate-950/95 text-xs text-slate-500">
-            <tr>
-              {columns.map((c) => (
-                <th key={c} className="px-3 py-2 font-medium">
-                  {c}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/80 text-slate-300">
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={columns.length} className="px-3 py-6 text-center text-slate-500">
-                  {empty}
-                </td>
-              </tr>
-            ) : (
-              rows.map((cells, i) => (
-                <tr key={i}>
-                  {cells.map((cell, j) => (
-                    <td
-                      key={j}
-                      className={`px-3 py-2 text-xs ${j === 0 ? 'font-mono text-slate-200' : 'text-slate-400'}`}
-                    >
-                      {cell}
-                    </td>
-                  ))}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 
 export function RoutersPanel() {
   const [routers, setRouters] = useState([]);
   const [selectedId, setSelectedId] = useState('');
-  const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState('');
+  const [listLoading, setListLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [copied, setCopied] = useState('');
   const [connMessage, setConnMessage] = useState('');
   const [connError, setConnError] = useState('');
   const [testing, setTesting] = useState(false);
-  const [wgSyncing, setWgSyncing] = useState(false);
-  const [billingChecklist, setBillingChecklist] = useState(null);
-  const [billingChecklistErr, setBillingChecklistErr] = useState('');
-  const [liveSnap, setLiveSnap] = useState(null);
-  const [liveLoading, setLiveLoading] = useState(false);
-  const [liveError, setLiveError] = useState('');
-  const [liveTab, setLiveTab] = useState('active');
-
-  const [addComment, setAddComment] = useState('');
-  const [addConnect, setAddConnect] = useState('');
-  const [addUser, setAddUser] = useState('');
-  const [addPass, setAddPass] = useState('');
-  const [addError, setAddError] = useState('');
+  const [detailTab, setDetailTab] = useState('access');
 
   const [editComment, setEditComment] = useState('');
   const [editConnect, setEditConnect] = useState('');
   const [editTransport, setEditTransport] = useState('ssh');
-  const [editSshUser, setEditSshUser] = useState('');
-  const [editNewSshPass, setEditNewSshPass] = useState('');
   const [editUser, setEditUser] = useState('');
   const [editNewPass, setEditNewPass] = useState('');
   const [editDefaultPpp, setEditDefaultPpp] = useState('default');
   const [editExpiredPpp, setEditExpiredPpp] = useState('nonpayment');
   const [editSitePublicIp, setEditSitePublicIp] = useState('');
   const [editPortalSlug, setEditPortalSlug] = useState('');
-  const [editSmsBrandName, setEditSmsBrandName] = useState('');
-  const [editSmsSenderId, setEditSmsSenderId] = useState('');
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const [liveSnap, setLiveSnap] = useState(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState('');
 
   const loadRouters = useCallback(async () => {
     setListError('');
@@ -158,42 +56,35 @@ export function RoutersPanel() {
   }, []);
 
   useEffect(() => {
-    loadRouters().catch((e) => setListError(e.message));
+    setListLoading(true);
+    loadRouters()
+      .then((arr) => {
+        if (Array.isArray(arr) && arr.length === 0) setShowAdd(true);
+      })
+      .catch((e) => setListError(e.message))
+      .finally(() => setListLoading(false));
   }, [loadRouters]);
 
-  useEffect(() => {
-    let cancelled = false;
-    apiFetch('/api/routers/billing-access-checklist')
-      .then((d) => {
-        if (!cancelled) setBillingChecklist(d);
-      })
-      .catch((e) => {
-        if (!cancelled) setBillingChecklistErr(e.message || 'Could not load checklist');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const selected = routers.find((r) => String(r._id) === String(selectedId));
 
-  const selected = routers.find((r) => r._id === selectedId);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return routers;
+    return routers.filter((r) => {
+      const name = routerLabel(r).toLowerCase();
+      const host = String(r.host || '').toLowerCase();
+      const tunnel = String(r.wireguard?.tunnelIp || '').toLowerCase();
+      return name.includes(q) || host.includes(q) || tunnel.includes(q);
+    });
+  }, [routers, query]);
+
+  const vpnCount = useMemo(
+    () => routers.filter((r) => Boolean(r.wireguard?.tunnelIp)).length,
+    [routers]
+  );
 
   useEffect(() => {
-    if (!selected) {
-      setEditComment('');
-      setEditConnect('');
-      setEditTransport('ssh');
-      setEditSshUser('');
-      setEditNewSshPass('');
-      setEditUser('');
-      setEditNewPass('');
-      setEditDefaultPpp('default');
-      setEditExpiredPpp('nonpayment');
-      setEditSitePublicIp('');
-      setEditPortalSlug('');
-      setEditSmsBrandName('');
-      setEditSmsSenderId('');
-      return;
-    }
+    if (!selected) return;
     setEditComment(
       selected.comment != null && String(selected.comment).trim()
         ? String(selected.comment).trim()
@@ -201,80 +92,63 @@ export function RoutersPanel() {
     );
     setEditConnect(connectDisplay(selected));
     setEditTransport(selected.transport === 'ssh' ? 'ssh' : 'api');
-    setEditSshUser(selected.sshUser || '');
-    setEditNewSshPass('');
     setEditUser(selected.apiUser || '');
     setEditNewPass('');
     setEditDefaultPpp(selected.defaultPppProfile || 'default');
     setEditExpiredPpp(selected.expiredPppProfile || 'nonpayment');
     setEditSitePublicIp(selected.sitePublicIp || '');
     setEditPortalSlug(selected.portalSlug || '');
-    setEditSmsBrandName(selected.smsBrandName != null ? String(selected.smsBrandName) : '');
-    setEditSmsSenderId(selected.smsSenderId != null ? String(selected.smsSenderId) : '');
     setConnMessage('');
     setConnError('');
     setSaveError('');
+    setLiveSnap(null);
+    setLiveError('');
+    setDetailTab('access');
   }, [selected]);
 
   useEffect(() => {
-    if (routers.length && !selectedId) {
-      setSelectedId(routers[0]._id);
-    }
-    if (selectedId && !routers.some((r) => r._id === selectedId)) {
-      setSelectedId(routers[0]?._id ?? '');
+    if (routers.length && !selectedId) setSelectedId(String(routers[0]._id));
+    if (selectedId && !routers.some((r) => String(r._id) === String(selectedId))) {
+      setSelectedId(routers[0] ? String(routers[0]._id) : '');
     }
   }, [routers, selectedId]);
 
-  async function addRouter(e) {
-    e.preventDefault();
-    setAddError('');
-    setLoading(true);
-    try {
-      const created = await apiFetch('/api/routers', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...(addComment.trim() ? { comment: addComment.trim() } : {}),
-          host: addConnect.trim(),
-          transport: 'ssh',
-          apiUser: addUser.trim(),
-          apiPassword: addPass,
-        }),
-      });
-      setAddComment('');
-      setAddConnect('');
-      setAddUser('');
-      setAddPass('');
-      await loadRouters();
-      const newId = created.id ?? created._id;
-      if (newId) setSelectedId(String(newId));
-    } catch (err) {
-      setAddError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    if (!mobileDetailOpen && !showAdd) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileDetailOpen, showAdd]);
 
   useEffect(() => {
-    setLiveSnap(null);
-    setLiveError('');
-    setLiveTab('active');
-  }, [selectedId]);
+    if (!mobileDetailOpen) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setMobileDetailOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileDetailOpen]);
 
-  async function fetchLiveFromSite() {
-    if (!selectedId) return;
-    setLiveLoading(true);
-    setLiveError('');
-    setConnError('');
-    try {
-      const snap = await apiFetch(`/api/routers/${selectedId}/mikrotik/live`);
-      setLiveSnap(snap);
-      if (snap.error) setLiveError(snap.error);
-    } catch (e) {
-      setLiveSnap(null);
-      setLiveError(e.message || 'Could not fetch live data from site');
-    } finally {
-      setLiveLoading(false);
-    }
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(''), 1600);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  function selectRouter(id) {
+    setSelectedId(String(id));
+    setMobileDetailOpen(true);
+  }
+
+  function copyText(value) {
+    const v = String(value || '');
+    if (!v) return;
+    navigator.clipboard.writeText(v).then(
+      () => setCopied(v),
+      () => {}
+    );
   }
 
   async function testConnection() {
@@ -284,17 +158,7 @@ export function RoutersPanel() {
     setTesting(true);
     try {
       const r = await apiFetch(`/api/routers/${selectedId}/mikrotik/ping`);
-      let msg = r.message || 'Connected';
-      if (r.walledGarden?.ok) {
-        const n =
-          (r.walledGarden.addedHosts?.length || 0) + (r.walledGarden.addedIps?.length || 0);
-        msg += ` Hotspot walled garden updated (${n} allow rule(s) for payments before login).`;
-      } else if (r.walledGarden && !r.walledGarden.ok && r.walledGarden.error) {
-        setConnError(
-          `Connected, but walled garden sync failed (guests may not reach checkout until this is fixed): ${r.walledGarden.error}`
-        );
-      }
-      setConnMessage(msg);
+      setConnMessage(r.message || 'Connected');
     } catch (e) {
       setConnError(e.message || 'Connection failed');
     } finally {
@@ -302,25 +166,20 @@ export function RoutersPanel() {
     }
   }
 
-  async function syncWalledGardenOnly() {
+  async function fetchLive() {
     if (!selectedId) return;
-    setConnError('');
-    setConnMessage('');
-    setWgSyncing(true);
+    setLiveLoading(true);
+    setLiveError('');
     try {
-      const r = await apiFetch(`/api/routers/${selectedId}/mikrotik/walled-garden/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-      });
-      const n = (r.addedHosts?.length || 0) + (r.addedIps?.length || 0);
-      setConnMessage(
-        `Walled garden synced: ${n} allow rule(s) added (${r.removed ?? 0} old QareFi rule(s) removed).`
-      );
+      const snap = await apiFetch(`/api/routers/${selectedId}/mikrotik/live`);
+      setLiveSnap(snap);
+      if (snap.error) setLiveError(snap.error);
+      setDetailTab('live');
     } catch (e) {
-      setConnError(e.message || 'Walled garden sync failed');
+      setLiveSnap(null);
+      setLiveError(e.message || 'Fetch failed');
     } finally {
-      setWgSyncing(false);
+      setLiveLoading(false);
     }
   }
 
@@ -334,26 +193,21 @@ export function RoutersPanel() {
         comment: editComment.trim(),
         host: editConnect.trim(),
         transport: editTransport,
-        sshUser: editSshUser.trim(),
         apiUser: editUser,
         defaultPppProfile: editDefaultPpp,
         expiredPppProfile: editExpiredPpp,
         sitePublicIp: editSitePublicIp.trim(),
         portalSlug: editPortalSlug.trim().toLowerCase(),
-        smsBrandName: editSmsBrandName.trim(),
-        smsSenderId: editSmsSenderId.trim(),
       };
       if (editNewPass.trim()) body.apiPassword = editNewPass;
-      if (editNewSshPass.trim()) body.sshPassword = editNewSshPass;
       await apiFetch(`/api/routers/${selectedId}`, {
         method: 'PATCH',
         body: JSON.stringify(body),
       });
       setEditNewPass('');
-      setEditNewSshPass('');
       await loadRouters();
-      setConnMessage('');
-      setConnError('');
+      setConnMessage('Saved');
+      setDetailTab('access');
     } catch (err) {
       setSaveError(err.message);
     } finally {
@@ -361,539 +215,534 @@ export function RoutersPanel() {
     }
   }
 
+  const detailProps = {
+    selected,
+    detailTab,
+    setDetailTab,
+    testing,
+    testConnection,
+    connMessage,
+    connError,
+    editComment,
+    setEditComment,
+    editConnect,
+    setEditConnect,
+    editUser,
+    setEditUser,
+    editNewPass,
+    setEditNewPass,
+    editDefaultPpp,
+    setEditDefaultPpp,
+    editExpiredPpp,
+    setEditExpiredPpp,
+    editPortalSlug,
+    setEditPortalSlug,
+    editSitePublicIp,
+    setEditSitePublicIp,
+    editTransport,
+    setEditTransport,
+    saveEdits,
+    saveError,
+    saving,
+    liveLoading,
+    fetchLive,
+    liveError,
+    liveSnap,
+    copyText,
+    copied,
+  };
+
   return (
-    <div className="space-y-10">
-      <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Routers</h2>
-        <p className="mt-2 text-sm text-slate-400">
-          Add a router with the <strong>MikroTicket</strong> (or other) <strong>SSH</strong> details:
-          address, login, and password. Default port is <strong>22</strong>; use{' '}
-          <strong className="font-mono">host:port</strong> if they give a custom SSH port. Switch to
-          RouterOS API under <strong>Advanced</strong> if you connect on <strong>8728</strong> instead.
-        </p>
-        <p className="mt-2 text-sm text-slate-400">
-          After a successful <strong>Test connection</strong>, the server updates MikroTik{' '}
-          <strong>IP → Hotspot → Walled garden</strong> with <span className="font-mono">QareFi:</span>{' '}
-          entries so guests can reach your pay page and billing API <strong>before</strong> hotspot login.
-          Set env <span className="font-mono">PUBLIC_APP_URL</span> to your real customer HTTPS origin.
-          Optional: <span className="font-mono">WALLED_GARDEN_EXTRA_HOSTS</span> (comma-separated),{' '}
-          <span className="font-mono">SYNC_WALLED_GARDEN_ON_PING=false</span> to skip auto-sync.
-        </p>
-      </div>
+    <div className="mx-auto w-full max-w-6xl min-w-0 space-y-4 overflow-x-hidden sm:space-y-5">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold tracking-tight text-white sm:text-xl">Routers</h2>
+          <p className="mt-0.5 text-sm text-slate-500">
+            {listLoading
+              ? 'Loading sites…'
+              : `${routers.length} site${routers.length === 1 ? '' : 's'}${
+                  vpnCount ? ` · ${vpnCount} on VPN` : ''
+                }`}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowAdd(true)}
+          className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm shadow-emerald-900/30 hover:bg-emerald-500 sm:h-10"
+        >
+          Add router
+        </button>
+      </header>
 
-      <section className="rounded-2xl border border-amber-500/30 bg-amber-950/15 p-5">
-        <h3 className="text-sm font-semibold text-amber-100">PPPoE renew / payment page (firewall)</h3>
-        <p className="mt-2 text-sm text-amber-100/90">
-          <strong>Hotspot walled garden does not apply to PPPoE.</strong> Subscribers on your{' '}
-          <strong>expired PPP profile</strong> must be allowed to reach the billing site and payment
-          APIs over <strong className="font-mono">HTTPS (443)</strong> (and usually <strong>DNS</strong>).
-          Add firewall filter / address-list rules on the MikroTik for those clients before any rule that
-          blocks them.
-        </p>
-        {billingChecklistErr && (
-          <p className="mt-2 text-sm text-red-300">{billingChecklistErr}</p>
-        )}
-        {billingChecklist && (
-          <>
-            <p className="mt-3 text-xs font-medium uppercase tracking-wide text-amber-200/80">
-              Hostnames from server config (allow TCP 443)
-            </p>
-            <ul className="mt-2 space-y-1 font-mono text-xs text-amber-50/95">
-              {[...(billingChecklist.hosts || []), ...(billingChecklist.ips || [])].map((h) => (
-                <li key={h} className="break-all">
-                  {h}
-                </li>
-              ))}
-            </ul>
-            {(() => {
-              const apiHost = hostnameFromViteApiBase();
-              const listed = new Set([
-                ...(billingChecklist.hosts || []),
-                ...(billingChecklist.ips || []),
-              ]);
-              if (!apiHost || listed.has(apiHost)) return null;
-              return (
-                <p className="mt-3 rounded-lg border border-amber-400/40 bg-slate-950/40 px-3 py-2 text-xs text-amber-100">
-                  This admin UI calls the API at <span className="font-mono">{apiHost}</span> but that
-                  host is <strong>not</strong> in the list above. Add it to server env{' '}
-                  <span className="font-mono">WALLED_GARDEN_EXTRA_HOSTS</span> on Render (comma-separated),
-                  redeploy the API, then allow the same hostname on the router for PPPoE clients.
-                </p>
-              );
-            })()}
-            <ul className="mt-4 list-disc space-y-2 pl-5 text-xs text-amber-100/85">
-              {(billingChecklist.tips || []).map((t, i) => (
-                <li key={i}>{t}</li>
-              ))}
-            </ul>
-            <button
-              type="button"
-              className="mt-4 rounded-lg border border-amber-500/50 px-3 py-1.5 text-xs font-medium text-amber-50 hover:bg-amber-900/30"
-              onClick={() => {
-                const lines = [
-                  ...(billingChecklist.hosts || []),
-                  ...(billingChecklist.ips || []),
-                ].join('\n');
-                navigator.clipboard.writeText(lines).catch(() => {});
-              }}
-            >
-              Copy host list
-            </button>
-          </>
-        )}
-      </section>
-
-      {listError && (
-        <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+      {listError ? (
+        <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-200">
           {listError}
         </p>
-      )}
+      ) : null}
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h3 className="font-medium text-white">Add router</h3>
-        <p className="mt-1 text-xs text-slate-500">
-          <strong>Comment</strong> is the router name everywhere (lists, customer portal). If you
-          skip it, the hostname is used. Add <span className="font-mono">:port</span> when SSH is not
-          on port 22 (e.g. <span className="font-mono">52.x.x.x:28748</span>). Saving only stores the
-          router in the database — use <strong>Test connection</strong> to verify MikroTik SSH/API
-          before PPPoE sync will work.
-        </p>
-        <form onSubmit={addRouter} className="mt-4 max-w-md space-y-4">
-          <label className="block text-sm text-slate-300">
-            Comment (router name)
-            <input
-              value={addComment}
-              onChange={(e) => setAddComment(e.target.value)}
-              placeholder="e.g. East Legon POP"
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+      {listLoading ? (
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="h-20 animate-pulse rounded-2xl border border-slate-800/80 bg-slate-900/40"
             />
-          </label>
-          <label className="block text-sm text-slate-300">
-            Connect to
-            <input
-              required
-              value={addConnect}
-              onChange={(e) => setAddConnect(e.target.value)}
-              placeholder="host or host:port — not “ssh … -p” (use 52.x.x.x:10864)"
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
-            />
-          </label>
-          <label className="block text-sm text-slate-300">
-            Login
-            <input
-              required
-              autoComplete="off"
-              value={addUser}
-              onChange={(e) => setAddUser(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-            />
-          </label>
-          <label className="block text-sm text-slate-300">
-            Password
-            <input
-              type="password"
-              required
-              autoComplete="new-password"
-              value={addPass}
-              onChange={(e) => setAddPass(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-            />
-          </label>
-          {addError && (
-            <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {addError}
-            </p>
-          )}
-          <button
-            type="submit"
-            disabled={loading}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            {loading ? 'Saving…' : 'Add router'}
-          </button>
-        </form>
-      </section>
-
-      {routers.length > 0 && (
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
-          <h3 className="font-medium text-white">Saved routers — connect, then use Hotspot / PPPoE</h3>
-          <p className="mt-1 text-xs text-slate-500">
-            Pick a router, test the connection (SSH by default, or API if you switched it), then use
-            Hotspot / PPPoE.
+          ))}
+        </div>
+      ) : routers.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-700/80 bg-slate-900/20 px-5 py-14 text-center sm:px-8">
+          <p className="text-base font-medium text-white">No routers yet</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-slate-500">
+            Add a site with its IP and login. We create the WireGuard tunnel and save remote access
+            endpoints for you.
           </p>
-
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <label className="text-sm text-slate-300">
-              Active router
-              <select
-                value={selectedId}
-                onChange={(e) => setSelectedId(e.target.value)}
-                className="ml-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-              >
-                {routers.map((r) => (
-                  <option key={r._id} value={r._id}>
-                    {routerLabel(r)} — {routerEndpointLabel(r)} ({r.transport === 'ssh' ? 'SSH' : 'API'})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              disabled={testing || !selectedId}
-              onClick={testConnection}
-              className="rounded-lg border border-emerald-700/60 bg-emerald-950/40 px-4 py-2 text-sm font-medium text-emerald-200 hover:bg-emerald-950/70 disabled:opacity-50"
+          <button
+            type="button"
+            onClick={() => setShowAdd(true)}
+            className="mt-6 inline-flex h-11 items-center rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white hover:bg-emerald-500"
+          >
+            Add your first router
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="relative">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by name, IP, or tunnel…"
+              className="h-11 w-full rounded-xl border border-slate-800 bg-slate-900/60 pl-10 pr-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20"
+            />
+            <svg
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden
             >
-              {testing ? 'Connecting…' : 'Test connection'}
-            </button>
-            <button
-              type="button"
-              disabled={wgSyncing || testing || !selectedId}
-              onClick={syncWalledGardenOnly}
-              className="rounded-lg border border-slate-600 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
-            >
-              {wgSyncing ? 'Syncing walled garden…' : 'Sync walled garden only'}
-            </button>
-            <button
-              type="button"
-              disabled={liveLoading || !selectedId}
-              onClick={fetchLiveFromSite}
-              className="rounded-lg border border-sky-700/50 bg-sky-950/40 px-4 py-2 text-sm font-medium text-sky-100 hover:bg-sky-950/70 disabled:opacity-50"
-            >
-              {liveLoading ? 'Fetching from site…' : 'Fetch live from site'}
-            </button>
+              <circle cx="11" cy="11" r="7" />
+              <path d="M20 20l-3-3" strokeLinecap="round" />
+            </svg>
           </div>
 
-          {connMessage && <p className="mt-3 text-sm text-emerald-400">{connMessage}</p>}
-          {connError && (
-            <p className="mt-3 whitespace-pre-wrap text-sm text-amber-200">{connError}</p>
-          )}
-          {liveError && !liveSnap && (
-            <p className="mt-3 whitespace-pre-wrap text-sm text-amber-200">{liveError}</p>
-          )}
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] lg:items-start">
+            <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/30">
+              {filtered.length === 0 ? (
+                <p className="px-4 py-10 text-center text-sm text-slate-500">No sites match “{query}”.</p>
+              ) : (
+                <ul className="divide-y divide-slate-800/80">
+                  {filtered.map((r) => {
+                    const active = String(r._id) === String(selectedId);
+                    const tunnel = r.wireguard?.tunnelIp;
+                    return (
+                      <li key={r._id}>
+                        <button
+                          type="button"
+                          onClick={() => selectRouter(r._id)}
+                          className={`flex w-full min-w-0 items-center gap-3 px-4 py-3.5 text-left transition sm:px-5 ${
+                            active
+                              ? 'bg-emerald-950/35 sm:bg-emerald-950/25'
+                              : 'hover:bg-slate-800/40 active:bg-slate-800/60'
+                          }`}
+                        >
+                          <span
+                            className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${
+                              tunnel ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.55)]' : 'bg-slate-600'
+                            }`}
+                            title={tunnel ? 'On VPN' : 'Direct'}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-2">
+                              <span className="truncate font-medium text-white">{routerLabel(r)}</span>
+                              <span
+                                className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
+                                  tunnel
+                                    ? 'bg-emerald-500/15 text-emerald-300'
+                                    : 'bg-slate-800 text-slate-500'
+                                }`}
+                              >
+                                {tunnel ? 'VPN' : 'Direct'}
+                              </span>
+                            </span>
+                            <span className="mt-0.5 block truncate font-mono text-xs text-slate-500">
+                              {tunnel
+                                ? `Winbox ${r.wireguard.endpoints?.winbox || `${tunnel}:8291`}`
+                                : r.host}
+                            </span>
+                          </span>
+                          <svg
+                            className="h-4 w-4 shrink-0 text-slate-600 lg:hidden"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            aria-hidden
+                          >
+                            <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
 
-          {liveSnap && (
-            <div className="mt-6 space-y-4 rounded-xl border border-slate-700 bg-slate-950/50 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h4 className="text-sm font-medium text-white">Live from site</h4>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    {liveSnap.routerName} · {liveSnap.host}
-                    {liveSnap.at ? ` · ${new Date(liveSnap.at).toLocaleString()}` : ''}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs">
-                  <span className="rounded-md border border-violet-500/30 bg-violet-950/30 px-2 py-1 text-violet-200">
-                    PPP secrets {liveSnap.counts?.pppSecrets ?? 0}
-                  </span>
-                  <span className="rounded-md border border-cyan-500/30 bg-cyan-950/30 px-2 py-1 text-cyan-200">
-                    Hotspot users {liveSnap.counts?.hotspotUsers ?? 0}
-                  </span>
-                  <span className="rounded-md border border-violet-500/30 bg-violet-950/30 px-2 py-1 text-violet-100">
-                    PPP online {liveSnap.counts?.pppActive ?? 0}
-                  </span>
-                  <span className="rounded-md border border-cyan-500/30 bg-cyan-950/30 px-2 py-1 text-cyan-100">
-                    Hotspot online {liveSnap.counts?.hotspotActive ?? 0}
-                  </span>
-                </div>
+            <aside className="hidden min-w-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/50 lg:sticky lg:top-20 lg:block lg:max-h-[calc(100dvh-6.5rem)] lg:overflow-y-auto">
+              <div className="p-5">
+                <RouterDetail {...detailProps} />
               </div>
+            </aside>
+          </div>
+        </>
+      )}
 
-              {liveSnap.details && (
-                <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
-                  {[
-                    ['Identity', liveSnap.details.identity],
-                    ['Version', liveSnap.details.version],
-                    ['Uptime', liveSnap.details.uptime],
-                  ].map(([k, v]) => (
-                    <div key={k} className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
-                      <p className="text-slate-600">{k}</p>
-                      <p className="mt-0.5 font-medium text-slate-200">{v || '—'}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
+      {mobileDetailOpen && selected ? (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/65 backdrop-blur-[2px]"
+            aria-label="Close"
+            onClick={() => setMobileDetailOpen(false)}
+          />
+          <div className="absolute inset-x-0 bottom-0 flex max-h-[min(94dvh,94vh)] flex-col rounded-t-2xl border border-slate-700/80 border-b-0 bg-slate-900 shadow-2xl">
+            <div className="relative flex shrink-0 items-center justify-center border-b border-slate-800 px-4 pb-3 pt-3">
+              <div className="h-1 w-10 rounded-full bg-slate-600" aria-hidden />
+              <button
+                type="button"
+                onClick={() => setMobileDetailOpen(false)}
+                className="absolute right-2 top-1.5 rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                Done
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+              <RouterDetail {...detailProps} />
+            </div>
+          </div>
+        </div>
+      ) : null}
 
-              {liveError && (
-                <p className="rounded-lg border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
-                  Partial: {liveError}
-                </p>
-              )}
+      {showAdd ? (
+        <AddRouterWizard
+          onCancel={() => setShowAdd(false)}
+          onCreated={async (data) => {
+            setShowAdd(false);
+            await loadRouters();
+            const id = data?.router?.id;
+            if (id) {
+              setSelectedId(String(id));
+              setMobileDetailOpen(true);
+            }
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
 
-              <div className="flex flex-wrap gap-2">
-                {[
-                  ['active', 'Online sessions'],
-                  ['ppp', 'PPP secrets'],
-                  ['hotspot', 'Hotspot users'],
-                ].map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setLiveTab(id)}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
-                      liveTab === id
-                        ? 'bg-slate-100 text-slate-900'
-                        : 'border border-slate-700 text-slate-400 hover:bg-slate-800'
-                    }`}
+function RouterDetail({
+  selected,
+  detailTab,
+  setDetailTab,
+  testing,
+  testConnection,
+  connMessage,
+  connError,
+  editComment,
+  setEditComment,
+  editConnect,
+  setEditConnect,
+  editUser,
+  setEditUser,
+  editNewPass,
+  setEditNewPass,
+  editDefaultPpp,
+  setEditDefaultPpp,
+  editExpiredPpp,
+  setEditExpiredPpp,
+  editPortalSlug,
+  setEditPortalSlug,
+  editSitePublicIp,
+  setEditSitePublicIp,
+  editTransport,
+  setEditTransport,
+  saveEdits,
+  saveError,
+  saving,
+  liveLoading,
+  fetchLive,
+  liveError,
+  liveSnap,
+  copyText,
+  copied,
+}) {
+  if (!selected) {
+    return (
+      <div className="flex min-h-[12rem] flex-col items-center justify-center text-center">
+        <p className="text-sm text-slate-500">Select a site from the list</p>
+      </div>
+    );
+  }
+
+  const onVpn = Boolean(selected.wireguard?.tunnelIp);
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="flex flex-wrap items-start gap-2">
+          <h3 className="min-w-0 flex-1 text-lg font-semibold tracking-tight text-white">
+            {routerLabel(selected)}
+          </h3>
+          <span
+            className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+              onVpn
+                ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/25'
+                : 'bg-slate-800 text-slate-400 ring-1 ring-slate-700'
+            }`}
+          >
+            {onVpn ? 'On VPN' : 'Direct'}
+          </span>
+        </div>
+        <p className="mt-1 truncate font-mono text-xs text-slate-500">{selected.host}</p>
+        {selected.wireguard?.lanSubnet ? (
+          <p className="mt-1 text-xs text-slate-500">
+            LAN <span className="font-mono text-slate-400">{selected.wireguard.lanSubnet}</span>
+          </p>
+        ) : null}
+      </div>
+
+      <div className="flex gap-1 rounded-xl bg-slate-950/80 p-1">
+        {[
+          { id: 'access', label: 'Access' },
+          { id: 'settings', label: 'Settings' },
+          { id: 'live', label: 'Live' },
+        ].map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setDetailTab(t.id)}
+            className={`min-h-10 flex-1 rounded-lg text-xs font-semibold transition sm:min-h-9 ${
+              detailTab === t.id
+                ? 'bg-slate-700 text-white shadow-sm'
+                : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {detailTab === 'access' && (
+        <div className="space-y-4">
+          {selected.wireguard?.endpoints ? (
+            <div className="space-y-2">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-slate-500">
+                Remote over VPN
+              </p>
+              {[
+                { label: 'Winbox', value: selected.wireguard.endpoints.winbox },
+                { label: 'SSH', value: selected.wireguard.endpoints.ssh },
+                { label: 'API', value: selected.wireguard.endpoints.api },
+              ].map((ep) => {
+                const justCopied = copied === ep.value;
+                return (
+                  <div
+                    key={ep.label}
+                    className="flex min-w-0 items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5"
                   >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {liveTab === 'active' && (
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <LiveTable
-                    title={`Hotspot active (${liveSnap.hotspotActive?.length ?? 0})`}
-                    accent="cyan"
-                    columns={['User', 'IP', 'Uptime']}
-                    rows={(liveSnap.hotspotActive || []).map((r) => [
-                      r.user,
-                      r.address,
-                      r.uptime,
-                    ])}
-                    empty="No hotspot sessions"
-                  />
-                  <LiveTable
-                    title={`PPP active (${liveSnap.pppActive?.length ?? 0})`}
-                    accent="violet"
-                    columns={['Username', 'IP', 'Uptime']}
-                    rows={(liveSnap.pppActive || []).map((r) => [
-                      r.secret,
-                      r.address,
-                      r.uptime,
-                    ])}
-                    empty="No PPP sessions"
-                  />
-                </div>
-              )}
-
-              {liveTab === 'ppp' && (
-                <LiveTable
-                  title={`PPP secrets on router (${liveSnap.pppSecrets?.length ?? 0})`}
-                  accent="violet"
-                  columns={['Username', 'Profile', 'Disabled']}
-                  rows={(liveSnap.pppSecrets || []).map((r) => [
-                    r.name,
-                    r.profile,
-                    r.disabled ? 'yes' : 'no',
-                  ])}
-                  empty="No PPP secrets on this router"
-                />
-              )}
-
-              {liveTab === 'hotspot' && (
-                <LiveTable
-                  title={`Hotspot users on router (${liveSnap.hotspotUsers?.length ?? 0})`}
-                  accent="cyan"
-                  columns={['Username', 'Profile', 'Disabled']}
-                  rows={(liveSnap.hotspotUsers || []).map((r) => [
-                    r.name,
-                    r.profile,
-                    r.disabled ? 'yes' : 'no',
-                  ])}
-                  empty="No hotspot users on this router"
-                />
-              )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                        {ep.label}
+                      </p>
+                      <p className="mt-0.5 truncate font-mono text-sm text-emerald-100">{ep.value}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyText(ep.value)}
+                      className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition ${
+                        justCopied
+                          ? 'bg-emerald-600 text-white'
+                          : 'border border-slate-700 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      {justCopied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-slate-400">
+              No VPN tunnel on this site yet. Use <strong className="text-slate-200">Add router</strong>{' '}
+              to provision one.
             </div>
           )}
 
-          {selected && (
-            <form onSubmit={saveEdits} className="mt-8 space-y-4 border-t border-slate-800 pt-6">
-              <h4 className="text-sm font-medium text-slate-200">Edit router</h4>
-              <label className="block text-sm text-slate-300">
-                Connect to
-                <input
-                  required
-                  value={editConnect}
-                  onChange={(e) => setEditConnect(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
-                />
-              </label>
-              <label className="block text-sm text-slate-300">
-                Comment (router name)
-                <input
-                  value={editComment}
-                  onChange={(e) => setEditComment(e.target.value)}
-                  placeholder="Shown in lists and customer portal; empty uses connect hostname"
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-                />
-              </label>
-              <label className="block text-sm text-slate-300">
-                Login
-                <input
-                  required
-                  value={editUser}
-                  onChange={(e) => setEditUser(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-                />
-              </label>
-              <label className="block text-sm text-slate-300">
-                New password (leave blank to keep)
-                <input
-                  type="password"
-                  value={editNewPass}
-                  onChange={(e) => setEditNewPass(e.target.value)}
-                  autoComplete="new-password"
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-                />
-              </label>
+          <button
+            type="button"
+            disabled={testing}
+            onClick={testConnection}
+            className="flex h-11 w-full items-center justify-center rounded-xl border border-emerald-600/40 bg-emerald-950/40 text-sm font-semibold text-emerald-100 hover:bg-emerald-950/70 disabled:opacity-50"
+          >
+            {testing ? 'Testing…' : 'Test connection'}
+          </button>
+          {connMessage ? <p className="text-sm text-emerald-400">{connMessage}</p> : null}
+          {connError ? (
+            <p className="break-words whitespace-pre-wrap rounded-xl border border-amber-500/25 bg-amber-950/20 px-3 py-2 text-xs text-amber-100">
+              {connError}
+            </p>
+          ) : null}
+        </div>
+      )}
 
-              <details className="rounded-lg border border-slate-800 bg-slate-950/40 p-4">
-                <summary className="cursor-pointer text-sm font-medium text-slate-300">
-                  Advanced — connection type, PPP, customer portal
-                </summary>
-                <div className="mt-4 space-y-4">
-                  <label className="block text-sm text-slate-300">
-                    Connection type
-                    <select
-                      value={editTransport}
-                      onChange={(e) => setEditTransport(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-                    >
-                      <option value="ssh">SSH — MikroTicket-style (default port 22, or add :port)</option>
-                      <option value="api">RouterOS API (default port 8728, or add :port)</option>
-                    </select>
-                  </label>
-                  {editTransport === 'api' ? (
-                    <ApiPortHint
-                      port={
-                        (() => {
-                          const m = String(editConnect).match(/:(\d{1,5})$/);
-                          return m ? Number(m[1]) : 8728;
-                        })()
-                      }
-                    />
-                  ) : (
-                    <label className="block text-sm text-slate-300">
-                      SSH user override (optional)
-                      <input
-                        value={editSshUser}
-                        onChange={(e) => setEditSshUser(e.target.value)}
-                        placeholder="Empty = login above"
-                        className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-                      />
-                    </label>
-                  )}
-                  {editTransport === 'ssh' && (
-                    <label className="block text-sm text-slate-300">
-                      New SSH-only password (optional)
-                      <input
-                        type="password"
-                        value={editNewSshPass}
-                        onChange={(e) => setEditNewSshPass(e.target.value)}
-                        autoComplete="new-password"
-                        className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-                      />
-                    </label>
-                  )}
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="block text-sm text-slate-300">
-                      Default active PPP profile
-                      <input
-                        value={editDefaultPpp}
-                        onChange={(e) => setEditDefaultPpp(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
-                      />
-                    </label>
-                    <label className="block text-sm text-slate-300">
-                      Default expired profile (PPPoE — e.g. captive / renew page)
-                      <input
-                        value={editExpiredPpp}
-                        onChange={(e) => setEditExpiredPpp(e.target.value)}
-                        placeholder="nonpayment"
-                        className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
-                      />
-                      <span className="mt-1 block text-xs text-slate-500">
-                        Must match a <strong className="text-slate-400">PPP profile</strong> name on
-                        MikroTik. When <code className="text-slate-400">paidUntil</code> passes, QareFi
-                        syncs this profile to the secret.
-                      </span>
-                    </label>
-                  </div>
-                  <label className="block text-sm text-slate-300">
-                    Customer WAN IPv4 (auto-detect pay page)
-                    <input
-                      value={editSitePublicIp}
-                      onChange={(e) => setEditSitePublicIp(e.target.value)}
-                      placeholder="Empty = clear"
-                      className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
-                    />
-                  </label>
-                  <label className="block text-sm text-slate-300">
-                    Portal slug (?r=)
-                    <input
-                      value={editPortalSlug}
-                      onChange={(e) =>
-                        setEditPortalSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
-                      }
-                      placeholder="Empty = clear"
-                      className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
-                    />
-                  </label>
-                  <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
-                    <p className="text-xs font-medium text-slate-400">SMS for this site</p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Payment SMS and broadcasts that target this router use the business name in{' '}
-                      <code className="text-slate-400">{'{{brand}}'}</code>. Optional sender ID must be
-                      registered in Arkesel; leave blank to use the global sender.
-                    </p>
-                    <label className="mt-3 block text-sm text-slate-300">
-                      SMS business name (<code className="text-violet-300">{'{{brand}}'}</code>)
-                      <input
-                        value={editSmsBrandName}
-                        onChange={(e) => setEditSmsBrandName(e.target.value)}
-                        placeholder="Empty = use global brand from env"
-                        className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
-                      />
-                    </label>
-                    <label className="mt-3 block text-sm text-slate-300">
-                      Arkesel sender ID (optional)
-                      <input
-                        value={editSmsSenderId}
-                        onChange={(e) => setEditSmsSenderId(e.target.value)}
-                        placeholder="Empty = ARKESEL_SENDER_ID"
-                        className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
-                      />
-                    </label>
-                  </div>
-                  {selected?.portalSlug && typeof window !== 'undefined' && (
-                    <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-3 text-xs text-slate-400">
-                      <p className="font-medium text-slate-300">Customer pay links</p>
-                      <p className="mt-2 break-all font-mono text-emerald-400/90">
-                        {window.location.origin}/portal/hotspot?r={selected.portalSlug}
-                      </p>
-                      <p className="mt-2 break-all font-mono text-emerald-400/90">
-                        {window.location.origin}/portal/renew?r={selected.portalSlug}
-                      </p>
-                      <button
-                        type="button"
-                        className="mt-2 text-slate-300 underline"
-                        onClick={() => {
-                          const t = `${window.location.origin}/portal/hotspot?r=${selected.portalSlug}`;
-                          navigator.clipboard.writeText(t);
-                        }}
-                      >
-                        Copy hotspot link
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </details>
-
-              {saveError && (
-                <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                  {saveError}
-                </p>
-              )}
-              <button
-                type="submit"
-                disabled={saving}
-                className="rounded-lg bg-slate-700 px-4 py-2 text-sm text-white hover:bg-slate-600 disabled:opacity-50"
+      {detailTab === 'settings' && (
+        <form onSubmit={saveEdits} className="space-y-4">
+          <div className="space-y-3">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-slate-500">Site</p>
+            <label className="block text-xs font-medium text-slate-400">
+              Name
+              <input
+                value={editComment}
+                onChange={(e) => setEditComment(e.target.value)}
+                className={fieldClass()}
+              />
+            </label>
+            <label className="block text-xs font-medium text-slate-400">
+              Host
+              <input
+                required
+                value={editConnect}
+                onChange={(e) => setEditConnect(e.target.value)}
+                className={`${fieldClass()} font-mono`}
+              />
+            </label>
+            <label className="block text-xs font-medium text-slate-400">
+              Transport
+              <select
+                value={editTransport}
+                onChange={(e) => setEditTransport(e.target.value)}
+                className={fieldClass()}
               >
-                {saving ? 'Saving…' : 'Save changes'}
-              </button>
-            </form>
-          )}
-        </section>
+                <option value="ssh">SSH</option>
+                <option value="api">API</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="space-y-3 border-t border-slate-800 pt-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-slate-500">Login</p>
+            <label className="block text-xs font-medium text-slate-400">
+              Username
+              <input
+                required
+                value={editUser}
+                onChange={(e) => setEditUser(e.target.value)}
+                className={fieldClass()}
+              />
+            </label>
+            <label className="block text-xs font-medium text-slate-400">
+              New password
+              <input
+                type="password"
+                value={editNewPass}
+                onChange={(e) => setEditNewPass(e.target.value)}
+                placeholder="Leave blank to keep"
+                className={fieldClass()}
+              />
+            </label>
+          </div>
+
+          <div className="space-y-3 border-t border-slate-800 pt-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-slate-500">
+              Profiles & portal
+            </p>
+            <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
+              <label className="block text-xs font-medium text-slate-400">
+                Active PPP
+                <input
+                  value={editDefaultPpp}
+                  onChange={(e) => setEditDefaultPpp(e.target.value)}
+                  className={`${fieldClass()} font-mono text-xs`}
+                />
+              </label>
+              <label className="block text-xs font-medium text-slate-400">
+                Expired PPP
+                <input
+                  value={editExpiredPpp}
+                  onChange={(e) => setEditExpiredPpp(e.target.value)}
+                  className={`${fieldClass()} font-mono text-xs`}
+                />
+              </label>
+            </div>
+            <label className="block text-xs font-medium text-slate-400">
+              Portal slug
+              <input
+                value={editPortalSlug}
+                onChange={(e) =>
+                  setEditPortalSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
+                }
+                className={`${fieldClass()} font-mono`}
+              />
+            </label>
+            <label className="block text-xs font-medium text-slate-400">
+              Site public IP
+              <input
+                value={editSitePublicIp}
+                onChange={(e) => setEditSitePublicIp(e.target.value)}
+                className={`${fieldClass()} font-mono`}
+              />
+            </label>
+          </div>
+
+          {saveError ? <p className="text-xs text-red-300">{saveError}</p> : null}
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex h-11 w-full items-center justify-center rounded-xl bg-white text-sm font-semibold text-slate-900 hover:bg-slate-100 disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        </form>
+      )}
+
+      {detailTab === 'live' && (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-500">Pull live sessions and users from the site.</p>
+          <button
+            type="button"
+            disabled={liveLoading}
+            onClick={fetchLive}
+            className="flex h-11 w-full items-center justify-center rounded-xl border border-sky-600/35 bg-sky-950/30 text-sm font-semibold text-sky-100 hover:bg-sky-950/50 disabled:opacity-50"
+          >
+            {liveLoading ? 'Fetching…' : 'Fetch from site'}
+          </button>
+          {liveError ? (
+            <p className="break-words rounded-xl border border-amber-500/25 bg-amber-950/20 px-3 py-2 text-xs text-amber-100">
+              {liveError}
+            </p>
+          ) : null}
+          {liveSnap ? (
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: 'PPP online', value: liveSnap.counts?.pppActive ?? 0 },
+                { label: 'Hotspot', value: liveSnap.counts?.hotspotActive ?? 0 },
+                { label: 'PPP secrets', value: liveSnap.counts?.pppSecrets ?? 0 },
+                { label: 'HS users', value: liveSnap.counts?.hotspotUsers ?? 0 },
+              ].map((c) => (
+                <div
+                  key={c.label}
+                  className="rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-3 text-center"
+                >
+                  <p className="text-[11px] text-slate-500">{c.label}</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums text-white">{c.value}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
       )}
     </div>
   );

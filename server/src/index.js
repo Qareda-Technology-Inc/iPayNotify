@@ -170,8 +170,19 @@ app.listen(config.port, () => {
     '[hubtel] Smoke-test callback logging: GET /api/payments/hubtel/callback/ping (then check these logs)'
   );
   if (config.wireguard?.enabled) {
-    console.log(`[wireguard] Registration ready → POST /api/routers/register (endpoint ${config.wireguard.endpoint})`);
+    const sshHint = config.wireguard.hasEnvSshKey
+      ? 'SSH key from env'
+      : 'generate SSH key in admin → WireGuard VPN (or set WG_VPS_SSH_KEY_PATH)';
+    console.log(
+      `[wireguard] Registration ready → POST /api/routers/register (endpoint ${config.wireguard.endpoint}; ${sshHint})`
+    );
   } else {
-    console.log('[wireguard] Not configured (set WG_VPS_HOST, WG_SERVER_PUBLIC_KEY, WG_ENDPOINT, WG_VPS_SSH_KEY_PATH)');
+    const missing = [];
+    if (!config.wireguard?.vpsHost) missing.push('WG_VPS_HOST');
+    if (!config.wireguard?.serverPublicKey) missing.push('WG_SERVER_PUBLIC_KEY');
+    if (!config.wireguard?.endpoint) missing.push('WG_ENDPOINT');
+    console.log(
+      `[wireguard] Not configured (missing ${missing.join(', ') || 'WG_*'}). SSH key: admin Generate, or WG_VPS_SSH_KEY_PATH`
+    );
   }
 });

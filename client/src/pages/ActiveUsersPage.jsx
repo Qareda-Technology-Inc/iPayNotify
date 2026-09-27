@@ -237,7 +237,7 @@ export function ActiveUsersPage() {
         )}
 
         {!loading && routers.length === 0 && !err && (
-          <p className="text-center text-sm text-slate-500">No routers configured. Add one under Devices → MikroTik.</p>
+          <p className="text-center text-sm text-slate-500">No routers configured. Add one under Network → Routers.</p>
         )}
       </div>
     </div>

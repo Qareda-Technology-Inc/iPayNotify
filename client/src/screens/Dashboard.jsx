@@ -15,6 +15,7 @@ import { ActiveUsersPage } from '../pages/ActiveUsersPage.jsx';
 import { SuperAdminOrganizationsPage } from '../pages/SuperAdminOrganizationsPage.jsx';
 import { SuperAdminOrgAdminsPage } from '../pages/SuperAdminOrgAdminsPage.jsx';
 import { SuperAdminEmailTemplatesPage } from '../pages/SuperAdminEmailTemplatesPage.jsx';
+import { WireGuardRoutersPage } from '../pages/WireGuardRoutersPage.jsx';
 import { OrganizationSettingsPage } from '../pages/OrganizationSettingsPage.jsx';
 import { AccountPage } from '../pages/AccountPage.jsx';
 import { SuperAdminGate } from '../components/SuperAdminGate.jsx';
@@ -187,11 +188,20 @@ export function Dashboard({ onSignOut }) {
           }
         />
         <Route
-          path="devices/mikrotik"
+          path="devices/routers"
           element={
             <RoleGate allow={['super_admin', 'org_admin', 'org_staff', 'ticket_manager']}>
               <RoutersPanel />
             </RoleGate>
+          }
+        />
+        <Route path="devices/mikrotik" element={<Navigate to="/devices/routers" replace />} />
+        <Route
+          path="devices/wireguard"
+          element={
+            <SuperAdminGate>
+              <WireGuardRoutersPage />
+            </SuperAdminGate>
           }
         />
         <Route

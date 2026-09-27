@@ -197,13 +197,12 @@ export const config = {
     clientAllowedIps: (process.env.WG_CLIENT_ALLOWED_IPS || '10.10.10.0/24').trim(),
     /** Optional shared secret routers must send as token= or X-Wg-Register-Token */
     registerToken: (process.env.WG_REGISTER_TOKEN || '').trim(),
+    /** Core tunnel settings present (SSH key may come from admin DB generate). */
     get enabled() {
-      return Boolean(
-        this.vpsHost &&
-          this.serverPublicKey &&
-          this.endpoint &&
-          (this.vpsSshKeyPath || this.vpsSshPrivateKey)
-      );
+      return Boolean(this.vpsHost && this.serverPublicKey && this.endpoint);
+    },
+    get hasEnvSshKey() {
+      return Boolean(this.vpsSshKeyPath || this.vpsSshPrivateKey);
     },
   },
 };

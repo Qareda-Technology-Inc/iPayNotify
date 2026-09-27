@@ -47,13 +47,11 @@ export function RoleGate({ allow = [], module, children }) {
   if (!state.role || (allowed.size > 0 && !allowed.has(state.role))) {
     return <Navigate to="/" replace />;
   }
-  if (module === 'tickets') {
-    // Only Qaretech Innovative (server sets modules.tickets) — no super-admin bypass for other orgs.
-    if (!state.modules.tickets) {
+  if (module) {
+    if (state.role === 'super_admin') return children;
+    if (!state.modules[module]) {
       return <Navigate to="/" replace />;
     }
-  } else if (module && state.role !== 'super_admin' && !state.modules[module]) {
-    return <Navigate to="/" replace />;
   }
   return children;
 }

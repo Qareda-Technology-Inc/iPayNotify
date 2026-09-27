@@ -9,7 +9,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { config } from '../config.js';
 import { sendSmtpMail, smtpReadyForSend } from '../integrations/mail.js';
 import { buildAdminSignInOtpEmail, buildSmtpTestEmail } from '../templates/email/index.js';
-import { issueAdminInvite } from '../services/adminInviteService.js';
+import { issueAdminInvite, inviteAcceptUrl } from '../services/adminInviteService.js';
 import {
   markWithdrawalPaid,
   rejectWithdrawal,
@@ -31,12 +31,14 @@ import {
   normalizeOrgLimits,
 } from '../services/orgLimitsService.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
+import { wireguardAdminRouter } from './wireguardAdmin.js';
 
 const SALT = 10;
 
 const router = express.Router();
 router.use(requireAuth);
 router.use(requireSuperAdmin);
+router.use('/wireguard', wireguardAdminRouter);
 
 router.get(
   '/organizations',
@@ -285,7 +287,7 @@ router.post(
       organizationId: org._id,
       status: 'invited',
     });
-    const { emailSent } = await issueAdminInvite(doc, { orgName: org.name });
+    const { emailSent, rawToken } = await issueAdminInvite(doc, { orgName: org.name });
     void logOrgAudit({
       organizationId: org._id,
       actorEmail: req.admin?.email,
@@ -302,6 +304,7 @@ router.post(
       organizationId: doc.organizationId,
       inviteExpiresAt: doc.inviteExpiresAt,
       emailSent,
+      acceptUrl: inviteAcceptUrl(rawToken),
       createdAt: doc.createdAt,
     });
   })
@@ -324,13 +327,14 @@ router.post(
     if (doc.status !== 'invited') {
       return res.status(400).json({ error: 'Only invited (pending) admins can be re-invited' });
     }
-    const { emailSent } = await issueAdminInvite(doc, { orgName: org.name });
+    const { emailSent, rawToken } = await issueAdminInvite(doc, { orgName: org.name });
     res.json({
       _id: doc._id,
       email: doc.email,
       status: doc.status,
       inviteExpiresAt: doc.inviteExpiresAt,
       emailSent,
+      acceptUrl: inviteAcceptUrl(rawToken),
     });
   })
 );

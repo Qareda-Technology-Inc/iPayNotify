@@ -18,6 +18,14 @@ walletRouter.get(
   asyncHandler(async (req, res) => {
     const oid = req.organizationId;
     if (!oid || !mongoose.isValidObjectId(String(oid))) {
+      if (req.admin?.role === 'super_admin') {
+        return res.json({
+          platformScope: true,
+          walletBalanceCents: 0,
+          currency: 'GHS',
+          message: 'Select an organisation to view its wallet.',
+        });
+      }
       return res.status(503).json({ error: 'No organisation context' });
     }
     res.json(await getWalletSummary(oid));
@@ -29,6 +37,9 @@ walletRouter.get(
   asyncHandler(async (req, res) => {
     const oid = req.organizationId;
     if (!oid || !mongoose.isValidObjectId(String(oid))) {
+      if (req.admin?.role === 'super_admin') {
+        return res.json([]);
+      }
       return res.status(503).json({ error: 'No organisation context' });
     }
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 40));

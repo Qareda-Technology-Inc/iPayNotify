@@ -62,7 +62,9 @@ function headerTitleForPath(pathname) {
     '/finance/payments': 'Payments',
     '/finance/wallet': 'Wallet',
     '/finance/messages': 'Messages & SMS',
-    '/devices/mikrotik': 'MikroTik routers',
+    '/devices/routers': 'Routers',
+    '/devices/mikrotik': 'Routers',
+    '/devices/wireguard': 'WireGuard VPN',
     '/org/settings': 'Organisation',
     '/account': 'Account',
     '/super/organizations': 'All organisations',
@@ -94,28 +96,39 @@ export function AdminShell({ onSignOut }) {
   const [counts, setCounts] = useState(null);
   const [sessionTick, setSessionTick] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [orgOptions, setOrgOptions] = useState([]);
 
   const adminEmail = me?.admin?.email || '';
   const adminDisplayName = String(me?.admin?.fullName || '').trim() || adminEmail;
   const adminRole = me?.admin?.role || 'super_admin';
   const isSuper = adminRole === 'super_admin';
   const modules = me?.modules || { tickets: false, remoteAccess: false };
-  /** Tickets only for Qaretech Innovative (server forces modules.tickets for that org). */
-  const showTickets = Boolean(modules.tickets);
+  const showTickets = isSuper || Boolean(modules.tickets);
   const showRemoteAccess = isSuper || Boolean(modules.remoteAccess);
   const organizationName = me?.organizationName || null;
+  const platformScope = Boolean(me?.platformScope) || (isSuper && !me?.organizationId);
 
   useEffect(() => {
     apiFetch('/api/auth/me')
       .then((d) => setMe(d))
       .catch(() => setMe(null));
-  }, [sessionTick]);
+  }, [sessionTick, location.pathname]);
 
   useEffect(() => {
     apiFetch('/api/dashboard/summary')
       .then((d) => setCounts(d.counts))
       .catch(() => {});
-  }, []);
+  }, [sessionTick, location.pathname]);
+
+  useEffect(() => {
+    if (!isSuper) {
+      setOrgOptions([]);
+      return;
+    }
+    apiFetch('/api/super-admin/organizations')
+      .then((list) => setOrgOptions(Array.isArray(list) ? list : []))
+      .catch(() => setOrgOptions([]));
+  }, [isSuper, sessionTick]);
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -132,6 +145,16 @@ export function AdminShell({ onSignOut }) {
 
   function clearActingOrganization() {
     setActingOrganizationId(null);
+    setSessionTick((n) => n + 1);
+  }
+
+  function selectActingOrganization(id) {
+    if (!id) {
+      clearActingOrganization();
+      return;
+    }
+    const row = orgOptions.find((o) => String(o._id) === String(id));
+    setActingOrganizationId(id, row?.name || '');
     setSessionTick((n) => n + 1);
   }
 
@@ -165,11 +188,14 @@ export function AdminShell({ onSignOut }) {
               <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-600">{adminEmail}</span>
             ) : null}
           </p>
-          {organizationName && (
+          {organizationName && !platformScope ? (
             <p className="mt-1 truncate text-xs text-slate-400" title={organizationName}>
               {organizationName}
             </p>
-          )}
+          ) : null}
+          {platformScope ? (
+            <p className="mt-1 truncate text-xs text-emerald-400/90">All organisations</p>
+          ) : null}
           {adminRole === 'super_admin' && (
             <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-amber-400/90">
               Super administrator
@@ -220,9 +246,14 @@ export function AdminShell({ onSignOut }) {
             <SideLink to="/finance/messages">Messages / SMS</SideLink>
           </NavGroup>
           <NavGroup title="Network">
-            <SideLink to="/devices/mikrotik" badge={counts?.routers}>
-              MikroTik
+            <SideLink to="/devices/routers" badge={counts?.routers}>
+              Routers
             </SideLink>
+            {isSuper ? (
+              <SideLink to="/devices/wireguard" accent="amber">
+                WireGuard VPN
+              </SideLink>
+            ) : null}
           </NavGroup>
           {showTickets ? (
             <NavGroup title="Ticket operations">
@@ -247,6 +278,9 @@ export function AdminShell({ onSignOut }) {
             <NavGroup title="Platform (super admin)">
               <SideLink to="/super/organizations" accent="amber">
                 All organisations
+              </SideLink>
+              <SideLink to="/devices/wireguard" accent="amber">
+                WireGuard routers
               </SideLink>
               <SideLink to="/super/withdrawals" accent="amber">
                 Vendor withdrawals
@@ -280,12 +314,30 @@ export function AdminShell({ onSignOut }) {
           </button>
           <h2 className="min-w-0 flex-1 text-sm font-semibold text-white sm:text-base">{headerTitle}</h2>
           <div className="flex basis-full min-w-0 flex-wrap items-center justify-end gap-2 sm:basis-auto sm:w-auto sm:flex-initial">
+            {isSuper ? (
+              <label className="flex w-full max-w-full items-center gap-2 sm:w-auto">
+                <span className="sr-only">Organisation</span>
+                <select
+                  value={actingId || ''}
+                  onChange={(e) => selectActingOrganization(e.target.value || null)}
+                  className="w-full max-w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 sm:w-56"
+                  title="Organisation scope"
+                >
+                  <option value="">All organisations</option>
+                  {orgOptions.map((o) => (
+                    <option key={o._id} value={o._id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             {adminRole === 'super_admin' && actingId && (
               <div className="flex w-full max-w-full items-center gap-2 rounded-lg border border-emerald-700/35 bg-emerald-950/25 px-3 py-1.5 text-xs text-emerald-100 sm:w-auto">
                 <span className="truncate">
                   Acting as{' '}
                   <strong className="text-emerald-50">
-                    {actingName || `Organisation ${actingId.slice(-8)}`}
+                    {actingName || organizationName || `Organisation ${actingId.slice(-8)}`}
                   </strong>
                 </span>
                 <button
@@ -299,7 +351,7 @@ export function AdminShell({ onSignOut }) {
             )}
           </div>
         </header>
-        <main className="flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
+        <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-4 sm:p-6">
           <Outlet />
         </main>
       </div>
