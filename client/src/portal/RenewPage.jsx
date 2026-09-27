@@ -16,6 +16,15 @@ function DetailRow({ label, children }) {
   );
 }
 
+function estimateNewPaidUntil(paidUntil, durationDays) {
+  const days = Number(durationDays);
+  if (!Number.isFinite(days) || days <= 0) return null;
+  const now = Date.now();
+  const current = paidUntil ? new Date(paidUntil).getTime() : NaN;
+  const base = Number.isFinite(current) && current > now ? current : now;
+  return new Date(base + days * 86400000);
+}
+
 /**
  * Online renew: platform-unique renew ID (or registered phone).
  * On-site / captive (?r=): PPPoE username still works for that venue only.
@@ -26,6 +35,7 @@ export function RenewPage() {
   const [lookupMode, setLookupMode] = useState('renewCode');
   const [lookupValue, setLookupValue] = useState('');
   const [quote, setQuote] = useState(null);
+  const [msisdn, setMsisdn] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState('lookup');
@@ -35,6 +45,10 @@ export function RenewPage() {
   const [lookupPayload, setLookupPayload] = useState(null);
 
   const siteReady = Boolean(ctx?.resolved && ctx.router?.id);
+  const portalSlug = getPortalSlugFromLocation();
+  const renewHome = portalSlug
+    ? `/portal/renew?r=${encodeURIComponent(portalSlug)}`
+    : '/portal/renew';
 
   function buildLookupBody(value) {
     const v = String(value || '').trim();
@@ -45,7 +59,7 @@ export function RenewPage() {
     if (lookupMode === 'secretName') {
       return {
         secretName: v,
-        portalSlug: getPortalSlugFromLocation() || undefined,
+        portalSlug: portalSlug || undefined,
       };
     }
     return { renewCode: v };
@@ -54,6 +68,7 @@ export function RenewPage() {
   function applyQuote(data, body) {
     setQuote(data);
     setLookupPayload(body);
+    setMsisdn(String(data?.customerPhone || '').trim());
     setStep('review');
   }
 
@@ -95,13 +110,18 @@ export function RenewPage() {
   async function doCheckout(e) {
     e.preventDefault();
     setError('');
+    const phoneForPay = String(msisdn || quote?.customerPhone || '').trim();
+    if (!phoneForPay) {
+      setError('Enter the MoMo / mobile money number that will pay.');
+      return;
+    }
     setLoading(true);
     try {
       const data = await publicFetch('/api/public/renew/checkout', {
         method: 'POST',
         body: JSON.stringify({
           ...(lookupPayload || {}),
-          customerMsisdn: quote?.customerPhone || undefined,
+          customerMsisdn: phoneForPay,
           customerName: quote?.customerName || undefined,
         }),
       });
@@ -145,6 +165,10 @@ export function RenewPage() {
         ? 'Your PPP login name'
         : 'e.g. QF7K2M9P';
 
+  const previewUntil = quote
+    ? estimateNewPaidUntil(quote.paidUntil, quote.durationDays)
+    : null;
+
   return (
     <div className="mx-auto max-w-md px-4 py-10">
       <DraftCheckoutPrompt
@@ -152,7 +176,11 @@ export function RenewPage() {
         payload={draftCheckout}
         onClose={() => setDraftCheckout(null)}
         onComplete={(ref) =>
-          navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`)
+          navigate(
+            `/portal/pay/return?ref=${encodeURIComponent(ref)}${
+              portalSlug ? `&r=${encodeURIComponent(portalSlug)}` : ''
+            }`
+          )
         }
       />
       <HubtelCheckout
@@ -188,7 +216,11 @@ export function RenewPage() {
               method: 'POST',
               body: JSON.stringify({ clientReference: ref, event: 'success', payload }),
             }).catch(() => {});
-            navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`);
+            navigate(
+              `/portal/pay/return?ref=${encodeURIComponent(ref)}${
+                portalSlug ? `&r=${encodeURIComponent(portalSlug)}` : ''
+              }`
+            );
           }
         }}
       />
@@ -199,8 +231,8 @@ export function RenewPage() {
         subtitle={
           step === 'lookup'
             ? siteReady
-              ? 'Use your renew ID, registered phone, or PPPoE username at this site.'
-              : 'Use your renew ID or registered phone to renew online.'
+              ? 'Best: use your Renew ID from SMS. Phone or PPPoE username also work at this site.'
+              : 'Use your Renew ID from SMS (recommended), or your registered phone.'
             : ''
         }
       />
@@ -250,7 +282,12 @@ export function RenewPage() {
           </label>
           {lookupMode === 'renewCode' && (
             <p className="text-xs text-slate-500">
-              Your renew ID looks like QF7K2M9P — ask your ISP or check your reminder SMS.
+              Your renew ID looks like QF7K2M9P — check your reminder SMS or ask your ISP.
+            </p>
+          )}
+          {lookupMode === 'phone' && (
+            <p className="text-xs text-slate-500">
+              Use the phone number registered on your account (not always the MoMo wallet).
             </p>
           )}
           {error && (
@@ -286,6 +323,9 @@ export function RenewPage() {
               <DetailRow label="Site">{quote.routerName}</DetailRow>
             ) : null}
             <DetailRow label="Package">{quote.packageName}</DetailRow>
+            {quote.durationDays ? (
+              <DetailRow label="Adds">{quote.durationDays} day{quote.durationDays === 1 ? '' : 's'}</DetailRow>
+            ) : null}
             <DetailRow label="Amount">
               <span className="text-lg font-semibold text-emerald-400">
                 {(quote.amountCents / 100).toFixed(2)} {quote.currency}
@@ -293,7 +333,7 @@ export function RenewPage() {
             </DetailRow>
             {quote.paidUntil ? (
               <>
-                <DetailRow label="Expires">
+                <DetailRow label="Expires now">
                   {new Date(quote.paidUntil).toLocaleString()}
                 </DetailRow>
                 <DetailRow label="Time left">
@@ -301,7 +341,27 @@ export function RenewPage() {
                 </DetailRow>
               </>
             ) : null}
+            {previewUntil ? (
+              <DetailRow label="After pay">
+                <span className="text-emerald-300">{previewUntil.toLocaleString()}</span>
+              </DetailRow>
+            ) : null}
           </div>
+
+          <label className="block text-sm">
+            <span className="text-slate-300">MoMo number to pay with</span>
+            <input
+              required
+              type="tel"
+              value={msisdn}
+              onChange={(e) => setMsisdn(e.target.value)}
+              placeholder="e.g. 0244123456"
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 font-mono outline-none ring-emerald-500/40 focus:ring-2"
+            />
+            <span className="mt-1 block text-xs text-slate-500">
+              Hubtel will prompt this number to approve the payment.
+            </span>
+          </label>
 
           {error && (
             <p className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
@@ -321,12 +381,16 @@ export function RenewPage() {
               setStep('lookup');
               setQuote(null);
               setLookupPayload(null);
+              setMsisdn('');
               setError('');
             }}
             className="w-full text-sm text-slate-500"
           >
             Back
           </button>
+          <a href={renewHome} className="hidden" aria-hidden>
+            home
+          </a>
         </form>
       )}
     </div>

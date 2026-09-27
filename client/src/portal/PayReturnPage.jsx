@@ -7,6 +7,13 @@ const MAX_TRIES = 40;
 export function PayReturnPage() {
   const [params] = useSearchParams();
   const ref = params.get('ref');
+  const siteSlug = params.get('r');
+  const renewHref = siteSlug
+    ? `/portal/renew?r=${encodeURIComponent(siteSlug)}`
+    : '/portal/renew';
+  const hotspotHref = siteSlug
+    ? `/portal/hotspot?r=${encodeURIComponent(siteSlug)}`
+    : '/portal/hotspot';
   const [status, setStatus] = useState(null);
   const [error, setError] = useState('');
   const [timedOut, setTimedOut] = useState(false);
@@ -104,7 +111,7 @@ export function PayReturnPage() {
             >
               {checking ? 'Checking…' : 'Check again'}
             </button>
-            <Link to="/portal/renew" className="mt-4 block text-sm text-slate-400 hover:text-emerald-400">
+            <Link to={renewHref} className="mt-4 block text-sm text-slate-400 hover:text-emerald-400">
               Back to renew
             </Link>
           </>
@@ -117,7 +124,7 @@ export function PayReturnPage() {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center text-red-300">
         Payment was not completed.
-        <Link to="/portal/renew" className="mt-6 block text-emerald-400">
+        <Link to={renewHref} className="mt-6 block text-emerald-400">
           Try again
         </Link>
       </div>
@@ -133,7 +140,7 @@ export function PayReturnPage() {
           {status.voucherCode}
         </p>
         <p className="mt-6 text-sm text-slate-500">Use this as username and password on the hotspot login.</p>
-        <Link to="/portal/hotspot" className="mt-8 inline-block text-emerald-400">
+        <Link to={hotspotHref} className="mt-8 inline-block text-emerald-400">
           Buy another
         </Link>
       </div>
@@ -150,7 +157,7 @@ export function PayReturnPage() {
             ? new Date(status.renewedUntil).toLocaleString()
             : 'Updated — reconnect your router'}
         </p>
-        <Link to="/portal/renew" className="mt-8 inline-block text-emerald-400">
+        <Link to={renewHref} className="mt-8 inline-block text-emerald-400">
           Done
         </Link>
       </div>
@@ -160,7 +167,7 @@ export function PayReturnPage() {
   return (
     <div className="mx-auto max-w-md px-4 py-16 text-center text-slate-400">
       Status: {status.status}
-      <Link to="/portal/renew" className="mt-6 block text-emerald-400">
+      <Link to={renewHref} className="mt-6 block text-emerald-400">
         Home
       </Link>
     </div>

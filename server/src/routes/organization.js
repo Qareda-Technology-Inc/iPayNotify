@@ -11,6 +11,14 @@ import {
   normalizeOrgLimits,
 } from '../services/orgLimitsService.js';
 import { routerDisplayName } from '../utils/routerLabel.js';
+import { requireRoles } from '../middleware/requireRoles.js';
+import {
+  listOrgTeam,
+  inviteOrgTeamMember,
+  resendOrgTeamInvite,
+  updateOrgTeamMember,
+  removeOrgTeamMember,
+} from '../services/orgTeamService.js';
 
 export const organizationRouter = express.Router();
 
@@ -249,5 +257,94 @@ organizationRouter.patch(
     });
 
     res.json(await jsonWithPortal(doc));
+  })
+);
+
+/** Team (org_admin + super_admin acting in a tenant) */
+organizationRouter.get(
+  '/admins',
+  requireRoles('super_admin', 'org_admin'),
+  asyncHandler(async (req, res) => {
+    const oid = req.organizationId;
+    if (!oid || !mongoose.isValidObjectId(String(oid))) {
+      return res.status(400).json({
+        error: 'Select an organisation first to manage the team.',
+        code: 'ORGANIZATION_REQUIRED',
+      });
+    }
+    res.json(await listOrgTeam(oid));
+  })
+);
+
+organizationRouter.post(
+  '/admins',
+  requireRoles('super_admin', 'org_admin'),
+  asyncHandler(async (req, res) => {
+    const oid = req.organizationId;
+    if (!oid || !mongoose.isValidObjectId(String(oid))) {
+      return res.status(400).json({
+        error: 'Select an organisation first to invite team members.',
+        code: 'ORGANIZATION_REQUIRED',
+      });
+    }
+    try {
+      const created = await inviteOrgTeamMember(oid, req.body, req.admin);
+      res.status(201).json(created);
+    } catch (e) {
+      const status = e.status && Number(e.status) >= 400 ? e.status : 500;
+      return res.status(status).json({ error: e.message || 'Invite failed' });
+    }
+  })
+);
+
+organizationRouter.post(
+  '/admins/:adminId/resend-invite',
+  requireRoles('super_admin', 'org_admin'),
+  asyncHandler(async (req, res) => {
+    const oid = req.organizationId;
+    if (!oid || !mongoose.isValidObjectId(String(oid))) {
+      return res.status(400).json({ error: 'No organisation context' });
+    }
+    try {
+      res.json(await resendOrgTeamInvite(oid, req.params.adminId, req.admin));
+    } catch (e) {
+      const status = e.status && Number(e.status) >= 400 ? e.status : 500;
+      return res.status(status).json({ error: e.message || 'Resend failed' });
+    }
+  })
+);
+
+organizationRouter.patch(
+  '/admins/:adminId',
+  requireRoles('super_admin', 'org_admin'),
+  asyncHandler(async (req, res) => {
+    const oid = req.organizationId;
+    if (!oid || !mongoose.isValidObjectId(String(oid))) {
+      return res.status(400).json({ error: 'No organisation context' });
+    }
+    try {
+      res.json(await updateOrgTeamMember(oid, req.params.adminId, req.body));
+    } catch (e) {
+      const status = e.status && Number(e.status) >= 400 ? e.status : 500;
+      return res.status(status).json({ error: e.message || 'Update failed' });
+    }
+  })
+);
+
+organizationRouter.delete(
+  '/admins/:adminId',
+  requireRoles('super_admin', 'org_admin'),
+  asyncHandler(async (req, res) => {
+    const oid = req.organizationId;
+    if (!oid || !mongoose.isValidObjectId(String(oid))) {
+      return res.status(400).json({ error: 'No organisation context' });
+    }
+    try {
+      await removeOrgTeamMember(oid, req.params.adminId, req.admin?.id, req.admin?.email);
+      res.status(204).end();
+    } catch (e) {
+      const status = e.status && Number(e.status) >= 400 ? e.status : 500;
+      return res.status(status).json({ error: e.message || 'Delete failed' });
+    }
   })
 );

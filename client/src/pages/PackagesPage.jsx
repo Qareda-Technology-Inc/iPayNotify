@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../api.js';
 
 const emptyForm = {
@@ -12,7 +12,55 @@ const emptyForm = {
   expiredProfile: '',
   description: '',
   isActive: true,
+  /** Hotspot session quota (optional). */
+  dataLimitMb: '',
+  sessionTimeAmount: '',
+  sessionTimeUnit: 'hour',
 };
+
+const KIND_SECTIONS = [
+  {
+    kind: 'hotspot',
+    title: 'Hotspot',
+    blurb: 'Voucher packages for the captive portal buy page.',
+  },
+  {
+    kind: 'pppoe',
+    title: 'PPPoE',
+    blurb: 'Subscription templates for PPPoE accounts and renewals.',
+  },
+  {
+    kind: 'remote_access',
+    title: 'Remote access',
+    blurb: 'Plans for remote access subscriptions.',
+  },
+];
+
+function sessionSecondsFromForm(form) {
+  const n = Number(form.sessionTimeAmount);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  const u = form.sessionTimeUnit || 'hour';
+  if (u === 'minute') return Math.floor(n * 60);
+  if (u === 'hour') return Math.floor(n * 3600);
+  if (u === 'day') return Math.floor(n * 86400);
+  return Math.floor(n * 3600);
+}
+
+function formatDataLimit(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  if (n < 1048576) return `${Math.round(n / 1024)} KB`;
+  if (n < 1073741824) return `${(n / 1048576).toFixed(n % 1048576 === 0 ? 0 : 1)} MB`;
+  return `${(n / 1073741824).toFixed(n % 1073741824 === 0 ? 0 : 1)} GB`;
+}
+
+function formatSessionLimit(seconds) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  if (n < 3600) return `${Math.round(n / 60)} min`;
+  if (n < 86400) return `${(n / 3600).toFixed(n % 3600 === 0 ? 0 : 1)} hr`;
+  return `${(n / 86400).toFixed(n % 86400 === 0 ? 0 : 1)} day`;
+}
 
 export function PackagesPage() {
   const [list, setList] = useState([]);
@@ -53,6 +101,15 @@ export function PackagesPage() {
         durationAmount: Number(form.durationAmount) || 1,
         description: form.description.trim() || undefined,
       };
+      delete base.dataLimitMb;
+      delete base.sessionTimeAmount;
+      delete base.sessionTimeUnit;
+      if (form.kind === 'hotspot') {
+        const mb = Number(form.dataLimitMb);
+        base.dataLimitBytes =
+          Number.isFinite(mb) && mb > 0 ? Math.round(mb * 1048576) : undefined;
+        base.timeLimitSeconds = sessionSecondsFromForm(form);
+      }
       if (form.kind !== 'remote_access') {
         base.activeProfile = form.activeProfile.trim() || 'default';
         base.expiredProfile = form.expiredProfile.trim() || undefined;
@@ -107,6 +164,31 @@ export function PackagesPage() {
       setSmsSaving(false);
     }
   }
+
+  const sections = useMemo(() => {
+    const byKind = new Map();
+    for (const p of list) {
+      const k = p.kind || 'other';
+      if (!byKind.has(k)) byKind.set(k, []);
+      byKind.get(k).push(p);
+    }
+    const known = KIND_SECTIONS.filter(
+      (s) => s.kind !== 'remote_access' || canRemoteAccess || byKind.has('remote_access')
+    ).map((s) => ({
+      ...s,
+      items: byKind.get(s.kind) || [],
+    }));
+    const knownKeys = new Set(KIND_SECTIONS.map((s) => s.kind));
+    const extras = [...byKind.entries()]
+      .filter(([k]) => !knownKeys.has(k))
+      .map(([kind, items]) => ({
+        kind,
+        title: kind,
+        blurb: '',
+        items,
+      }));
+    return [...known, ...extras];
+  }, [list, canRemoteAccess]);
 
   return (
     <div className="space-y-8">
@@ -246,7 +328,56 @@ export function PackagesPage() {
             <option value="day">day</option>
             <option value="month">month</option>
           </select>
+          <span className="mt-1 block text-xs text-slate-500">
+            Calendar validity from purchase / generation (voucher expiry date).
+          </span>
         </label>
+        {form.kind === 'hotspot' && (
+          <>
+            <label className="block text-sm text-slate-300">
+              Data limit (MB)
+              <input
+                type="number"
+                min={0}
+                step={1}
+                placeholder="Unlimited"
+                value={form.dataLimitMb}
+                onChange={(e) => setForm((f) => ({ ...f, dataLimitMb: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+              />
+              <span className="mt-1 block text-xs text-slate-500">
+                Volume cap pushed to MikroTik (`limit-bytes-total`). Leave empty for unlimited.
+              </span>
+            </label>
+            <label className="block text-sm text-slate-300">
+              Session time amount
+              <input
+                type="number"
+                min={0}
+                step={1}
+                placeholder="Unlimited"
+                value={form.sessionTimeAmount}
+                onChange={(e) => setForm((f) => ({ ...f, sessionTimeAmount: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+              />
+            </label>
+            <label className="block text-sm text-slate-300">
+              Session time unit
+              <select
+                value={form.sessionTimeUnit}
+                onChange={(e) => setForm((f) => ({ ...f, sessionTimeUnit: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+              >
+                <option value="minute">minute</option>
+                <option value="hour">hour</option>
+                <option value="day">day</option>
+              </select>
+              <span className="mt-1 block text-xs text-slate-500">
+                Online time once logged in (`limit-uptime`). Separate from calendar validity above.
+              </span>
+            </label>
+          </>
+        )}
         {form.kind !== 'remote_access' && (
           <>
             <label className="block text-sm text-slate-300">
@@ -257,19 +388,21 @@ export function PackagesPage() {
                 className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
               />
             </label>
-            <label className="block text-sm text-slate-300">
-              Expired profile (optional — PPPoE; MikroTik profile when time runs out)
-              <input
-                value={form.expiredProfile}
-                onChange={(e) => setForm((f) => ({ ...f, expiredProfile: e.target.value }))}
-                placeholder="nonpayment"
-                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
-              />
-              <span className="mt-1 block text-xs text-slate-500">
-                Default on the router record is <span className="font-mono text-slate-400">nonpayment</span>{' '}
-                if left empty here.
-              </span>
-            </label>
+            {form.kind === 'pppoe' && (
+              <label className="block text-sm text-slate-300">
+                Expired profile (optional)
+                <input
+                  value={form.expiredProfile}
+                  onChange={(e) => setForm((f) => ({ ...f, expiredProfile: e.target.value }))}
+                  placeholder="nonpayment"
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
+                />
+                <span className="mt-1 block text-xs text-slate-500">
+                  MikroTik profile when the subscription expires. Default on the router is{' '}
+                  <span className="font-mono text-slate-400">nonpayment</span> if left empty.
+                </span>
+              </label>
+            )}
           </>
         )}
         <label className="block text-sm text-slate-300 sm:col-span-2">
@@ -300,63 +433,112 @@ export function PackagesPage() {
         </button>
       </form>
 
-      <div className="overflow-x-auto rounded-xl border border-slate-800">
-        <table className="w-full min-w-[640px] text-left text-sm">
-          <thead className="border-b border-slate-800 bg-slate-900/80 text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Kind</th>
-              <th className="px-4 py-3">Price</th>
-              <th className="px-4 py-3">Duration</th>
-              <th className="px-4 py-3">Profile</th>
-              <th className="px-4 py-3">Renewal SMS</th>
-              <th className="px-4 py-3">Active</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800">
-            {list.map((p) => (
-              <tr key={p._id} className="text-slate-300">
-                <td className="px-4 py-3 font-medium text-white">{p.name}</td>
-                <td className="px-4 py-3">{p.kind}</td>
-                <td className="px-4 py-3">
-                  {(Number(p.priceCents) / 100).toFixed(2)} {p.currency || 'GHS'}
-                </td>
-                <td className="px-4 py-3">
-                  {p.durationAmount ?? p.durationDays ?? '—'} {p.durationUnit || (p.durationDays ? 'day' : '')}
-                </td>
-                <td className="px-4 py-3 font-mono text-xs">
-                  {p.kind === 'remote_access' ? '—' : p.activeProfile}
-                </td>
-                <td className="px-4 py-3">
-                  <button
-                    type="button"
-                    onClick={() => openRenewalSmsModal(p)}
-                    className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
-                  >
-                    Edit
-                  </button>
-                </td>
-                <td className="px-4 py-3">
-                  <button
-                    type="button"
-                    onClick={() => toggleActive(p)}
-                    className={`rounded-md px-2 py-1 text-xs ${
-                      p.isActive
-                        ? 'bg-emerald-950 text-emerald-300'
-                        : 'bg-slate-800 text-slate-400'
-                    }`}
-                  >
-                    {p.isActive ? 'Yes' : 'No'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {list.length === 0 && (
-          <p className="px-4 py-8 text-center text-sm text-slate-500">No packages yet.</p>
-        )}
-      </div>
+      {list.length === 0 ? (
+        <p className="rounded-xl border border-slate-800 px-4 py-8 text-center text-sm text-slate-500">
+          No packages yet.
+        </p>
+      ) : (
+        <div className="space-y-6">
+          {sections.map((section) => (
+            <section key={section.kind} className="overflow-hidden rounded-xl border border-slate-800">
+              <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-800 bg-slate-900/80 px-4 py-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">{section.title}</h3>
+                  {section.blurb ? (
+                    <p className="mt-0.5 text-xs text-slate-500">{section.blurb}</p>
+                  ) : null}
+                </div>
+                <span className="text-xs text-slate-500">
+                  {section.items.length} package{section.items.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              {section.items.length === 0 ? (
+                <p className="px-4 py-6 text-sm text-slate-500">No {section.title.toLowerCase()} packages yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-left text-sm">
+                    <thead className="border-b border-slate-800/80 text-xs uppercase text-slate-500">
+                      <tr>
+                        <th className="px-4 py-2.5">Name</th>
+                        <th className="px-4 py-2.5">Price</th>
+                        <th className="px-4 py-2.5">Duration</th>
+                        {section.kind === 'hotspot' ? (
+                          <th className="px-4 py-2.5">Limits</th>
+                        ) : null}
+                        {section.kind !== 'remote_access' ? (
+                          <th className="px-4 py-2.5">Profile</th>
+                        ) : null}
+                        {section.kind === 'pppoe' ? (
+                          <th className="px-4 py-2.5">Expired profile</th>
+                        ) : null}
+                        <th className="px-4 py-2.5">Renewal SMS</th>
+                        <th className="px-4 py-2.5">Active</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {section.items.map((p) => (
+                        <tr key={p._id} className="text-slate-300">
+                          <td className="px-4 py-3">
+                            <span className="font-medium text-white">{p.name}</span>
+                            {p.description ? (
+                              <span className="mt-0.5 block text-xs text-slate-500">{p.description}</span>
+                            ) : null}
+                          </td>
+                          <td className="px-4 py-3">
+                            {(Number(p.priceCents) / 100).toFixed(2)} {p.currency || 'GHS'}
+                          </td>
+                          <td className="px-4 py-3">
+                            {p.durationAmount ?? p.durationDays ?? '—'}{' '}
+                            {p.durationUnit || (p.durationDays ? 'day' : '')}
+                          </td>
+                          {section.kind === 'hotspot' ? (
+                            <td className="px-4 py-3 text-xs text-slate-400">
+                              <span className="block">{formatDataLimit(p.dataLimitBytes)} data</span>
+                              <span className="block">
+                                {formatSessionLimit(p.timeLimitSeconds)} session
+                              </span>
+                            </td>
+                          ) : null}
+                          {section.kind !== 'remote_access' ? (
+                            <td className="px-4 py-3 font-mono text-xs">{p.activeProfile || '—'}</td>
+                          ) : null}
+                          {section.kind === 'pppoe' ? (
+                            <td className="px-4 py-3 font-mono text-xs text-slate-400">
+                              {p.expiredProfile || '—'}
+                            </td>
+                          ) : null}
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => openRenewalSmsModal(p)}
+                              className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                            >
+                              Edit
+                            </button>
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleActive(p)}
+                              className={`rounded-md px-2 py-1 text-xs ${
+                                p.isActive
+                                  ? 'bg-emerald-950 text-emerald-300'
+                                  : 'bg-slate-800 text-slate-400'
+                              }`}
+                            >
+                              {p.isActive ? 'Yes' : 'No'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

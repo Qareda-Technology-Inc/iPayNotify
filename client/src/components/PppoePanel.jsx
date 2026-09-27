@@ -385,12 +385,17 @@ export function PppoePanel() {
         chargeBalance: renewChargeBalance,
         ...(renewPackageId ? { packageId: renewPackageId } : {}),
       };
-      await apiFetch(`/api/pppoe/${renewAccount._id}/renew`, {
+      const result = await apiFetch(`/api/pppoe/${renewAccount._id}/renew`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
       setRenewAccount(null);
-      window.location.reload();
+      const until = result?.paidUntil || result?.account?.paidUntil;
+      setExpirySyncSummary(
+        until ? `Renewed until ${new Date(until).toLocaleString()}` : 'Account renewed'
+      );
+      await loadAll();
+      if (routerId) await loadRouterLiveData(routerId);
     } catch (err) {
       setError(err.message || 'Renew failed');
     } finally {

@@ -58,13 +58,14 @@ function headerTitleForPath(pathname) {
     '/finance/pppoe': 'PPPoE',
     '/users/remote-access': 'Remote access',
     '/finance/packages': 'Packages',
-    '/hotspot': 'Hotspot vouchers',
+    '/hotspot': 'Hotspot & vouchers',
     '/finance/payments': 'Payments',
     '/finance/wallet': 'Wallet',
     '/finance/messages': 'Messages & SMS',
     '/devices/routers': 'Routers',
     '/devices/mikrotik': 'Routers',
     '/devices/wireguard': 'WireGuard VPN',
+    '/super/wireguard': 'WireGuard routers',
     '/org/settings': 'Organisation',
     '/account': 'Account',
     '/super/organizations': 'All organisations',
@@ -237,7 +238,7 @@ export function AdminShell({ onSignOut }) {
               Packages
             </SideLink>
             <SideLink to="/hotspot" badge={counts?.vouchers}>
-              Vouchers
+              Hotspot & vouchers
             </SideLink>
             <SideLink to="/finance/payments" badge={counts?.paymentsPending}>
               Payments
@@ -279,7 +280,7 @@ export function AdminShell({ onSignOut }) {
               <SideLink to="/super/organizations" accent="amber">
                 All organisations
               </SideLink>
-              <SideLink to="/devices/wireguard" accent="amber">
+              <SideLink to="/super/wireguard" accent="amber">
                 WireGuard routers
               </SideLink>
               <SideLink to="/super/withdrawals" accent="amber">

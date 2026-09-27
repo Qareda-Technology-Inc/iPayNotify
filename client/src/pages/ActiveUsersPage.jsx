@@ -19,19 +19,25 @@ export function ActiveUsersPage() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [routerFilter, setRouterFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all'); // all | hotspot | ppp
+  const [search, setSearch] = useState('');
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ soft = false } = {}) => {
     setErr('');
-    setLoading(true);
+    if (soft) setRefreshing(true);
+    else setLoading(true);
     try {
       const d = await apiFetch('/api/routers/active-sessions');
       setData(d);
     } catch (e) {
       setErr(e.message || 'Could not load sessions');
-      setData(null);
+      if (!soft) setData(null);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -39,12 +45,54 @@ export function ActiveUsersPage() {
     load();
   }, [load]);
 
-  const totals = data?.totals;
+  useEffect(() => {
+    if (!autoRefresh) return undefined;
+    const id = setInterval(() => {
+      load({ soft: true });
+    }, 45000);
+    return () => clearInterval(id);
+  }, [autoRefresh, load]);
+
+  const allRouters = data?.routers || [];
+  const allErrored =
+    allRouters.length > 0 && allRouters.every((r) => Boolean(r.error));
+
   const routers = useMemo(() => {
-    const all = data?.routers || [];
-    if (!routerFilter) return all;
-    return all.filter((r) => r.routerId === routerFilter);
-  }, [data, routerFilter]);
+    let list = allRouters;
+    if (routerFilter) list = list.filter((r) => r.routerId === routerFilter);
+    const q = search.trim().toLowerCase();
+    return list.map((r) => {
+      let hotspot = r.hotspotActive || [];
+      let ppp = r.pppActive || [];
+      if (typeFilter === 'hotspot') ppp = [];
+      if (typeFilter === 'ppp') hotspot = [];
+      if (q) {
+        hotspot = hotspot.filter((row) =>
+          String(row.user || '')
+            .toLowerCase()
+            .includes(q)
+        );
+        ppp = ppp.filter((row) =>
+          String(row.secret || '')
+            .toLowerCase()
+            .includes(q)
+        );
+      }
+      return { ...r, hotspotActive: hotspot, pppActive: ppp };
+    });
+  }, [allRouters, routerFilter, typeFilter, search]);
+
+  const filteredTotals = useMemo(() => {
+    let hotspot = 0;
+    let ppp = 0;
+    for (const r of routers) {
+      hotspot += r.hotspotActive?.length || 0;
+      ppp += r.pppActive?.length || 0;
+    }
+    return { hotspot, ppp, all: hotspot + ppp };
+  }, [routers]);
+
+  const totals = data?.totals;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -52,64 +100,131 @@ export function ActiveUsersPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Active users</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Live from each MikroTik site: hotspot sessions (
-            <span className="font-mono text-slate-500">/ip/hotspot/active</span>) and PPP (
-            <span className="font-mono text-slate-500">/ppp/active</span>), plus board identity / uptime.
+            Live Hotspot and PPP sessions from each site. Refresh keeps the last snapshot visible.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="text-sm text-slate-400">
-            Site
-            <select
-              value={routerFilter}
-              onChange={(e) => setRouterFilter(e.target.value)}
-              className="ml-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-200"
-            >
-              <option value="">All sites</option>
-              {(data?.routers || []).map((r) => (
-                <option key={r.routerId} value={r.routerId}>
-                  {r.routerName}
-                </option>
-              ))}
-            </select>
+          <label className="inline-flex items-center gap-2 text-xs text-slate-400">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+            />
+            Auto-refresh
           </label>
           <button
             type="button"
-            disabled={loading}
-            onClick={() => load()}
+            disabled={loading || refreshing}
+            onClick={() => load({ soft: Boolean(data) })}
             className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-600/80 bg-slate-800/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800 disabled:opacity-50"
           >
-            <IconRefresh className={loading ? 'animate-spin text-slate-400' : 'text-slate-400'} />
-            {loading ? 'Refreshing…' : 'Refresh live'}
+            <IconRefresh
+              className={loading || refreshing ? 'animate-spin text-slate-400' : 'text-slate-400'}
+            />
+            {refreshing ? 'Refreshing…' : loading ? 'Loading…' : 'Refresh live'}
           </button>
         </div>
       </div>
 
       {err && (
-        <p className="mt-6 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200" role="alert">
+        <p
+          className="mt-6 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200"
+          role="alert"
+        >
           {err}
         </p>
       )}
 
-      {!loading && data && (
+      {allErrored && !err ? (
+        <p className="mt-6 rounded-xl border border-amber-500/35 bg-amber-950/25 px-4 py-3 text-sm text-amber-100">
+          Every site returned an error — check router credentials or VPN, then refresh.
+        </p>
+      ) : null}
+
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <label className="block text-sm text-slate-400">
+          Site
+          <select
+            value={routerFilter}
+            onChange={(e) => setRouterFilter(e.target.value)}
+            className="mt-1 block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-200 sm:w-48"
+          >
+            <option value="">All sites</option>
+            {allRouters.map((r) => (
+              <option key={r.routerId} value={r.routerId}>
+                {r.routerName}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex gap-1 rounded-xl bg-slate-950 p-1">
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'hotspot', label: 'Hotspot' },
+            { id: 'ppp', label: 'PPP' },
+          ].map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTypeFilter(t.id)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                typeFilter === t.id ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <label className="block min-w-0 flex-1 text-sm text-slate-400 sm:max-w-xs">
+          Search user
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter username…"
+            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white"
+          />
+        </label>
+      </div>
+
+      {(data || loading) && (
         <div className="mt-6 flex flex-wrap gap-4 text-sm">
           <div className="rounded-xl border border-slate-600/60 bg-slate-900/60 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Total live sessions</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              {search || typeFilter !== 'all' || routerFilter ? 'Matching' : 'Total live'}
+            </p>
             <p className="mt-1 text-2xl font-semibold tabular-nums text-white">
-              {totals?.all ?? (Number(totals?.hotspot ?? 0) + Number(totals?.ppp ?? 0))}
+              {data
+                ? search || typeFilter !== 'all' || routerFilter
+                  ? filteredTotals.all
+                  : totals?.all ?? filteredTotals.all
+                : '—'}
             </p>
           </div>
           <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/25 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-cyan-400/90">Hotspot online</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums text-cyan-100">{totals?.hotspot ?? 0}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-cyan-400/90">Hotspot</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums text-cyan-100">
+              {data
+                ? search || typeFilter !== 'all' || routerFilter
+                  ? filteredTotals.hotspot
+                  : totals?.hotspot ?? 0
+                : '—'}
+            </p>
           </div>
           <div className="rounded-xl border border-violet-500/30 bg-violet-950/25 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-violet-400/90">PPP active</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums text-violet-100">{totals?.ppp ?? 0}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-violet-400/90">PPP</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums text-violet-100">
+              {data
+                ? search || typeFilter !== 'all' || routerFilter
+                  ? filteredTotals.ppp
+                  : totals?.ppp ?? 0
+                : '—'}
+            </p>
           </div>
-          {data.at && (
+          {data?.at && (
             <p className="self-end text-xs text-slate-500">
               Snapshot: {new Date(data.at).toLocaleString()}
+              {refreshing ? ' · updating…' : ''}
             </p>
           )}
         </div>
@@ -117,18 +232,25 @@ export function ActiveUsersPage() {
 
       <div className="mt-8 space-y-6">
         {loading && !data ? (
-          <p className="text-sm text-slate-500">Connecting to sites…</p>
+          <div className="space-y-3">
+            {[0, 1].map((i) => (
+              <div
+                key={i}
+                className="h-40 animate-pulse rounded-2xl border border-slate-800 bg-slate-900/40"
+              />
+            ))}
+          </div>
         ) : (
           routers.map((r) => (
             <section
               key={r.routerId}
               className="overflow-hidden rounded-2xl border border-slate-800/90 bg-slate-900/40 shadow-lg shadow-black/20"
             >
-              <div className="border-b border-slate-800 bg-slate-900/80 px-5 py-4">
+              <div className="border-b border-slate-800 bg-slate-900/80 px-4 py-4 sm:px-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-medium text-white">{r.routerName}</h2>
-                    <p className="mt-0.5 font-mono text-xs text-slate-500">{r.host}</p>
+                  <div className="min-w-0">
+                    <h2 className="truncate text-lg font-medium text-white">{r.routerName}</h2>
+                    <p className="mt-0.5 truncate font-mono text-xs text-slate-500">{r.host}</p>
                   </div>
                   {r.details && (
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 sm:grid-cols-3">
@@ -156,88 +278,100 @@ export function ActiveUsersPage() {
                   (r.hotspotActive?.length ?? 0) === 0 &&
                   (r.pppActive?.length ?? 0) === 0 && (
                     <p className="mt-2 text-xs text-slate-500">
-                      Router reachable — no live Hotspot or PPP sessions right now.
+                      No matching live Hotspot or PPP sessions.
                     </p>
                   )}
               </div>
 
-              <div className="grid gap-6 p-5 lg:grid-cols-2">
-                <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-cyan-500/90">
-                    Hotspot active ({r.hotspotActive?.length ?? 0})
-                  </h3>
-                  <div className="mt-2 overflow-x-auto rounded-xl border border-slate-800">
-                    <table className="w-full min-w-[360px] text-left text-sm">
-                      <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
-                        <tr>
-                          <th className="px-3 py-2">User</th>
-                          <th className="px-3 py-2">IP</th>
-                          <th className="px-3 py-2">Uptime</th>
-                          <th className="px-3 py-2">Traffic</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/80 text-slate-300">
-                        {(r.hotspotActive || []).length === 0 ? (
+              <div className="grid gap-6 p-4 sm:p-5 lg:grid-cols-2">
+                {typeFilter !== 'ppp' ? (
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-cyan-500/90">
+                      Hotspot active ({r.hotspotActive?.length ?? 0})
+                    </h3>
+                    <div className="mt-2 overflow-x-auto rounded-xl border border-slate-800">
+                      <table className="w-full min-w-[300px] text-left text-sm">
+                        <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
                           <tr>
-                            <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
-                              No hotspot sessions
-                            </td>
+                            <th className="px-3 py-2">User</th>
+                            <th className="px-3 py-2">IP</th>
+                            <th className="px-3 py-2">Uptime</th>
+                            <th className="hidden px-3 py-2 sm:table-cell">Traffic</th>
                           </tr>
-                        ) : (
-                          r.hotspotActive.map((row, i) => (
-                            <tr key={row.id || `${row.user}-${row.address}-${i}`}>
-                              <td className="px-3 py-2 font-mono text-sm text-cyan-200/90">{row.user}</td>
-                              <td className="px-3 py-2 font-mono text-xs">{row.address || '—'}</td>
-                              <td className="px-3 py-2 text-xs text-slate-400">{row.uptime}</td>
-                              <td className="px-3 py-2 font-mono text-xs text-slate-400">{row.statistics}</td>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/80 text-slate-300">
+                          {(r.hotspotActive || []).length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
+                                No hotspot sessions
+                              </td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                          ) : (
+                            r.hotspotActive.map((row, i) => (
+                              <tr key={row.id || `${row.user}-${row.address}-${i}`}>
+                                <td className="px-3 py-2 font-mono text-sm text-cyan-200/90">
+                                  {row.user}
+                                </td>
+                                <td className="px-3 py-2 font-mono text-xs">{row.address || '—'}</td>
+                                <td className="px-3 py-2 text-xs text-slate-400">{row.uptime}</td>
+                                <td className="hidden px-3 py-2 font-mono text-xs text-slate-400 sm:table-cell">
+                                  {row.statistics}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
+                ) : null}
 
-                <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-violet-500/90">
-                    PPP active ({r.pppActive?.length ?? 0})
-                  </h3>
-                  <div className="mt-2 overflow-x-auto rounded-xl border border-slate-800">
-                    <table className="w-full min-w-[320px] text-left text-sm">
-                      <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
-                        <tr>
-                          <th className="px-3 py-2">Username</th>
-                          <th className="px-3 py-2">IP</th>
-                          <th className="px-3 py-2">Uptime</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/80 text-slate-300">
-                        {(r.pppActive || []).length === 0 ? (
+                {typeFilter !== 'hotspot' ? (
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-violet-500/90">
+                      PPP active ({r.pppActive?.length ?? 0})
+                    </h3>
+                    <div className="mt-2 overflow-x-auto rounded-xl border border-slate-800">
+                      <table className="w-full min-w-[280px] text-left text-sm">
+                        <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
                           <tr>
-                            <td colSpan={3} className="px-3 py-6 text-center text-slate-500">
-                              No PPP sessions
-                            </td>
+                            <th className="px-3 py-2">Username</th>
+                            <th className="px-3 py-2">IP</th>
+                            <th className="px-3 py-2">Uptime</th>
                           </tr>
-                        ) : (
-                          r.pppActive.map((row, i) => (
-                            <tr key={row.id || `${row.secret}-${i}`}>
-                              <td className="px-3 py-2 font-mono text-sm text-violet-200/90">{row.secret}</td>
-                              <td className="px-3 py-2 font-mono text-xs">{row.address}</td>
-                              <td className="px-3 py-2 text-xs text-slate-400">{row.uptime}</td>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/80 text-slate-300">
+                          {(r.pppActive || []).length === 0 ? (
+                            <tr>
+                              <td colSpan={3} className="px-3 py-6 text-center text-slate-500">
+                                No PPP sessions
+                              </td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                          ) : (
+                            r.pppActive.map((row, i) => (
+                              <tr key={row.id || `${row.secret}-${i}`}>
+                                <td className="px-3 py-2 font-mono text-sm text-violet-200/90">
+                                  {row.secret}
+                                </td>
+                                <td className="px-3 py-2 font-mono text-xs">{row.address}</td>
+                                <td className="px-3 py-2 text-xs text-slate-400">{row.uptime}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
+                ) : null}
               </div>
             </section>
           ))
         )}
 
         {!loading && routers.length === 0 && !err && (
-          <p className="text-center text-sm text-slate-500">No routers configured. Add one under Network → Routers.</p>
+          <p className="text-center text-sm text-slate-500">
+            No routers configured. Add one under Network → Routers.
+          </p>
         )}
       </div>
     </div>

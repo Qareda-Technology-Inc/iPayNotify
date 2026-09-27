@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch, resolveApiUrl } from '../api.js';
 import { getToken } from '../authStorage.js';
@@ -17,7 +17,14 @@ function shortKey(k) {
   return `${s.slice(0, 8)}…${s.slice(-6)}`;
 }
 
-export function WireGuardRoutersPage() {
+/**
+ * @param {{ mode?: 'vpn' | 'routers' }} props
+ * - vpn: platform VPN status, VPS SSH, phone/laptop clients
+ * - routers: MikroTik peer onboarding + registered router peers
+ */
+export function WireGuardRoutersPage({ mode = 'routers' }) {
+  const isVpn = mode === 'vpn';
+
   const [items, setItems] = useState([]);
   const [cfg, setCfg] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +65,16 @@ export function WireGuardRoutersPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const routerPeers = useMemo(
+    () => items.filter((p) => p.kind !== 'client'),
+    [items]
+  );
+  const phonePeers = useMemo(
+    () => items.filter((p) => p.kind === 'client'),
+    [items]
+  );
+  const tablePeers = isVpn ? phonePeers : routerPeers;
 
   async function generateSshKey(rotate = false) {
     if (rotate && !window.confirm('Replace the existing SSH key? You must update authorized_keys on the VPS.')) {
@@ -302,126 +319,191 @@ export function WireGuardRoutersPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          WireGuard router management
-        </h2>
-        <p className="mt-2 max-w-3xl text-sm text-slate-400">
-          Site MikroTiks join the platform VPN first. After a peer appears here (auto-register script or
-          manual add), add the site under{' '}
-          <Link to="/devices/routers" className="text-indigo-300 underline-offset-2 hover:underline">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            {isVpn ? 'WireGuard VPN' : 'WireGuard routers'}
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm text-slate-400">
+            {isVpn ? (
+              <>
+                Platform VPN hub: endpoint status, VPS SSH for peer sync, and phone / laptop clients.
+                Onboard site MikroTiks under{' '}
+                <Link
+                  to="/super/wireguard"
+                  className="text-indigo-300 underline-offset-2 hover:underline"
+                >
+                  WireGuard routers
+                </Link>
+                .
+              </>
+            ) : (
+              <>
+                Site MikroTiks join the platform VPN first. After a peer appears here, add the site under{' '}
+                <Link
+                  to="/devices/routers"
+                  className="text-indigo-300 underline-offset-2 hover:underline"
+                >
+                  Routers
+                </Link>{' '}
+                using the tunnel IP (<span className="font-mono text-slate-300">10.10.10.x</span>).
+                VPN status and phone access live under{' '}
+                <Link
+                  to="/devices/wireguard"
+                  className="text-indigo-300 underline-offset-2 hover:underline"
+                >
+                  WireGuard VPN
+                </Link>
+                .
+              </>
+            )}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            to="/devices/wireguard"
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+              isVpn
+                ? 'bg-amber-600/20 text-amber-100 ring-1 ring-amber-500/40'
+                : 'border border-slate-700 text-slate-300 hover:bg-slate-800'
+            }`}
+          >
+            VPN
+          </Link>
+          <Link
+            to="/super/wireguard"
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+              !isVpn
+                ? 'bg-amber-600/20 text-amber-100 ring-1 ring-amber-500/40'
+                : 'border border-slate-700 text-slate-300 hover:bg-slate-800'
+            }`}
+          >
             Routers
-          </Link>{' '}
-          using the assigned tunnel IP (<span className="font-mono text-slate-300">10.10.10.x</span>) —
-          not the public WAN.
-        </p>
+          </Link>
+        </div>
       </div>
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-        <h3 className="text-sm font-medium text-white">Platform VPN status</h3>
-        <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-slate-500">Ready</dt>
-            <dd className="mt-1 text-slate-200">
-              {cfg?.enabled ? 'Yes' : 'No — finish env + SSH key below'}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-slate-500">Endpoint</dt>
-            <dd className="mt-1 font-mono text-xs text-slate-200 break-all">{endpoint}</dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-slate-500">IP pool</dt>
-            <dd className="mt-1 font-mono text-xs text-slate-200">{cfg?.pool || '10.10.10.0/24'}</dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-slate-500">Register token</dt>
-            <dd className="mt-1 text-slate-200">
-              {cfg?.hasRegisterToken ? 'Configured' : 'Optional / not set'}
-            </dd>
-          </div>
-        </dl>
+      {isVpn ? (
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <h3 className="text-sm font-medium text-white">Platform VPN status</h3>
+          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-slate-500">Ready</dt>
+              <dd className="mt-1 text-slate-200">
+                {cfg?.enabled ? 'Yes' : 'No — finish env + SSH key below'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-slate-500">Endpoint</dt>
+              <dd className="mt-1 break-all font-mono text-xs text-slate-200">{endpoint}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-slate-500">IP pool</dt>
+              <dd className="mt-1 font-mono text-xs text-slate-200">{cfg?.pool || '10.10.10.0/24'}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-slate-500">Register token</dt>
+              <dd className="mt-1 text-slate-200">
+                {cfg?.hasRegisterToken ? 'Configured' : 'Optional / not set'}
+              </dd>
+            </div>
+          </dl>
 
-        <div className="mt-4 rounded-xl border border-amber-500/25 bg-amber-950/15 p-4">
-          <h4 className="text-sm font-medium text-amber-50">VPS SSH key (for peer sync)</h4>
-          <p className="mt-1 text-xs text-amber-100/80">
-            Generates an <strong>Ed25519</strong> or <strong>RSA 2048</strong> key (formats your VPS
-            panel accepts). Copy the public line into the panel’s SSH keys /{' '}
-            <span className="font-mono">authorized_keys</span>. If you see a key-format error, click{' '}
-            <strong>Rotate key</strong> and replace the old line on the VPS.
-          </p>
-          {cfg?.vpsSsh?.privateKeyParseOk === false ? (
-            <p className="mt-2 rounded-lg border border-red-500/40 bg-red-950/30 px-3 py-2 text-xs text-red-100">
-              Stored private key is not usable. Click <strong>Rotate key</strong>, then replace the
-              public key on the VPS before adding routers.
+          <div className="mt-4 rounded-xl border border-amber-500/25 bg-amber-950/15 p-4">
+            <h4 className="text-sm font-medium text-amber-50">VPS SSH key (for peer sync)</h4>
+            <p className="mt-1 text-xs text-amber-100/80">
+              Generates an <strong>Ed25519</strong> or <strong>RSA 2048</strong> key (formats your VPS
+              panel accepts). Copy the public line into the panel’s SSH keys /{' '}
+              <span className="font-mono">authorized_keys</span>. If you see a key-format error, click{' '}
+              <strong>Rotate key</strong> and replace the old line on the VPS.
             </p>
-          ) : null}
-          {cfg?.vpsSsh?.source === 'env' ? (
-            <p className="mt-2 text-xs text-amber-100/90">
-              Using SSH key from environment (<span className="font-mono">WG_VPS_SSH_*</span>).
-            </p>
-          ) : cfg?.vpsSsh?.publicKey ? (
-            <>
-              <pre className="mt-3 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-slate-800 bg-slate-950/70 p-3 font-mono text-[11px] text-slate-200">
-                {cfg.vpsSsh.authorizedKeysLine || cfg.vpsSsh.publicKey}
-              </pre>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => copySshPublicKey()}
-                  className="rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs font-medium text-amber-50 hover:bg-amber-900/30"
-                >
-                  Copy public key
-                </button>
-                <button
-                  type="button"
-                  disabled={sshKeyBusy}
-                  onClick={() => testVpsSsh()}
-                  className="rounded-lg border border-emerald-600/40 px-3 py-1.5 text-xs font-medium text-emerald-100 hover:bg-emerald-950/40 disabled:opacity-50"
-                >
-                  {sshKeyBusy ? 'Testing…' : 'Test VPS SSH'}
-                </button>
-                <button
-                  type="button"
-                  disabled={sshKeyBusy}
-                  onClick={() => generateSshKey(true)}
-                  className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50"
-                >
-                  {sshKeyBusy ? 'Working…' : 'Rotate key'}
-                </button>
-              </div>
-            </>
-          ) : (
-            <button
-              type="button"
-              disabled={sshKeyBusy}
-              onClick={() => generateSshKey(false)}
-              className="mt-3 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500 disabled:opacity-50"
-            >
-              {sshKeyBusy ? 'Generating…' : 'Generate SSH key'}
-            </button>
-          )}
-        </div>
-
-        <div className="mt-4 rounded-xl border border-indigo-500/25 bg-indigo-950/20 p-4 text-sm text-indigo-100/90">
-          <p className="font-medium text-indigo-50">How to onboard a site</p>
+            {cfg?.vpsSsh?.privateKeyParseOk === false ? (
+              <p className="mt-2 rounded-lg border border-red-500/40 bg-red-950/30 px-3 py-2 text-xs text-red-100">
+                Stored private key is not usable. Click <strong>Rotate key</strong>, then replace the
+                public key on the VPS before adding routers.
+              </p>
+            ) : null}
+            {cfg?.vpsSsh?.source === 'env' ? (
+              <p className="mt-2 text-xs text-amber-100/90">
+                Using SSH key from environment (<span className="font-mono">WG_VPS_SSH_*</span>).
+              </p>
+            ) : cfg?.vpsSsh?.publicKey ? (
+              <>
+                <pre className="mt-3 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-slate-800 bg-slate-950/70 p-3 font-mono text-[11px] text-slate-200">
+                  {cfg.vpsSsh.authorizedKeysLine || cfg.vpsSsh.publicKey}
+                </pre>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => copySshPublicKey()}
+                    className="rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs font-medium text-amber-50 hover:bg-amber-900/30"
+                  >
+                    Copy public key
+                  </button>
+                  <button
+                    type="button"
+                    disabled={sshKeyBusy}
+                    onClick={() => testVpsSsh()}
+                    className="rounded-lg border border-emerald-600/40 px-3 py-1.5 text-xs font-medium text-emerald-100 hover:bg-emerald-950/40 disabled:opacity-50"
+                  >
+                    {sshKeyBusy ? 'Testing…' : 'Test VPS SSH'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={sshKeyBusy}
+                    onClick={() => generateSshKey(true)}
+                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    {sshKeyBusy ? 'Working…' : 'Rotate key'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                disabled={sshKeyBusy}
+                onClick={() => generateSshKey(false)}
+                className="mt-3 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500 disabled:opacity-50"
+              >
+                {sshKeyBusy ? 'Generating…' : 'Generate SSH key'}
+              </button>
+            )}
+          </div>
+        </section>
+      ) : (
+        <section className="rounded-2xl border border-indigo-500/25 bg-indigo-950/20 p-5 text-sm text-indigo-100/90">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-medium text-indigo-50">How to onboard a site</p>
+            {!cfg?.enabled ? (
+              <Link
+                to="/devices/wireguard"
+                className="text-xs text-amber-200 underline-offset-2 hover:underline"
+              >
+                VPN not ready — set up VPS SSH first
+              </Link>
+            ) : (
+              <span className="text-xs text-indigo-200/70">
+                Endpoint <span className="font-mono">{endpoint}</span>
+              </span>
+            )}
+          </div>
           <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-xs text-indigo-100/85">
+            <li>Download the install script below (API URL and token are filled in for you).</li>
             <li>
-              Download the install script below (API URL and token are filled in for you).
-            </li>
-            <li>
-              On the MikroTik: set a clear <strong>System → Identity</strong> name (used as site
-              name), then <span className="font-mono">/import</span> the{' '}
-              <span className="font-mono">.rsc</span> file. LAN is taken from DHCP/bridge
-              automatically.
+              On the MikroTik: set a clear <strong>System → Identity</strong> name, then{' '}
+              <span className="font-mono">/import</span> the <span className="font-mono">.rsc</span>{' '}
+              file. LAN is taken from DHCP/bridge automatically.
             </li>
             <li>
               Refresh this page — the peer should appear with a{' '}
               <span className="font-mono">10.10.10.x</span> tunnel IP.
             </li>
             <li>
-              Open <Link to="/devices/routers" className="underline underline-offset-2">Routers</Link>,
-              pick that VPN peer, enter SSH login/password, then Test connection.
+              Open{' '}
+              <Link to="/devices/routers" className="underline underline-offset-2">
+                Routers
+              </Link>
+              , pick that VPN peer, enter SSH login/password, then Test connection.
             </li>
           </ol>
           <div className="mt-4 grid gap-3 border-t border-indigo-500/20 pt-4 sm:grid-cols-2">
@@ -452,8 +534,8 @@ export function WireGuardRoutersPage() {
           >
             {downloading ? 'Preparing…' : 'Download install script (.rsc)'}
           </button>
-        </div>
-      </section>
+        </section>
+      )}
 
       {err && (
         <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
@@ -466,160 +548,167 @@ export function WireGuardRoutersPage() {
         </p>
       )}
 
-      <section className="rounded-2xl border border-emerald-500/25 bg-emerald-950/15 p-5">
-        <h3 className="font-medium text-white">Phone / laptop access</h3>
-        <p className="mt-1 text-xs text-slate-400">
-          Creates a WireGuard client on the platform VPN, syncs it to the VPS, and shows a QR +{' '}
-          <span className="font-mono">.conf</span> once. Install the WireGuard app, scan the QR, turn
-          the tunnel on, then open Winbox to the router&apos;s{' '}
-          <span className="font-mono text-slate-300">10.10.10.x:8291</span> from{' '}
-          <Link to="/devices/routers" className="text-emerald-300 underline-offset-2 hover:underline">
-            Routers
-          </Link>
-          .
-        </p>
-        <form onSubmit={generatePhoneClient} className="mt-4 flex max-w-xl flex-col gap-3">
-          <label className="block text-sm text-slate-300">
-            Device label
-            <input
-              value={phoneLabel}
-              onChange={(e) => setPhoneLabel(e.target.value)}
-              placeholder="e.g. Kwame iPhone"
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
-            />
-          </label>
-          <label className="inline-flex items-center gap-2 text-xs text-slate-400">
-            <input
-              type="checkbox"
-              checked={phoneIncludeLan}
-              onChange={(e) => setPhoneIncludeLan(e.target.checked)}
-            />
-            Include site LAN subnets (reach 192.168.x devices when routed)
-          </label>
-          <button
-            type="submit"
-            disabled={phoneBusy || !cfg?.enabled}
-            className="w-fit rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-          >
-            {phoneBusy ? 'Creating…' : 'Generate phone config + QR'}
-          </button>
-        </form>
-
-        {phoneBundle ? (
-          <div className="mt-5 grid gap-4 rounded-xl border border-emerald-500/30 bg-slate-950/50 p-4 sm:grid-cols-[auto_1fr]">
-            <div className="flex flex-col items-center gap-2">
-              {phoneBundle.qrDataUrl ? (
-                <img
-                  src={phoneBundle.qrDataUrl}
-                  alt="WireGuard QR code"
-                  className="h-48 w-48 rounded-lg bg-white p-2"
-                />
-              ) : null}
-              <p className="text-center text-[11px] text-slate-500">Scan in WireGuard app</p>
-            </div>
-            <div className="min-w-0 space-y-3">
-              <p className="text-sm text-emerald-100">
-                Tunnel IP{' '}
-                <span className="font-mono font-semibold">{phoneBundle.peer?.tunnelIp}</span>
-                {phoneBundle.peer?.siteName ? (
-                  <span className="text-slate-400"> · {phoneBundle.peer.siteName}</span>
-                ) : null}
-              </p>
-              <p className="text-xs text-amber-100/90">
-                Private key is shown only here — download or scan now. Lost config? Delete the peer and
-                generate a new one.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={downloadPhoneConfig}
-                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
-                >
-                  Download .conf
-                </button>
-                <button
-                  type="button"
-                  onClick={copyPhoneConfig}
-                  className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
-                >
-                  Copy config
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPhoneBundle(null)}
-                  className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:bg-slate-800"
-                >
-                  Dismiss
-                </button>
-              </div>
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-slate-800 bg-slate-950 p-3 font-mono text-[10px] text-slate-400">
-                {phoneBundle.config}
-              </pre>
-            </div>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-        <h3 className="font-medium text-white">Manual peer (known public key)</h3>
-        <p className="mt-1 text-xs text-slate-500">
-          Use when the site already has a WireGuard key and you need to allocate / re-sync a tunnel IP
-          without re-running the RouterOS script.
-        </p>
-        <form onSubmit={createPeer} className="mt-4 grid max-w-2xl gap-3 sm:grid-cols-2">
-          <label className="block text-sm text-slate-300 sm:col-span-2">
-            Site name
-            <input
-              required
-              value={siteName}
-              onChange={(e) => setSiteName(e.target.value)}
-              placeholder="East Legon POP"
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-            />
-          </label>
-          <label className="block text-sm text-slate-300 sm:col-span-2">
-            Public key
-            <input
-              required
-              value={publicKey}
-              onChange={(e) => setPublicKey(e.target.value)}
-              placeholder="Base64 WireGuard public key"
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs"
-            />
-          </label>
-          <label className="block text-sm text-slate-300">
-            LAN subnet (optional)
-            <input
-              value={lanSubnet}
-              onChange={(e) => setLanSubnet(e.target.value)}
-              placeholder="192.168.88.0/24"
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
-            />
-          </label>
-          <label className="block text-sm text-slate-300">
-            Tunnel IP (optional)
-            <input
-              value={tunnelIp}
-              onChange={(e) => setTunnelIp(e.target.value)}
-              placeholder="auto 10.10.10.x"
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
-            />
-          </label>
-          <div className="sm:col-span-2">
+      {isVpn ? (
+        <section className="rounded-2xl border border-emerald-500/25 bg-emerald-950/15 p-5">
+          <h3 className="font-medium text-white">Phone / laptop access</h3>
+          <p className="mt-1 text-xs text-slate-400">
+            Creates a WireGuard client on the platform VPN, syncs it to the VPS, and shows a QR +{' '}
+            <span className="font-mono">.conf</span> once. Install the WireGuard app, scan the QR, turn
+            the tunnel on, then open Winbox to the router&apos;s{' '}
+            <span className="font-mono text-slate-300">10.10.10.x:8291</span> from{' '}
+            <Link
+              to="/devices/routers"
+              className="text-emerald-300 underline-offset-2 hover:underline"
+            >
+              Routers
+            </Link>
+            .
+          </p>
+          <form onSubmit={generatePhoneClient} className="mt-4 flex max-w-xl flex-col gap-3">
+            <label className="block text-sm text-slate-300">
+              Device label
+              <input
+                value={phoneLabel}
+                onChange={(e) => setPhoneLabel(e.target.value)}
+                placeholder="e.g. Kwame iPhone"
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+              />
+            </label>
+            <label className="inline-flex items-center gap-2 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                checked={phoneIncludeLan}
+                onChange={(e) => setPhoneIncludeLan(e.target.checked)}
+              />
+              Include site LAN subnets (reach 192.168.x devices when routed)
+            </label>
             <button
               type="submit"
-              disabled={creating}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={phoneBusy || !cfg?.enabled}
+              className="w-fit rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
             >
-              {creating ? 'Saving…' : 'Add peer'}
+              {phoneBusy ? 'Creating…' : 'Generate phone config + QR'}
             </button>
-          </div>
-        </form>
-      </section>
+          </form>
+
+          {phoneBundle ? (
+            <div className="mt-5 grid gap-4 rounded-xl border border-emerald-500/30 bg-slate-950/50 p-4 sm:grid-cols-[auto_1fr]">
+              <div className="flex flex-col items-center gap-2">
+                {phoneBundle.qrDataUrl ? (
+                  <img
+                    src={phoneBundle.qrDataUrl}
+                    alt="WireGuard QR code"
+                    className="h-48 w-48 rounded-lg bg-white p-2"
+                  />
+                ) : null}
+                <p className="text-center text-[11px] text-slate-500">Scan in WireGuard app</p>
+              </div>
+              <div className="min-w-0 space-y-3">
+                <p className="text-sm text-emerald-100">
+                  Tunnel IP{' '}
+                  <span className="font-mono font-semibold">{phoneBundle.peer?.tunnelIp}</span>
+                  {phoneBundle.peer?.siteName ? (
+                    <span className="text-slate-400"> · {phoneBundle.peer.siteName}</span>
+                  ) : null}
+                </p>
+                <p className="text-xs text-amber-100/90">
+                  Private key is shown only here — download or scan now. Lost config? Delete the peer
+                  and generate a new one.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={downloadPhoneConfig}
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+                  >
+                    Download .conf
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyPhoneConfig}
+                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+                  >
+                    Copy config
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPhoneBundle(null)}
+                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:bg-slate-800"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-slate-800 bg-slate-950 p-3 font-mono text-[10px] text-slate-400">
+                  {phoneBundle.config}
+                </pre>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : (
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <h3 className="font-medium text-white">Manual peer (known public key)</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Use when the site already has a WireGuard key and you need to allocate / re-sync a tunnel
+            IP without re-running the RouterOS script.
+          </p>
+          <form onSubmit={createPeer} className="mt-4 grid max-w-2xl gap-3 sm:grid-cols-2">
+            <label className="block text-sm text-slate-300 sm:col-span-2">
+              Site name
+              <input
+                required
+                value={siteName}
+                onChange={(e) => setSiteName(e.target.value)}
+                placeholder="East Legon POP"
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+              />
+            </label>
+            <label className="block text-sm text-slate-300 sm:col-span-2">
+              Public key
+              <input
+                required
+                value={publicKey}
+                onChange={(e) => setPublicKey(e.target.value)}
+                placeholder="Base64 WireGuard public key"
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs"
+              />
+            </label>
+            <label className="block text-sm text-slate-300">
+              LAN subnet (optional)
+              <input
+                value={lanSubnet}
+                onChange={(e) => setLanSubnet(e.target.value)}
+                placeholder="192.168.88.0/24"
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
+              />
+            </label>
+            <label className="block text-sm text-slate-300">
+              Tunnel IP (optional)
+              <input
+                value={tunnelIp}
+                onChange={(e) => setTunnelIp(e.target.value)}
+                placeholder="auto 10.10.10.x"
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm"
+              />
+            </label>
+            <div className="sm:col-span-2">
+              <button
+                type="submit"
+                disabled={creating}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {creating ? 'Saving…' : 'Add peer'}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-medium text-white">Registered peers</h3>
+          <h3 className="font-medium text-white">
+            {isVpn ? 'Phone / laptop peers' : 'Registered router peers'}
+          </h3>
           <button
             type="button"
             onClick={() => load()}
@@ -630,9 +719,11 @@ export function WireGuardRoutersPage() {
         </div>
         {loading ? (
           <p className="mt-4 text-sm text-slate-500">Loading…</p>
-        ) : items.length === 0 ? (
+        ) : tablePeers.length === 0 ? (
           <p className="mt-4 text-sm text-slate-500">
-            No peers yet. Run the auto-register script on a MikroTik, or add a peer manually above.
+            {isVpn
+              ? 'No phone clients yet. Generate a config above.'
+              : 'No router peers yet. Run the auto-register script on a MikroTik, or add a peer manually above.'}
           </p>
         ) : (
           <div className="mt-4 overflow-x-auto rounded-xl border border-slate-800">
@@ -640,7 +731,7 @@ export function WireGuardRoutersPage() {
               <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
                 <tr>
                   <th className="px-3 py-2 font-medium">Name</th>
-                  <th className="px-3 py-2 font-medium">Type</th>
+                  {!isVpn ? <th className="px-3 py-2 font-medium">Type</th> : null}
                   <th className="px-3 py-2 font-medium">Tunnel IP</th>
                   <th className="px-3 py-2 font-medium">LAN</th>
                   <th className="px-3 py-2 font-medium">Public key</th>
@@ -650,28 +741,21 @@ export function WireGuardRoutersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
-                {items.map((p) => (
+                {tablePeers.map((p) => (
                   <tr key={p.id} className="text-slate-300">
                     <td className="px-3 py-2.5 text-slate-100">{p.siteName}</td>
-                    <td className="px-3 py-2.5">
-                      <span
-                        className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ${
-                          p.kind === 'client'
-                            ? 'bg-sky-500/15 text-sky-100 ring-sky-500/30'
-                            : 'bg-slate-500/15 text-slate-300 ring-slate-500/30'
-                        }`}
-                      >
-                        {p.kind === 'client' ? 'Phone' : 'Router'}
-                      </span>
-                    </td>
+                    {!isVpn ? (
+                      <td className="px-3 py-2.5">
+                        <span className="inline-flex rounded-md bg-slate-500/15 px-2 py-0.5 text-[11px] font-medium text-slate-300 ring-1 ring-slate-500/30">
+                          Router
+                        </span>
+                      </td>
+                    ) : null}
                     <td className="px-3 py-2.5 font-mono text-xs text-emerald-200">{p.tunnelIp}</td>
                     <td className="px-3 py-2.5 font-mono text-xs text-slate-400">
                       {p.lanSubnet || '—'}
                     </td>
-                    <td
-                      className="px-3 py-2.5 font-mono text-xs text-slate-400"
-                      title={p.publicKey}
-                    >
+                    <td className="px-3 py-2.5 font-mono text-xs text-slate-400" title={p.publicKey}>
                       {shortKey(p.publicKey)}
                     </td>
                     <td className="px-3 py-2.5">
@@ -681,7 +765,10 @@ export function WireGuardRoutersPage() {
                         {p.status}
                       </span>
                       {p.lastSyncError ? (
-                        <p className="mt-1 max-w-[10rem] text-[10px] text-red-300/90" title={p.lastSyncError}>
+                        <p
+                          className="mt-1 max-w-[10rem] text-[10px] text-red-300/90"
+                          title={p.lastSyncError}
+                        >
                           {p.lastSyncError}
                         </p>
                       ) : null}

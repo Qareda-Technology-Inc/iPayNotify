@@ -1,9 +1,10 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
-import { HotspotVoucher, PlanPackage } from '../models/index.js';
+import { HotspotVoucher, PlanPackage, Router } from '../models/index.js';
 import { withRouterMikrotik } from '../mikrotik/routeros.js';
 import * as hs from '../mikrotik/hotspotCommands.js';
 import { formatExpiryComment } from '../utils/expiryComment.js';
+import { extendPaidUntilByPackage } from '../utils/duration.js';
 import { resolveRouter } from './routerResolver.js';
 import { organizationIdForRouter } from '../db/defaultOrganizationId.js';
 
@@ -99,10 +100,12 @@ export async function generateVouchers({
 
   const vouchers = [];
   const now = new Date();
-  const validUntil =
-    pkg.durationDays != null
-      ? new Date(now.getTime() + pkg.durationDays * 86400000)
-      : undefined;
+  let validUntil;
+  try {
+    validUntil = extendPaidUntilByPackage(now, pkg);
+  } catch {
+    validUntil = undefined;
+  }
 
   for (let i = 0; i < count; i++) {
     const code = await uniqueCode(router._id);
@@ -128,6 +131,116 @@ export async function listVouchers(query = {}) {
     .sort({ createdAt: -1 })
     .limit(500)
     .lean();
+}
+
+function rosBytes(row, keys) {
+  for (const k of keys) {
+    const raw = row?.[k];
+    if (raw == null || raw === '') continue;
+    const n = Number(String(raw).replace(/,/g, ''));
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 0;
+}
+
+/**
+ * Mark vouchers as used when they appear in hotspot active sessions,
+ * and snapshot byte counters from MikroTik user rows.
+ */
+export async function reconcileHotspotVoucherUsage(organizationId) {
+  const orgFilter =
+    organizationId != null &&
+    String(organizationId).trim() &&
+    mongoose.isValidObjectId(String(organizationId).trim())
+      ? { organizationId: String(organizationId).trim() }
+      : { organizationId: { $exists: true, $ne: null } };
+
+  const routerIds = await HotspotVoucher.distinct('routerId', orgFilter);
+  const summary = {
+    routers: routerIds.length,
+    markedUsed: 0,
+    updatedBytes: 0,
+    exhausted: 0,
+    errors: [],
+  };
+  const now = new Date();
+
+  for (const rid of routerIds) {
+    try {
+      const router = await Router.findById(rid);
+      if (!router) continue;
+      const vouchers = await HotspotVoucher.find({
+        ...orgFilter,
+        routerId: rid,
+        $or: [{ validUntil: null }, { validUntil: { $gte: now } }],
+      });
+      if (!vouchers.length) continue;
+
+      const byCode = new Map(vouchers.map((v) => [String(v.code).toUpperCase(), v]));
+
+      await withRouterMikrotik(router, async (api) => {
+        const [activeRows, userRows] = await Promise.all([
+          hs.printHotspotActive(api),
+          hs.printHotspotUsers(api),
+        ]);
+
+        for (const row of activeRows) {
+          const user = String(row.user || row['user-name'] || row.name || '')
+            .trim()
+            .toUpperCase();
+          if (!user) continue;
+          const v = byCode.get(user);
+          if (!v) continue;
+          if (!v.usedAt) {
+            v.usedAt = now;
+            summary.markedUsed++;
+          }
+          v.lastSeenAt = now;
+          await v.save();
+        }
+
+        for (const row of userRows) {
+          const name = String(row.name || '')
+            .trim()
+            .toUpperCase();
+          if (!name) continue;
+          const v = byCode.get(name);
+          if (!v) continue;
+          const bi = rosBytes(row, ['bytes-in', 'bytes_in']);
+          const bo = rosBytes(row, ['bytes-out', 'bytes_out']);
+          let dirty = false;
+          if (bi !== (v.bytesIn || 0) || bo !== (v.bytesOut || 0)) {
+            v.bytesIn = bi;
+            v.bytesOut = bo;
+            summary.updatedBytes++;
+            dirty = true;
+          }
+          const limit = Number(v.dataLimitBytes);
+          if (Number.isFinite(limit) && limit > 0 && bi + bo >= limit) {
+            if (!v.usedAt) {
+              v.usedAt = now;
+              summary.markedUsed++;
+              dirty = true;
+            }
+            try {
+              const id = row['.id'] || v.mikrotikInternalId;
+              if (id) await hs.removeHotspotUser(api, id);
+              v.mikrotikInternalId = undefined;
+              dirty = true;
+              summary.exhausted++;
+            } catch (e) {
+              summary.errors.push({ id: String(v._id), message: e.message });
+            }
+          }
+          if (dirty) await v.save();
+        }
+      });
+    } catch (e) {
+      summary.errors.push({ routerId: String(rid), message: e.message });
+    }
+  }
+
+  return summary;
 }
 
 /** Remove router users for vouchers past validUntil (saves router resources). */

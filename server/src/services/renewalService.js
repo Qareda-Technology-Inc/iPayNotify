@@ -5,7 +5,10 @@ import { chargeForRenewal } from '../integrations/hubtel.js';
 import { syncPppoeAccountToRouter } from './pppoeService.js';
 import { notifyTransactionPaidSms } from './paymentSmsService.js';
 import { formatExpiryComment } from '../utils/expiryComment.js';
-import { purgeExpiredHotspotOnRouter } from './hotspotService.js';
+import {
+  purgeExpiredHotspotOnRouter,
+  reconcileHotspotVoucherUsage,
+} from './hotspotService.js';
 import { extendPaidUntilByPackage } from '../utils/duration.js';
 
 /**
@@ -208,6 +211,7 @@ export async function runMidnightBillingJob() {
   try {
     summary.autoRenew = await attemptAutoRenewals({ withinMs: 86400000 });
     summary.pppoeExpired = await enforceExpiredPppoeAccounts();
+    summary.hotspotUsage = await reconcileHotspotVoucherUsage();
     summary.hotspotPurge = await purgeExpiredHotspotOnRouter();
     summary.syncNearExpiry = await refreshPppoeSyncNearExpiry();
   } catch (e) {

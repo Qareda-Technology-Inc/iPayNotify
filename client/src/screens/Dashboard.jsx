@@ -200,7 +200,15 @@ export function Dashboard({ onSignOut }) {
           path="devices/wireguard"
           element={
             <SuperAdminGate>
-              <WireGuardRoutersPage />
+              <WireGuardRoutersPage mode="vpn" />
+            </SuperAdminGate>
+          }
+        />
+        <Route
+          path="super/wireguard"
+          element={
+            <SuperAdminGate>
+              <WireGuardRoutersPage mode="routers" />
             </SuperAdminGate>
           }
         />

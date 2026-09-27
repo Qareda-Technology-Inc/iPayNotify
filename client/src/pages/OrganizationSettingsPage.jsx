@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch, apiDownload } from '../api.js';
+import { OrgTeamSection } from '../components/OrgTeamSection.jsx';
 
 const STATUSES = ['active', 'trial', 'past_due', 'suspended'];
 
@@ -216,6 +217,12 @@ export function OrganizationSettingsPage() {
           {limitLabel(limits.maxSmsPerMonth)}
         </p>
       </div>
+
+      <OrgTeamSection
+        canManage={isSuper || me?.admin?.role === 'org_admin'}
+        usage={usage}
+        limits={limits}
+      />
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
         <h2 className="text-lg font-semibold text-white">Customer site links</h2>

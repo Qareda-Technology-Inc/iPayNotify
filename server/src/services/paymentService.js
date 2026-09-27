@@ -125,6 +125,7 @@ function quoteFromAccount(account, pkg) {
     packageName: pkg?.name || 'Custom',
     amountCents,
     currency: pkg?.currency || 'GHS',
+    durationDays: Number(pkg?.durationDays) > 0 ? Number(pkg.durationDays) : null,
     routerId: String(account.routerId?._id || account.routerId),
     routerName: account.routerId?.name || account.routerId?.comment || null,
     paidUntil: account.paidUntil,

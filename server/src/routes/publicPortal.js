@@ -59,7 +59,9 @@ publicPortalRouter.get(
       kind: 'hotspot',
       isActive: true,
     })
-      .select('name priceCents currency activeProfile durationDays description')
+      .select(
+        'name priceCents currency activeProfile durationDays durationAmount durationUnit dataLimitBytes timeLimitSeconds description'
+      )
       .sort({ name: 1 })
       .lean();
     res.json(list);
