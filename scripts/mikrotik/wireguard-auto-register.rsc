@@ -51,39 +51,27 @@
   :error "pubkey"
 }
 :put "QAREFI: 5 pubkey ok"
-
-# Only encode "+" (form bodies treat + as space). Do NOT search for "/" —
-# a script line containing the two-char string quote-slash-quote breaks /import
-# and the replace loop then inserts junk until the key is ~200 chars.
-:local pk $mypub
-:local plus "+"
-:local guard 0
-:while (([:find $pk $plus] != nil) && ($guard < 20)) do={
-  :local i [:find $pk $plus]
-  :local nxt ($i + 1)
-  :set pk ([:pick $pk 0 $i] . "%2B" . [:pick $pk $nxt [:len $pk]])
-  :set guard ($guard + 1)
-}
-:put ("QAREFI: 5b keylen=" . [:len $pk])
-:if (([:len $pk] < 40) || ([:len $pk] > 90)) do={
-  :put "QAREFI: FAIL key encode"
-  :error "encode"
+:put ("QAREFI: 5b keylen=" . [:len $mypub])
+:if (([:len $mypub] < 40) || ([:len $mypub] > 50)) do={
+  :put "QAREFI: FAIL pubkey length"
+  :error "pubkey"
 }
 
-:local url ($apibase . "/api/routers/register")
-:local httpdata ("publicKey=" . $pk . "&siteName=" . $sitename)
-:if ([:len $lansubnet] > 0) do={ :set httpdata ($httpdata . "&lanSubnet=" . $lansubnet) }
+# Raw key goes in a header so + and / are not rewritten (those chars break URL and form bodies).
+:local url ($apibase . "/api/routers/register?siteName=" . $sitename)
+:if ([:len $lansubnet] > 0) do={ :set url ($url . "&lanSubnet=" . $lansubnet) }
 :if ([:len $bootcode] > 0) do={
-  :set httpdata ($httpdata . "&boot=" . $bootcode)
+  :set url ($url . "&boot=" . $bootcode)
 } else={
-  :if ([:len $regtoken] > 0) do={ :set httpdata ($httpdata . "&token=" . $regtoken) }
+  :if ([:len $regtoken] > 0) do={ :set url ($url . "&token=" . $regtoken) }
 }
-:if ([:len $orgid] > 0) do={ :set httpdata ($httpdata . "&organizationId=" . $orgid) }
+:if ([:len $orgid] > 0) do={ :set url ($url . "&organizationId=" . $orgid) }
+:local hdr ("X-Wg-Pubkey: " . $mypub)
 
 :local tmpfile "q.txt"
 :put "QAREFI: 6 register"
 :do {
-  /tool fetch url=$url http-method=post http-data=$httpdata http-header-field="Content-Type: application/x-www-form-urlencoded" dst-path=$tmpfile mode=https keep-result=yes
+  /tool fetch url=$url http-method=post http-data="ok=1" http-header-field=$hdr dst-path=$tmpfile mode=https keep-result=yes
 } on-error={
   :put "QAREFI: FAIL register fetch"
   :do {

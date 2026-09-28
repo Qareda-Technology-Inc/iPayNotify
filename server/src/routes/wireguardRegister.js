@@ -84,9 +84,10 @@ async function handleWireGuardRegister(req, res) {
       }
 
       const input = mergeInput(req);
+      const headerKey = String(req.get('x-wg-pubkey') || req.get('x-wg-key') || '').trim();
       const publicKey = normalizeWireGuardPublicKey(
-        input.publicKey || input.public_key,
-        input.keyFormat || input.key_format
+        headerKey || input.publicKey || input.public_key,
+        headerKey ? 'raw' : input.keyFormat || input.key_format
       );
       const siteName = sanitizeSiteName(input.siteName || input.site_name);
       const lanSubnet = String(input.lanSubnet || input.lan_subnet || '').trim();
