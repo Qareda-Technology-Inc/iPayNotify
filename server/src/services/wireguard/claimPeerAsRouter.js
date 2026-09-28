@@ -3,6 +3,7 @@ import { WireGuardPeer } from '../../models/WireGuardPeer.js';
 import { withRouterMikrotik } from '../../mikrotik/routeros.js';
 import { assertOrgLimit } from '../orgLimitsService.js';
 import { config } from '../../config.js';
+import { syncWireGuardPeerToVps } from './wgPeerSync.js';
 
 const VPN_MGMT_COMMENT = 'QareFi: VPN management';
 
@@ -53,6 +54,20 @@ export async function claimWireGuardPeerAsRouter({
   const name = String(siteName || peer.siteName || '').trim() || peer.tunnelIp;
   const t = String(transport || 'ssh').toLowerCase() === 'api' ? 'api' : 'ssh';
   const host = peer.tunnelIp;
+
+  try {
+    await syncWireGuardPeerToVps({
+      publicKey: peer.publicKey,
+      tunnelIp: peer.tunnelIp,
+      lanSubnet: peer.lanSubnet,
+    });
+  } catch (e) {
+    const err = new Error(
+      `Could not refresh the WireGuard peer for ${host} on the VPS: ${e?.message || e}`
+    );
+    err.status = Number(e?.status) || 502;
+    throw err;
+  }
 
   const ephemeral = {
     host,
@@ -109,9 +124,17 @@ export async function claimWireGuardPeerAsRouter({
       }
     });
   } catch (e) {
+    const raw = String(e?.message || e);
+    const noRoute = /no route to host|channel open failure|EHOSTUNREACH/i.test(raw);
     const err = new Error(
-      `Tunnel is up (${host}) but login failed: ${e?.message || e}. ` +
-        `Confirm the MikroTik username/password and that SSH/API is enabled.`
+      noRoute
+        ? `Router ${host} is registered, but the VPS still has no path to it (${raw}). ` +
+          `This is the WireGuard handshake, not the MikroTik password. ` +
+          `On the router: /interface wireguard peers print detail — last-handshake must be recent, and the peer endpoint must be the VPS. ` +
+          `On the VPS: sudo wg show (allowed-ips includes ${host}/32 and a recent handshake); ping ${host}. ` +
+          `UDP 51820 from the router to the VPS must be open.`
+        : `Reached the tunnel address ${host} but login failed: ${raw}. ` +
+          `Confirm the MikroTik username/password and that IP → Services → ssh (or api) is enabled.`
     );
     err.status = 502;
     throw err;
