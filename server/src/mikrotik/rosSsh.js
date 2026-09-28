@@ -208,17 +208,6 @@ export function parseDetailPrintOutput(stdout) {
   return rows;
 }
 
-/** A new as-value / detail row, not a terminal wrap of the previous one. */
-function isNewAsValueRecord(line) {
-  const t = String(line || '').trim();
-  if (/^\.id\s*=/i.test(t)) return true;
-  if (/^(?:#\s*)?\d+\s+\.id\s*=/i.test(t)) return true;
-  if (/^\*[0-9A-Fa-f]+\s+\S+=/.test(t)) return true;
-  /* Detail table: `0 user=…` or `0 R user=…` */
-  if (/^\d+\s+(?:[A-Z]{1,4}\s+)?[A-Za-z_][A-Za-z0-9_.-]*=/.test(t)) return true;
-  return false;
-}
-
 function isAsValueNoise(line) {
   const t = String(line || '').trim();
   if (!t) return true;
@@ -244,14 +233,15 @@ function joinWrappedAsValueLines(stdout) {
       cur = trimmed;
       continue;
     }
-    if (isNewAsValueRecord(trimmed)) {
-      records.push(cur);
-      cur = trimmed;
+    const tail = cur.split(';').pop();
+    const midToken = Boolean(tail) && !tail.includes('=');
+    const boundary = cur.endsWith('=') || cur.endsWith(';') || trimmed.startsWith(';') || midToken;
+    if (boundary || !trimmed.includes('=')) {
+      cur += trimmed;
       continue;
     }
-    if (trimmed.startsWith(';') || cur.endsWith(';') || cur.endsWith('=')) cur += trimmed;
-    else if (/^[A-Za-z_][A-Za-z0-9_.-]*=/.test(trimmed)) cur += ` ${trimmed}`;
-    else cur += trimmed;
+    records.push(cur);
+    cur = trimmed;
   }
   if (cur) records.push(cur);
   return records;
@@ -302,8 +292,13 @@ export function parseAsValuePrintOutput(stdout) {
         if (k === 'id' && !obj['.id']) obj['.id'] = v.startsWith('*') ? v : v;
       }
     } else if (line.includes('=')) {
-      /* Terse / detail one-liner: space-separated key=value (values may be quoted) */
-      Object.assign(obj, parseRosKvSegment(line));
+      const chained = parseEqualsChain(line);
+      if (chained) {
+        Object.assign(obj, chained);
+      } else {
+        /* Terse / detail one-liner: space-separated key=value (values may be quoted) */
+        Object.assign(obj, parseRosKvSegment(line));
+      }
       /* Normalize `.id` / leading dots */
       for (const k of Object.keys(obj)) {
         if (k.startsWith('.') && k.length > 1) {
@@ -315,7 +310,54 @@ export function parseAsValuePrintOutput(stdout) {
 
     if (Object.keys(obj).length > 0) rows.push(obj);
   }
-  return rows;
+  return mergeWrappedSessionFragments(rows);
+}
+
+function parseEqualsChain(line) {
+  const raw = String(line || '').trim();
+  if (/\s/.test(raw)) return null;
+  const body = raw.replace(/^=+/, '');
+  const parts = body.split('=');
+  if (parts.length < 4 || parts.length % 2 !== 0) return null;
+  if (!/^[A-Za-z0-9_.-]+$/.test(parts[0].replace(/^\./, ''))) return null;
+  const obj = {};
+  for (let i = 0; i < parts.length; i += 2) {
+    const k = parts[i];
+    if (!k || !/^[A-Za-z0-9_.-]+$/.test(k)) return null;
+    obj[k] = parts[i + 1];
+  }
+  return obj;
+}
+
+/** Second physical line of one session: uptime/bytes with no username of its own. */
+function mergeWrappedSessionFragments(rows) {
+  const merged = [];
+  for (const row of rows) {
+    const prev = merged[merged.length - 1];
+    const prevIdentity = prev && (prev.user || prev.name || prev.address || prev['mac-address']);
+    const rowUser = row.user || row.name;
+    const rowStats = row.uptime || row['bytes-in'] || row['bytes-out'] || row['session-time-left'];
+    if (prev && prevIdentity && !prev.uptime && !rowUser && rowStats) {
+      Object.assign(prev, row);
+      continue;
+    }
+    if (
+      prev &&
+      prevIdentity &&
+      prev.uptime &&
+      !prev['bytes-in'] &&
+      !prev['bytes-out'] &&
+      !rowUser &&
+      !row.address &&
+      !row['mac-address'] &&
+      (row['bytes-in'] || row['bytes-out'])
+    ) {
+      Object.assign(prev, row);
+      continue;
+    }
+    merged.push(row);
+  }
+  return merged;
 }
 
 /**
