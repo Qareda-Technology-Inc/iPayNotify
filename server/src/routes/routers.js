@@ -66,6 +66,44 @@ routersApi.get(
 );
 
 /**
+ * Ready-to-paste MikroTik Terminal commands (/tool fetch + /import).
+ * GET /api/routers/install-script/commands?siteName=
+ */
+routersApi.get(
+  '/install-script/commands',
+  asyncHandler(async (req, res) => {
+    const siteName = String(req.query.siteName || '').trim();
+    const apiBase = String(config.publicApiUrl || '')
+      .trim()
+      .replace(/\/$/, '');
+    if (!apiBase) {
+      return res.status(503).json({
+        error:
+          'PUBLIC_API_URL is not set on the server. Set it to your live API origin (e.g. https://ipaynotifyserver.onrender.com) so routers can /tool fetch the script.',
+      });
+    }
+    const q = new URLSearchParams();
+    const token = String(config.wireguard?.registerToken || '').trim();
+    if (token) q.set('token', token);
+    if (req.organizationId) q.set('organizationId', String(req.organizationId));
+    if (siteName) q.set('siteName', siteName);
+    const qs = q.toString();
+    const fetchUrl = `${apiBase}/api/routers/bootstrap.rsc${qs ? `?${qs}` : ''}`;
+    const fileName = 'qarefi-install.rsc';
+    const fetchCmd = `/tool fetch url="${fetchUrl}" dst-path=${fileName}`;
+    const importCmd = `/import ${fileName}`;
+    res.json({
+      fetchUrl,
+      fileName,
+      fetchCmd,
+      importCmd,
+      oneShot: `${fetchCmd}; :delay 2s; ${importCmd}`,
+      hint: 'Paste oneShot (or fetchCmd then importCmd) into MikroTik Terminal while the router has internet.',
+    });
+  })
+);
+
+/**
  * Active WireGuard tunnel peers for this org (pending claim + claimed).
  * GET /api/routers/wireguard-peers?pending=1
  */

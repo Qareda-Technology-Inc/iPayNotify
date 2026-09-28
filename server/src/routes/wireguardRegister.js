@@ -192,3 +192,38 @@ wireguardRegisterRouter.get(
     ]);
   })
 );
+
+/**
+ * Public .rsc download for MikroTik /tool fetch (no JWT).
+ * GET /api/routers/bootstrap.rsc?token=&organizationId=&siteName=
+ * token must match WG_REGISTER_TOKEN when that env is set.
+ */
+wireguardRegisterRouter.get(
+  ['/bootstrap.rsc', '/bootstrap'],
+  asyncHandler(async (req, res) => {
+    const wg = config.wireguard;
+    const token = String(req.query.token || req.get('x-wg-register-token') || '').trim();
+    if (wg?.registerToken) {
+      if (!token || token !== wg.registerToken) {
+        return res.status(401).type('text/plain').send('error=Invalid or missing token\n');
+      }
+    }
+    const organizationId = String(req.query.organizationId || req.query.orgId || '').trim();
+    const siteName = String(req.query.siteName || '').trim();
+    const lanSubnet = String(req.query.lanSubnet || '').trim();
+    if (lanSubnet && !IPV4_CIDR_RE.test(lanSubnet)) {
+      return res.status(400).type('text/plain').send('error=lanSubnet must be IPv4 CIDR\n');
+    }
+    const { buildWireGuardInstallScript } = await import(
+      '../services/wireguard/buildInstallScript.js'
+    );
+    const script = buildWireGuardInstallScript({
+      ...(organizationId ? { organizationId } : {}),
+      ...(siteName ? { siteName } : {}),
+      ...(lanSubnet ? { lanSubnet } : {}),
+    });
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="wireguard-auto-register.rsc"');
+    res.send(script);
+  })
+);

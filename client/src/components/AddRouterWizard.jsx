@@ -24,6 +24,8 @@ export function AddRouterWizard({ onCreated, onCancel }) {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [fetchCmds, setFetchCmds] = useState(null);
+  const [copied, setCopied] = useState(false);
 
   const loadPeers = useCallback(async () => {
     try {
@@ -69,12 +71,40 @@ export function AddRouterWizard({ onCreated, onCancel }) {
       a.click();
       URL.revokeObjectURL(url);
       setInfo(
-        'Script downloaded. On the MikroTik (Winbox on site Wi‑Fi): Files → Upload → Terminal: /import that file. Then come back here — we poll every 5s for the tunnel.'
+        'Script downloaded. Prefer /tool fetch below if the router has internet — or Winbox → Files → Upload → /import.'
       );
     } catch (err) {
       setError(err.message || 'Could not download script');
     } finally {
       setDownloading(false);
+    }
+  }
+
+  async function loadFetchCommands() {
+    setError('');
+    setInfo('');
+    try {
+      const q = new URLSearchParams();
+      if (siteName.trim()) q.set('siteName', siteName.trim());
+      const data = await apiFetch(
+        `/api/routers/install-script/commands${q.toString() ? `?${q}` : ''}`
+      );
+      setFetchCmds(data);
+      setInfo('Copy the Terminal command and paste it on the MikroTik — it fetches and imports the script.');
+    } catch (err) {
+      setError(err.message || 'Could not build fetch URL');
+      setFetchCmds(null);
+    }
+  }
+
+  async function copyOneShot() {
+    if (!fetchCmds?.oneShot) return;
+    try {
+      await navigator.clipboard.writeText(fetchCmds.oneShot);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Could not copy — select the command and copy manually.');
     }
   }
 
@@ -204,20 +234,43 @@ export function AddRouterWizard({ onCreated, onCancel }) {
                 />
               </label>
               <ol className="list-decimal space-y-1.5 pl-4 text-xs text-slate-400">
-                <li>Download the .rsc below</li>
-                <li>Winbox → Files → Upload the file</li>
+                <li>Get the Terminal command (fetch) or download the .rsc</li>
                 <li>
-                  Terminal: <span className="font-mono text-emerald-300/90">/import wireguard-auto-register.rsc</span>
+                  On MikroTik Terminal paste the one-shot fetch+import (router needs internet)
                 </li>
                 <li>Open tab “2. Finish” when the peer appears (auto-refresh)</li>
               </ol>
               <button
                 type="button"
+                onClick={loadFetchCommands}
+                className="flex h-11 w-full items-center justify-center rounded-xl bg-emerald-600 text-sm font-semibold text-white hover:bg-emerald-500"
+              >
+                Get /tool fetch command
+              </button>
+              {fetchCmds?.oneShot ? (
+                <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-950/60 p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    Paste in MikroTik Terminal
+                  </p>
+                  <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-emerald-200/90">
+                    {fetchCmds.oneShot}
+                  </pre>
+                  <button
+                    type="button"
+                    onClick={copyOneShot}
+                    className="w-full rounded-lg border border-slate-600 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+                  >
+                    {copied ? 'Copied' : 'Copy command'}
+                  </button>
+                </div>
+              ) : null}
+              <button
+                type="button"
                 disabled={downloading}
                 onClick={downloadScript}
-                className="flex h-11 w-full items-center justify-center rounded-xl bg-emerald-600 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                className="flex h-10 w-full items-center justify-center rounded-xl border border-slate-600 text-sm font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50"
               >
-                {downloading ? 'Preparing…' : 'Download install script (.rsc)'}
+                {downloading ? 'Preparing…' : 'Or download .rsc file'}
               </button>
               {peers.length ? (
                 <button
