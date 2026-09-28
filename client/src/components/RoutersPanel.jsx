@@ -576,8 +576,8 @@ function RouterDetail({
             </div>
           ) : (
             <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3 text-sm text-slate-400">
-              No VPN tunnel on this site yet. Use <strong className="text-slate-200">Add router</strong>{' '}
-              to provision one.
+              No VPN tunnel linked yet. Use <strong className="text-slate-200">Add router</strong> →
+              download the .rsc, import it on the MikroTik, then finish with the admin login.
             </div>
           )}
 

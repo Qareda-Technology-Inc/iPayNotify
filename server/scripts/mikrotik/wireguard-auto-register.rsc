@@ -1,14 +1,16 @@
 # WireGuard auto-register for RouterOS v7+
 # -----------------------------------------------------------------------------
-# Same script on every router — SITE_NAME and LAN_SUBNET auto-detect unless set.
+# ZenFi-style: router phones home to the cloud API (no need for cloud → LAN).
 #
-# 1) Optional: set SITE_NAME / LAN_SUBNET below (leave "auto" to detect)
-# 2) /import file-name=wireguard-auto-register.rsc
+# 1) Download this .rsc from QareFi (Add router → Download script)
+# 2) Winbox → Files → Upload, then Terminal: /import wireguard-auto-register.rsc
 #    or paste into /system script and run
-# 3) Optional: System → Scheduler → on startup once
+# 3) In QareFi: refresh → peer appears → enter SSH username/password to finish
 # -----------------------------------------------------------------------------
 
 :local API_BASE "https://ipaynotifyserver.onrender.com"
+# Filled by QareFi when you download (links peer to your organization)
+:local ORG_ID ""
 # "auto" = /system identity name (set a clear identity per site in Winbox)
 :local SITE_NAME "auto"
 # "auto" = first DHCP server network, else bridge LAN address as /24
@@ -17,6 +19,8 @@
 :local WG_IFACE "wg-qarefi"
 :local WG_LISTEN_PORT 51820
 :local WG_MTU 1420
+:local WG_POOL "10.66.54.0/24"
+:local VPN_MGMT_COMMENT "QareFi: VPN management"
 
 :log info "wg-auto-register: starting"
 
@@ -52,7 +56,6 @@
       :local slash [:find $addr "/"]
       :if ($slash != nil) do={
         :local ipOnly [:pick $addr 0 $slash]
-        # crude /24: a.b.c.0/24 from a.b.c.d
         :local d1 [:find $ipOnly "."]
         :local d2 [:find $ipOnly "." ($d1 + 1)]
         :local d3 [:find $ipOnly "." ($d2 + 1)]
@@ -93,6 +96,9 @@
 :if ([:len $REGISTER_TOKEN] > 0) do={
   :set httpData ($httpData . "&token=" . $REGISTER_TOKEN)
 }
+:if ([:len $ORG_ID] > 0) do={
+  :set httpData ($httpData . "&organizationId=" . $ORG_ID)
+}
 
 :local url ($API_BASE . "/api/routers/register")
 :local tmpFile "wg-register-response.txt"
@@ -117,7 +123,6 @@
   :error "blank response"
 }
 
-# Parse plain-text key=value lines (no JSON on RouterOS)
 :local tunnelIp ""
 :local serverPublicKey ""
 :local endpoint ""
@@ -125,7 +130,6 @@
 :local okFlag ""
 :local errMsg ""
 
-# Walk the response by newline
 :local pos 0
 :local textLen [:len $raw]
 :while ($pos < $textLen) do={
@@ -138,7 +142,6 @@
     :set line [:pick $raw $pos $nl]
     :set pos ($nl + 1)
   }
-  # strip CR
   :local cr [:find $line "\r"]
   :if ($cr != nil) do={ :set line [:pick $line 0 $cr] }
 
@@ -160,7 +163,7 @@
   :error ("registration failed: " . $errMsg)
 }
 
-:if ([:len $allowedIps] = 0) do={ :set allowedIps "10.66.54.0/24" }
+:if ([:len $allowedIps] = 0) do={ :set allowedIps $WG_POOL }
 
 :local colon [:find $endpoint ":"]
 :if ($colon = nil) do={
@@ -182,8 +185,26 @@
 :if ([:len [/interface wireguard peers find where interface=$WG_IFACE public-key="$serverPublicKey"]] = 0) do={
   /interface wireguard peers add interface=$WG_IFACE public-key="$serverPublicKey" endpoint-address=$epHost endpoint-port=$epPort allowed-address="$allowedIps" persistent-keepalive=25s comment="QareFi VPS"
 } else={
-  /interface wireguard peers set [find where interface=$WG_IFACE public-key="$serverPublicKey"] endpoint-address=$epHost endpoint-port=$epPort allowed-address="$allowedIps" persistent-keepalive=25s
+  /interface wireguard peers set [find where interface=$WG_IFACE public-key="$serverPublicKey"] endpoint-address=$epHost endpoint-port=$epPort allowed-address="$allowedIps" persistent-keepalive=25s comment="QareFi VPS"
 }
 
-:log info "wg-auto-register: SUCCESS — WireGuard peer and address configured"
+# Allow cloud management over the VPN (SSH / Winbox / API)
+:if ([:len [/ip firewall filter find where comment=$VPN_MGMT_COMMENT]] = 0) do={
+  :do {
+    /ip firewall filter add chain=input action=accept src-address=$WG_POOL comment=$VPN_MGMT_COMMENT place-before=0
+  } on-error={
+    /ip firewall filter add chain=input action=accept src-address=$WG_POOL comment=$VPN_MGMT_COMMENT
+  }
+}
+
+:do {
+  :local sshId [/ip service find where name="ssh"]
+  :if ([:len $sshId] > 0) do={ /ip service set $sshId disabled=no }
+  :local apiId [/ip service find where name="api"]
+  :if ([:len $apiId] > 0) do={ /ip service set $apiId disabled=no }
+  :local wbId [/ip service find where name="winbox"]
+  :if ([:len $wbId] > 0) do={ /ip service set $wbId disabled=no }
+} on-error={}
+
+:log info ("wg-auto-register: SUCCESS — tunnelIp=" . $tunnelIp . " — finish Add router in QareFi with SSH login")
 :do { /file remove [find where name=$tmpFile] } on-error={}

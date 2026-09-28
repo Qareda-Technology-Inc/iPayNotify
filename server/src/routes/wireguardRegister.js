@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { config } from '../config.js';
 import { WireGuardPeer } from '../models/WireGuardPeer.js';
@@ -39,9 +40,15 @@ function sanitizeErr(msg) {
     .slice(0, 200);
 }
 
+function parseOrgId(raw) {
+  const s = String(raw || '').trim();
+  if (!s || !mongoose.isValidObjectId(s)) return null;
+  return new mongoose.Types.ObjectId(s);
+}
+
 /**
  * POST /api/routers/register
- * Body/query: publicKey, siteName, lanSubnet?[, token]
+ * Body/query: publicKey, siteName, lanSubnet?[, token][, organizationId]
  * Response: plain text key=value (RouterOS-friendly). Never JSON.
  */
 wireguardRegisterRouter.post(
@@ -63,6 +70,9 @@ wireguardRegisterRouter.post(
       const token = String(
         input.token || input.registerToken || req.get('x-wg-register-token') || ''
       ).trim();
+      const organizationId = parseOrgId(
+        input.organizationId || input.organization_id || input.orgId
+      );
 
       if (wg.registerToken) {
         if (!token || token !== wg.registerToken) {
@@ -86,12 +96,12 @@ wireguardRegisterRouter.post(
         ]);
       }
 
-      /** Idempotent: same public key → return existing assignment */
       let peer = await WireGuardPeer.findOne({ publicKey });
       if (peer) {
         peer.lastSeen = new Date();
         if (siteName && siteName !== peer.siteName) peer.siteName = siteName;
         if (lanSubnet && lanSubnet !== peer.lanSubnet) peer.lanSubnet = lanSubnet;
+        if (organizationId && !peer.organizationId) peer.organizationId = organizationId;
         try {
           await syncWireGuardPeerToVps({
             publicKey: peer.publicKey,
@@ -115,13 +125,19 @@ wireguardRegisterRouter.post(
           publicKey,
           tunnelIp,
           lanSubnet: lanSubnet || '',
+          kind: 'router',
           status: 'active',
           lastSeen: new Date(),
+          ...(organizationId ? { organizationId } : {}),
         });
       } catch (e) {
         if (e?.code === 11000) {
           peer = await WireGuardPeer.findOne({ publicKey });
           if (peer) {
+            if (organizationId && !peer.organizationId) {
+              peer.organizationId = organizationId;
+              await peer.save();
+            }
             return plainText(res, 200, [...successLines(peer, wg), 'ok=true', 'existing=true']);
           }
         }
@@ -151,6 +167,7 @@ wireguardRegisterRouter.post(
       console.log('[wireguard] registered', {
         siteName,
         tunnelIp,
+        organizationId: organizationId ? String(organizationId) : null,
         publicKeyPrefix: `${publicKey.slice(0, 12)}…`,
       });
       return plainText(res, 201, [...successLines(peer, wg), 'ok=true', 'existing=false']);

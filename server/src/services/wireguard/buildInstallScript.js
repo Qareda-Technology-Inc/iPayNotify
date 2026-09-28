@@ -26,8 +26,8 @@ function escapeRosString(s) {
 }
 
 /**
- * Build a ready-to-import .rsc with API_BASE + REGISTER_TOKEN filled from server config.
- * SITE_NAME / LAN_SUBNET stay "auto" so each router detects its own identity + LAN.
+ * Build a ready-to-import .rsc with API_BASE + REGISTER_TOKEN (+ optional ORG_ID) filled.
+ * SITE_NAME / LAN_SUBNET stay "auto" unless overridden so each router detects its own.
  */
 export function buildWireGuardInstallScript(overrides = {}) {
   let body = loadTemplate();
@@ -39,6 +39,8 @@ export function buildWireGuardInstallScript(overrides = {}) {
   const token = String(
     overrides.registerToken != null ? overrides.registerToken : config.wireguard?.registerToken || ''
   ).trim();
+  const orgId = String(overrides.organizationId || '').trim();
+  const pool = String(config.wireguard?.tunnelPool || '10.66.54.0/24').trim();
 
   body = body.replace(
     /:local API_BASE "[^"]*"/,
@@ -48,8 +50,15 @@ export function buildWireGuardInstallScript(overrides = {}) {
     /:local REGISTER_TOKEN "[^"]*"/,
     `:local REGISTER_TOKEN "${escapeRosString(token)}"`
   );
+  body = body.replace(
+    /:local ORG_ID "[^"]*"/,
+    `:local ORG_ID "${escapeRosString(orgId)}"`
+  );
+  body = body.replace(
+    /:local WG_POOL "[^"]*"/,
+    `:local WG_POOL "${escapeRosString(pool)}"`
+  );
 
-  // Optional overrides when admin wants a fixed name/LAN for one download
   if (overrides.siteName != null && String(overrides.siteName).trim()) {
     body = body.replace(
       /:local SITE_NAME "[^"]*"/,

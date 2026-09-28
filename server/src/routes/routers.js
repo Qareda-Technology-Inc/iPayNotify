@@ -24,22 +24,82 @@ import { logOrgAudit } from '../services/orgAuditService.js';
 import { assertOrgLimit } from '../services/orgLimitsService.js';
 import { WireGuardPeer } from '../models/WireGuardPeer.js';
 import { provisionMikrotikRouter } from '../services/wireguard/provisionRouter.js';
+import { claimWireGuardPeerAsRouter } from '../services/wireguard/claimPeerAsRouter.js';
+import { buildWireGuardInstallScript } from '../services/wireguard/buildInstallScript.js';
 import { orgQuery } from '../utils/tenantScope.js';
+import { isWgTunnelHost } from '../mikrotik/wgJump.js';
 
 export const routersApi = express.Router();
 
 routersApi.use(requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'));
 
+const IPV4_CIDR_RE =
+  /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\/(?:3[0-2]|[12]?\d)$/;
+
 /**
- * Active WireGuard tunnel peers (platform VPN) — pick tunnel IP when adding a MikroTik.
- * GET /api/routers/wireguard-peers
+ * Download MikroTik .rsc — router phones home (ZenFi-style). No cloud→LAN needed.
+ * GET /api/routers/install-script?siteName=
+ */
+routersApi.get(
+  '/install-script',
+  asyncHandler(async (req, res) => {
+    const siteName = String(req.query.siteName || '').trim();
+    const lanSubnet = String(req.query.lanSubnet || '').trim();
+    if (lanSubnet && !IPV4_CIDR_RE.test(lanSubnet)) {
+      return res.status(400).json({ error: 'lanSubnet must be IPv4 CIDR' });
+    }
+    if (!config.publicApiUrl) {
+      console.warn('[install-script] PUBLIC_API_URL is empty — script may point at wrong host');
+    }
+    const script = buildWireGuardInstallScript({
+      organizationId: req.organizationId ? String(req.organizationId) : '',
+      ...(siteName ? { siteName } : {}),
+      ...(lanSubnet ? { lanSubnet } : {}),
+    });
+    const fname = siteName
+      ? `qarefi-${siteName.replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 40)}.rsc`
+      : 'wireguard-auto-register.rsc';
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+    res.send(script);
+  })
+);
+
+/**
+ * Active WireGuard tunnel peers for this org (pending claim + claimed).
+ * GET /api/routers/wireguard-peers?pending=1
  */
 routersApi.get(
   '/wireguard-peers',
-  asyncHandler(async (_req, res) => {
-    const items = await WireGuardPeer.find({ status: { $ne: 'disabled' } })
-      .sort({ siteName: 1 })
-      .select('siteName tunnelIp lanSubnet status lastSeen')
+  asyncHandler(async (req, res) => {
+    const pendingOnly = String(req.query.pending || '') === '1' || req.query.pending === 'true';
+    const q = {
+      status: { $ne: 'disabled' },
+      kind: { $ne: 'client' },
+    };
+    if (pendingOnly) {
+      q.$and = [
+        {
+          $or: [{ claimedRouterId: null }, { claimedRouterId: { $exists: false } }],
+        },
+        {
+          $or: [
+            { organizationId: req.organizationId },
+            { organizationId: null },
+            { organizationId: { $exists: false } },
+          ],
+        },
+      ];
+    } else if (req.organizationId) {
+      q.$or = [
+        { organizationId: req.organizationId },
+        { organizationId: null },
+        { organizationId: { $exists: false } },
+      ];
+    }
+    const items = await WireGuardPeer.find(q)
+      .sort({ updatedAt: -1 })
+      .select('siteName tunnelIp lanSubnet status lastSeen organizationId claimedRouterId createdAt')
       .lean();
     res.json({
       items: items.map((p) => ({
@@ -49,13 +109,52 @@ routersApi.get(
         lanSubnet: p.lanSubnet || '',
         status: p.status,
         lastSeen: p.lastSeen,
+        claimed: Boolean(p.claimedRouterId),
+        organizationId: p.organizationId ? String(p.organizationId) : null,
+        createdAt: p.createdAt,
       })),
     });
   })
 );
 
 /**
- * Guided add: SSH to public IP → create WireGuard → save router on tunnel IP.
+ * After .rsc: attach credentials → billing Router on tunnel IP.
+ * POST /api/routers/from-peer
+ */
+routersApi.post(
+  '/from-peer',
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await claimWireGuardPeerAsRouter({
+        organizationId: req.organizationId,
+        peerId: req.body?.peerId || req.body?.id,
+        username: req.body?.username ?? req.body?.apiUser ?? req.body?.sshUser,
+        password: req.body?.password ?? req.body?.apiPassword ?? req.body?.sshPassword,
+        siteName: req.body?.siteName || req.body?.name,
+        transport: req.body?.transport,
+        allowRemoteAccess: req.body?.allowRemoteAccess !== false,
+      });
+      void logOrgAudit({
+        organizationId: req.organizationId,
+        actorEmail: req.admin?.email,
+        action: 'router.from_peer',
+        meta: {
+          routerId: result.router.id,
+          tunnelIp: result.wireguard.tunnelIp,
+          peerId: result.wireguard.peerId,
+        },
+      });
+      res.status(201).json(result);
+    } catch (e) {
+      const status = e.status && Number(e.status) >= 400 ? e.status : 500;
+      return res.status(status).json({ error: e.message || 'Could not attach router' });
+    }
+  })
+);
+
+/**
+ * Guided add: SSH to reachable host → create WireGuard → save router on tunnel IP.
+ * Prefer install-script + from-peer for sites behind NAT (cloud cannot reach LAN).
  * POST /api/routers/provision
  */
 routersApi.post(
@@ -128,7 +227,9 @@ routersApi.get(
       .lean();
 
     const tunnelHosts = [
-      ...new Set(list.map((r) => String(r.host || '').trim()).filter((h) => /^10\.10\.10\.\d+$/.test(h))),
+      ...new Set(
+        list.map((r) => String(r.host || '').trim()).filter((h) => isWgTunnelHost(h))
+      ),
     ];
     let peersByIp = new Map();
     if (tunnelHosts.length) {
@@ -142,7 +243,7 @@ routersApi.get(
       list.map((r) => {
         const host = String(r.host || '').trim();
         const peer = peersByIp.get(host);
-        const isTunnel = /^10\.10\.10\.\d+$/.test(host);
+        const isTunnel = isWgTunnelHost(host);
         return {
           ...r,
           wireguard: isTunnel

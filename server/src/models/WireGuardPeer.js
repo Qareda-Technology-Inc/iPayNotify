@@ -13,6 +13,20 @@ const wireGuardPeerSchema = new mongoose.Schema(
     tunnelIp: { type: String, required: true, trim: true, unique: true },
     /** Optional LAN CIDR behind the router, e.g. 192.168.88.0/24 */
     lanSubnet: { type: String, trim: true, default: '' },
+    /** Org that downloaded the install script / owns this peer (router self-register) */
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      default: null,
+      index: true,
+    },
+    /** When linked to a billing MikroTik Router row */
+    claimedRouterId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Router',
+      default: null,
+      index: true,
+    },
     /** router = site MikroTik; client = phone/laptop admin access */
     kind: {
       type: String,
@@ -34,5 +48,6 @@ const wireGuardPeerSchema = new mongoose.Schema(
 );
 
 wireGuardPeerSchema.index({ createdAt: -1 });
+wireGuardPeerSchema.index({ organizationId: 1, claimedRouterId: 1 });
 
 export const WireGuardPeer = mongoose.model('WireGuardPeer', wireGuardPeerSchema);

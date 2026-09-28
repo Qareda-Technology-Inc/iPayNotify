@@ -524,11 +524,20 @@ export async function provisionMikrotikRouter({
   }
 
   const connectHost = parsed.host;
-  if (isPrivateLanHost(connectHost) && !isWgTunnelHost(connectHost)) {
+  /*
+   * Cloud APIs cannot reach site LAN (your phone/laptop being on Wi‑Fi does not help —
+   * the request still hits the remote API). Allow private hosts only when the API itself
+   * is local/dev, or ALLOW_PRIVATE_ROUTER_HOST=1 (on-prem API).
+   */
+  const allowPrivateHost =
+    process.env.ALLOW_PRIVATE_ROUTER_HOST === '1' ||
+    process.env.ALLOW_PRIVATE_ROUTER_HOST === 'true' ||
+    process.env.NODE_ENV !== 'production';
+  if (isPrivateLanHost(connectHost) && !allowPrivateHost) {
     const err = new Error(
-      `${connectHost} is a private LAN IP. The cloud API cannot reach site LAN addresses. ` +
-        `Use the existing WireGuard tunnel IP (e.g. 10.66.54.2) to re-link this router to the cloud DB, ` +
-        `or add the router from a machine that can reach it and complete WireGuard first.`
+      `${connectHost} is a private LAN IP. The live cloud API cannot reach site LAN addresses — ` +
+        `being on that Wi‑Fi does not change this. Use the WireGuard tunnel IP (e.g. 10.66.54.2), ` +
+        `or run the API on the LAN (localhost / ALLOW_PRIVATE_ROUTER_HOST=1) and add via the LAN IP first.`
     );
     err.status = 400;
     throw err;
