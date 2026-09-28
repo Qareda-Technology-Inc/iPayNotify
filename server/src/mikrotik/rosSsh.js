@@ -235,7 +235,10 @@ function joinWrappedAsValueLines(stdout) {
     }
     const tail = cur.split(';').pop();
     const midToken = Boolean(tail) && !tail.includes('=');
-    const boundary = cur.endsWith('=') || cur.endsWith(';') || trimmed.startsWith(';') || midToken;
+    /* PPPoE interface names are `<pppoe-login>`; a wrap can split inside the brackets. */
+    const unclosedPppoe = /<pppoe-[^>]*$/i.test(cur);
+    const boundary =
+      cur.endsWith('=') || cur.endsWith(';') || trimmed.startsWith(';') || midToken || unclosedPppoe;
     if (boundary || !trimmed.includes('=')) {
       cur += trimmed;
       continue;
@@ -271,8 +274,13 @@ export function parseAsValuePrintOutput(stdout) {
     const retEq = /^ret\s*=\s*(.+)$/i.exec(line);
     if (retEq) line = retEq[1].trim();
 
-    /* Drop leading row index: `0 name=…` or `0;.id=*1;…` */
-    line = line.replace(/^\d+\s+/, '').replace(/^\d+;/, '');
+    /* Drop a row index only (`0;.id=`). A leading voucher code (`482193;address=`) is the username. */
+    line = line.replace(/^\d+\s+(?=[A-Za-z_.])/ , '');
+    if (/^\d+;\.id=/i.test(line)) line = line.replace(/^\d+;/, '');
+    const bareCode = /^(\d{4,});([\s\S]*)$/.exec(line);
+    if (bareCode && !/(?:^|;)user=/.test(line)) {
+      line = `user=${bareCode[1]};${bareCode[2]}`;
+    }
 
     const obj = {};
     const parts = line.includes(';') ? line.split(';') : null;

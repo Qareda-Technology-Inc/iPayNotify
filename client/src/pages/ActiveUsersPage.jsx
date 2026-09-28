@@ -100,7 +100,7 @@ export function ActiveUsersPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Active users</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Live Hotspot and PPP sessions from each site. Refresh keeps the last snapshot visible.
+            Live Hotspot and PPPoE sessions from each site. Refresh keeps the last snapshot visible.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -161,7 +161,7 @@ export function ActiveUsersPage() {
           {[
             { id: 'all', label: 'All' },
             { id: 'hotspot', label: 'Hotspot' },
-            { id: 'ppp', label: 'PPP' },
+            { id: 'ppp', label: 'PPPoE' },
           ].map((t) => (
             <button
               key={t.id}
@@ -213,7 +213,7 @@ export function ActiveUsersPage() {
               </p>
             </div>
             <div className="rounded-xl border border-violet-500/30 bg-violet-950/25 px-4 py-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-violet-400/90">PPP</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-violet-400/90">PPPoE</p>
               <p className="mt-1 text-2xl font-semibold tabular-nums text-violet-100">
                 {data
                   ? search || typeFilter !== 'all' || routerFilter
@@ -281,7 +281,7 @@ export function ActiveUsersPage() {
                   (r.hotspotActive?.length ?? 0) === 0 &&
                   (r.pppActive?.length ?? 0) === 0 && (
                     <p className="mt-2 text-xs text-slate-500">
-                      No matching live Hotspot or PPP sessions.
+                      No matching live Hotspot or PPPoE sessions.
                     </p>
                   )}
               </div>

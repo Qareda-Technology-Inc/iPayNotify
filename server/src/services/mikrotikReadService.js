@@ -137,9 +137,14 @@ function formatQuota(bytesIn, bytesOut, limitTotal) {
  * Hotspot active: real username only (never use MAC as the name).
  */
 function mapHotspotActiveRow(r) {
-  let user = rosFirstStr(r, ['user', 'user-name', 'username', 'name']);
-  /* Reject MAC / empty masquerading as username */
-  if (user && looksLikeMac(user)) user = '';
+  let user = '';
+  for (const k of ['user', 'user-name', 'username', 'name']) {
+    const v = rosFirstStr(r, [k]);
+    if (v && !looksLikeMac(v)) {
+      user = v;
+      break;
+    }
+  }
 
   const mac = rosFirstStr(r, ['mac-address', 'mac']);
   const address = rosFirstStr(r, ['address']);
@@ -163,21 +168,68 @@ function mapHotspotActiveRow(r) {
   };
 }
 
+/** Fill blank hotspot logins and total quota from /ip hotspot user (matched by name or MAC). */
+function mapHotspotActiveList(activeRows, userRows) {
+  const byName = new Map();
+  const byMac = new Map();
+  for (const u of userRows || []) {
+    const name = String(u?.name || u?.user || '').trim();
+    const mac = String(u?.['mac-address'] || u?.mac || '').trim().toLowerCase();
+    if (name) byName.set(name.toLowerCase(), u);
+    if (looksLikeMac(mac)) byMac.set(mac, u);
+  }
+  return (activeRows || [])
+    .map((raw) => {
+      const row = mapHotspotActiveRow(raw);
+      if (!row) return null;
+      const named = row.user && row.user !== '—' && !looksLikeMac(row.user) ? row.user : '';
+      const mac = String(raw?.['mac-address'] || raw?.mac || row.macAddress || '')
+        .trim()
+        .toLowerCase();
+      const account =
+        (named && byName.get(named.toLowerCase())) || (looksLikeMac(mac) ? byMac.get(mac) : null) || null;
+      if (account) {
+        const name = String(account.name || account.user || '').trim();
+        if (name && !looksLikeMac(name)) row.user = name;
+        const bi = rosFirstNumber(account, ['bytes-in', 'bytes_in']);
+        const bo = rosFirstNumber(account, ['bytes-out', 'bytes_out']);
+        const limit = rosFirstNumber(account, ['limit-bytes-total', 'limit-bytes-in', 'limit-bytes']);
+        const sbi = rosFirstNumber(raw, ['bytes-in', 'bytes_in', 'rx-byte']);
+        const sbo = rosFirstNumber(raw, ['bytes-out', 'bytes_out', 'tx-byte']);
+        const usedBi = Number.isFinite(bi) && bi > 0 ? bi : sbi;
+        const usedBo = Number.isFinite(bo) && bo > 0 ? bo : sbo;
+        const hasLimit = Number.isFinite(limit) && limit > 0;
+        const hasUsed =
+          (Number.isFinite(usedBi) && usedBi > 0) || (Number.isFinite(usedBo) && usedBo > 0);
+        if (hasLimit || hasUsed) row.quota = formatQuota(usedBi, usedBo, limit);
+      }
+      return row;
+    })
+    .filter(Boolean);
+}
+
+function pppoeLoginFromName(iface) {
+  const s = String(iface || '').trim().replace(/^"|"$/g, '');
+  const wrapped = /^<pppoe-(.+)>$/i.exec(s);
+  if (wrapped) return wrapped[1];
+  const open = /^<pppoe-([^>]+)>?$/i.exec(s);
+  if (open) return open[1];
+  return '';
+}
+
 /**
- * PPP active: prefer `user` (PPPoE login); avoid dropping rows when only `caller-id` or
- * interface `name` is present. `name` on /ppp/active is often the dynamic interface id, not the secret.
+ * PPPoE active only. Login is `user`, or the `<pppoe-login>` interface name.
+ * Caller-id is a MAC and is not the username.
  */
 function mapPppActiveRow(r) {
+  const service = rosFirstStr(r, ['service']).toLowerCase();
+  if (service && !service.startsWith('pppoe')) return null;
+  const iface = rosFirstStr(r, ['name', 'interface']);
+  if (/^<(?:pptp|l2tp|sstp|ovpn)-/i.test(iface)) return null;
+
   let secret = rosFirstStr(r, ['user', 'login', 'account']);
-  if (!secret) {
-    const iface = rosFirstStr(r, ['name', 'interface']);
-    const fromIface = /^<pppoe-(.+)>$/i.exec(iface);
-    if (fromIface) secret = fromIface[1];
-    else if (iface && !/^</.test(iface)) secret = iface;
-  }
-  if (!secret) {
-    secret = rosFirstStr(r, ['caller-id', 'caller-id-value']);
-  }
+  if (looksLikeMac(secret) || /^</.test(secret)) secret = '';
+  if (!secret) secret = pppoeLoginFromName(iface);
   const id = r['.id'] ?? r.id ?? r.numbers ?? null;
   if (!secret) {
     if (id != null && String(id).trim() !== '') {
@@ -290,8 +342,11 @@ async function readActiveSessionsOnRouter(router) {
       errs.push(`Details: ${String(e.message || e)}`);
     }
     try {
-      const rows = await hs.printHotspotActive(api);
-      hotspotActive = rows.map(mapHotspotActiveRow).filter(Boolean);
+      const [activeRows, userRows] = await Promise.all([
+        hs.printHotspotActive(api),
+        hs.printHotspotUsers(api).catch(() => []),
+      ]);
+      hotspotActive = mapHotspotActiveList(activeRows, userRows);
     } catch (e) {
       errs.push(`Hotspot: ${String(e.message || e)}`);
     }
@@ -334,6 +389,7 @@ export async function getRouterLiveSnapshot(routerId, organizationId) {
     };
     let pppSecrets = [];
     let hotspotUsers = [];
+    let hotspotUsersRaw = [];
     let pppActive = [];
     let hotspotActive = [];
 
@@ -368,8 +424,8 @@ export async function getRouterLiveSnapshot(routerId, organizationId) {
     }
 
     try {
-      const rows = await hs.printHotspotUsers(api);
-      hotspotUsers = rows.map(mapHotspotUserRow).filter(Boolean);
+      hotspotUsersRaw = await hs.printHotspotUsers(api);
+      hotspotUsers = hotspotUsersRaw.map(mapHotspotUserRow).filter(Boolean);
     } catch (e) {
       errs.push(`Hotspot users: ${String(e.message || e)}`);
     }
@@ -383,7 +439,7 @@ export async function getRouterLiveSnapshot(routerId, organizationId) {
 
     try {
       const rows = await hs.printHotspotActive(api);
-      hotspotActive = rows.map(mapHotspotActiveRow).filter(Boolean);
+      hotspotActive = mapHotspotActiveList(rows, hotspotUsersRaw);
     } catch (e) {
       errs.push(`Hotspot active: ${String(e.message || e)}`);
     }

@@ -25,6 +25,26 @@ function listKindFromPrintCmd(cmd) {
   return 'generic';
 }
 
+function namedPrintRows(rows) {
+  let n = 0;
+  for (const r of rows) {
+    const name = String(r?.user || r?.name || '').trim();
+    if (name && !/^\*[0-9A-Fa-f]+$/.test(name)) n += 1;
+  }
+  return n;
+}
+
+function scorePrintRows(rows, kind) {
+  if (!Array.isArray(rows) || !rows.length) return 0;
+  const named = namedPrintRows(rows);
+  let stats = 0;
+  for (const r of rows) {
+    if (r?.uptime || r?.address || r?.['bytes-in'] || r?.['bytes-out']) stats += 1;
+  }
+  if (kind === 'ppp' || kind === 'hotspot') return named * 100 + stats * 10 + rows.length;
+  return rows.length;
+}
+
 /**
  * Fetch a print list using as-value → detail → terse → default table.
  * Fixes empty results when RouterOS returns tabular `Flags:` output (no key=value).
@@ -32,26 +52,34 @@ function listKindFromPrintCmd(cmd) {
 async function fetchPrintList(adapter, printCmd) {
   const verb = apiPathToCliVerb(printCmd.replace(/\/print$/, ''));
   const kind = listKindFromPrintCmd(printCmd);
-  const attempts = [
+  /* Active users only need PPPoE. `where` first, then an unfiltered print if a build rejects it. */
+  const bases = [
     `${verb} print as-value without-paging`,
     `${verb} print detail without-paging`,
     `${verb} print terse without-paging`,
     `${verb} print without-paging`,
   ];
+  const attempts =
+    printCmd === '/ppp/active/print'
+      ? [...bases.map((line) => `${line} where service=pppoe`), ...bases]
+      : bases;
 
   let lastOut = '';
   let best = [];
+  let bestScore = 0;
   for (const line of attempts) {
     try {
       const out = await execRos(adapter.conn, line);
       lastOut = out || lastOut;
       const rows = parseActiveListStdout(out, kind);
-      if (rows.length > best.length) best = rows;
-      if (rows.length > 0) {
-        /* Prefer as-value/detail when they return data; keep scanning if first pass was weak */
-        if (line.includes('as-value') || line.includes('detail') || rows.length >= 1) {
-          return rows;
-        }
+      const score = scorePrintRows(rows, kind);
+      if (score > bestScore) {
+        bestScore = score;
+        best = rows;
+      }
+      /* as-value is complete when most rows already carry a login name */
+      if (line.includes('as-value') && rows.length > 0 && namedPrintRows(rows) >= rows.length * 0.5) {
+        return rows;
       }
     } catch (e) {
       /* try next format — some ROS builds dislike as-value/terse */
