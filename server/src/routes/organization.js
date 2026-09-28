@@ -12,6 +12,7 @@ import {
 } from '../services/orgLimitsService.js';
 import { routerDisplayName } from '../utils/routerLabel.js';
 import { requireRoles } from '../middleware/requireRoles.js';
+import { PORTAL_DESIGN_IDS, VOUCHER_DESIGN_IDS, clipPortalCopy } from '../utils/portalDesigns.js';
 import {
   listOrgTeam,
   inviteOrgTeamMember,
@@ -48,6 +49,7 @@ async function portalSitesForOrg(organizationId) {
       portalSlug: slug,
       renewUrl: `${base}/portal/renew?r=${enc}`,
       hotspotUrl: `${base}/portal/hotspot?r=${enc}`,
+      loginUrl: `${base}/portal/login?r=${enc}`,
     };
   });
 }
@@ -98,6 +100,35 @@ function applyBillingPatch(doc, billingBody, { isSuperAdmin = false } = {}) {
       throw err;
     }
     doc.billing.logoUrl = raw;
+  }
+  if (b.portalDesign !== undefined) {
+    const id = String(b.portalDesign || '').trim();
+    if (!PORTAL_DESIGN_IDS.includes(id)) {
+      const err = new Error('Unknown portal design');
+      err.status = 400;
+      throw err;
+    }
+    doc.billing.portalDesign = id;
+  }
+  if (b.voucherDesign !== undefined) {
+    const id = String(b.voucherDesign || '').trim();
+    if (!VOUCHER_DESIGN_IDS.includes(id)) {
+      const err = new Error('Unknown voucher design');
+      err.status = 400;
+      throw err;
+    }
+    doc.billing.voucherDesign = id;
+  }
+  for (const field of [
+    'portalHeadline',
+    'portalSubtitle',
+    'portalButtonLabel',
+    'portalBuyLabel',
+    'voucherTitle',
+  ]) {
+    if (b[field] !== undefined) {
+      doc.billing[field] = clipPortalCopy(field, b[field]);
+    }
   }
   if (b.payoutMomoNumber !== undefined) {
     doc.billing.payoutMomoNumber = String(b.payoutMomoNumber || '').trim();

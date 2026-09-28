@@ -5,6 +5,7 @@ import {
   getDefaultPlatformFeeBps,
   resolvePlatformFeeBps,
 } from './platformSettingsService.js';
+import { clipPortalCopy, normalizePortalDesign, normalizeVoucherDesign } from '../utils/portalDesigns.js';
 
 /**
  * Hubtel + merchant labels for a tenant.
@@ -54,6 +55,13 @@ export async function sanitizeBillingForClient(billing) {
       merchantDisplayName: '',
       smsBrandName: '',
       logoUrl: '',
+      portalDesign: 'midnight',
+      voucherDesign: 'grid',
+      portalHeadline: '',
+      portalSubtitle: '',
+      portalButtonLabel: '',
+      portalBuyLabel: '',
+      voucherTitle: '',
       platformFeeBps: null,
       platformFeePercent: defaultBps / 100,
       defaultPlatformFeePercent: defaultBps / 100,
@@ -68,6 +76,13 @@ export async function sanitizeBillingForClient(billing) {
     merchantDisplayName: String(billing.merchantDisplayName || '').trim(),
     smsBrandName: String(billing.smsBrandName || '').trim(),
     logoUrl: String(billing.logoUrl || '').trim(),
+    portalDesign: normalizePortalDesign(billing.portalDesign),
+    voucherDesign: normalizeVoucherDesign(billing.voucherDesign),
+    portalHeadline: clipPortalCopy('portalHeadline', billing.portalHeadline),
+    portalSubtitle: clipPortalCopy('portalSubtitle', billing.portalSubtitle),
+    portalButtonLabel: clipPortalCopy('portalButtonLabel', billing.portalButtonLabel),
+    portalBuyLabel: clipPortalCopy('portalBuyLabel', billing.portalBuyLabel),
+    voucherTitle: clipPortalCopy('voucherTitle', billing.voucherTitle),
     platformFeeBps: hasOverride ? feeBps : null,
     platformFeePercent: feeBps / 100,
     defaultPlatformFeePercent: defaultBps / 100,

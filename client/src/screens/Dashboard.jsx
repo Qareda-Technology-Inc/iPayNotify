@@ -6,6 +6,7 @@ import { WalletPage } from '../pages/WalletPage.jsx';
 import { SuperAdminWithdrawalsPage } from '../pages/SuperAdminWithdrawalsPage.jsx';
 import { PackagesPage } from '../pages/PackagesPage.jsx';
 import { HotspotPanel } from '../components/HotspotPanel.jsx';
+import { CaptivePortalPage } from '../pages/CaptivePortalPage.jsx';
 import { PppoePanel } from '../components/PppoePanel.jsx';
 import { RemoteAccessPanel } from '../components/RemoteAccessPanel.jsx';
 import { MessagesPage } from '../pages/MessagesPage.jsx';
@@ -141,6 +142,14 @@ export function Dashboard({ onSignOut }) {
           element={
             <RoleGate allow={['super_admin', 'org_admin', 'org_staff', 'ticket_manager']}>
               <HotspotPanel />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="hotspot/portal"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff', 'ticket_manager']}>
+              <CaptivePortalPage />
             </RoleGate>
           }
         />

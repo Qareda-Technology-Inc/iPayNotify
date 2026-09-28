@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { apiFetch } from '../api.js';
 import { routerDisplayName } from '../utils/routerDisplayName.js';
 import { downloadVouchersPdf } from '../utils/exportVouchersPdf.js';
+import { VOUCHER_DESIGNS } from '../portal/designs.js';
 
 function formatBytes(n) {
   const v = Number(n);
@@ -56,6 +58,8 @@ export function HotspotPanel() {
   const [recent, setRecent] = useState([]);
   const [stats, setStats] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const [printDesign, setPrintDesign] = useState('grid');
+  const [printTitle, setPrintTitle] = useState('');
 
   const loadMeta = useCallback(async () => {
     const statusQs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
@@ -81,6 +85,16 @@ export function HotspotPanel() {
   useEffect(() => {
     loadMeta().catch((e) => setError(e.message));
   }, [loadMeta]);
+
+  useEffect(() => {
+    apiFetch('/api/organization')
+      .then((o) => {
+        const id = o?.billing?.voucherDesign;
+        if (VOUCHER_DESIGNS.some((d) => d.id === id)) setPrintDesign(id);
+        setPrintTitle(String(o?.billing?.voucherTitle || '').trim());
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!routerId) {
@@ -236,11 +250,12 @@ export function HotspotPanel() {
       const router = routers.find((r) => String(r._id) === String(routerId));
       const pkg = packages.find((p) => String(p._id) === String(packageId));
       downloadVouchersPdf(rows, {
-        title: 'Wi‑Fi Access',
+        title: printTitle || 'Wi‑Fi Access',
         venue: routerDisplayName(router) || '',
         packageName: pkg?.name || '',
         server: hotspotServer || '',
-        filename: `vouchers-${(pkg?.name || 'hotspot').replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.pdf`,
+        design: printDesign,
+        filename: `vouchers-${printDesign}-${(pkg?.name || 'hotspot').replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.pdf`,
       });
       setInfo(`Downloaded ${rows.length} voucher${rows.length === 1 ? '' : 's'} as PDF.`);
     } catch (err) {
@@ -258,7 +273,11 @@ export function HotspotPanel() {
         <h2 className="text-lg font-semibold text-white">Hotspot & vouchers</h2>
         <p className="mt-1 max-w-2xl text-sm text-slate-400">
           Pick a router, its hotspot server, an internet plan, and quantity. Preview unique 6-digit
-          codes, then create and push them to MikroTik.
+          codes, then create and push them to MikroTik. Login page and print layout live under{' '}
+          <Link to="/hotspot/portal" className="text-indigo-300 hover:text-indigo-200">
+            Captive portal
+          </Link>
+          .
         </p>
       </div>
 
@@ -487,6 +506,20 @@ export function HotspotPanel() {
             Vouchers
           </h3>
           <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-xs text-slate-400">
+              Print design
+              <select
+                value={printDesign}
+                onChange={(e) => setPrintDesign(e.target.value)}
+                className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-300"
+              >
+                {VOUCHER_DESIGNS.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}

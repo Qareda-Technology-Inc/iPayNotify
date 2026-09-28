@@ -1,10 +1,16 @@
-import { Routes, Route, Link } from 'react-router-dom';
+import { Routes, Route, Link, useLocation } from 'react-router-dom';
 import { RenewPage } from './RenewPage.jsx';
 import { HotspotBuyPage } from './HotspotBuyPage.jsx';
 import { PayReturnPage } from './PayReturnPage.jsx';
 import { PayMockPage } from './PayMockPage.jsx';
+import { CaptiveLoginPage } from './CaptiveLoginPage.jsx';
 
 export function PublicPortal() {
+  const { pathname } = useLocation();
+  if (/\/login\/?$/.test(pathname)) {
+    return <CaptiveLoginPage />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="border-b border-slate-800 bg-slate-900/90">

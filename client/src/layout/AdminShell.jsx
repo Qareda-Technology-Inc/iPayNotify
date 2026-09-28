@@ -18,11 +18,11 @@ function NavGroup({ title, children }) {
   );
 }
 
-function SideLink({ to, children, badge, accent = 'indigo' }) {
+function SideLink({ to, children, badge, accent = 'indigo', end }) {
   return (
     <NavLink
       to={to}
-      end={to === '/'}
+      end={end ?? to === '/'}
       className={({ isActive }) =>
         `flex items-center justify-between rounded-lg px-3 py-2 text-sm transition ${
           isActive
@@ -59,6 +59,7 @@ function headerTitleForPath(pathname) {
     '/users/remote-access': 'Remote access',
     '/finance/packages': 'Packages',
     '/hotspot': 'Hotspot & vouchers',
+    '/hotspot/portal': 'Captive portal',
     '/finance/payments': 'Payments',
     '/finance/wallet': 'Wallet',
     '/finance/messages': 'Messages & SMS',
@@ -237,9 +238,10 @@ export function AdminShell({ onSignOut }) {
             <SideLink to="/finance/packages" badge={counts?.packages}>
               Packages
             </SideLink>
-            <SideLink to="/hotspot" badge={counts?.vouchers}>
+            <SideLink to="/hotspot" end badge={counts?.vouchers}>
               Hotspot & vouchers
             </SideLink>
+            <SideLink to="/hotspot/portal">Captive portal</SideLink>
             <SideLink to="/finance/payments" badge={counts?.paymentsPending}>
               Payments
             </SideLink>

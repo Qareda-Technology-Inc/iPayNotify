@@ -1,5 +1,10 @@
 import { Organization, Router as MikrotikRouter } from '../models/index.js';
 import { routerDisplayName } from '../utils/routerLabel.js';
+import {
+  clipPortalCopy,
+  normalizePortalDesign,
+  normalizeVoucherDesign,
+} from '../utils/portalDesigns.js';
 
 /** Normalize IPv4 from Express / proxies (::ffff:1.2.3.4, IPv6-mapped). */
 export function normalizeClientIp(raw) {
@@ -77,6 +82,13 @@ async function withOrgGate(routerDoc, match) {
     branding: {
       displayName: brandName,
       logoUrl: /^https:\/\//i.test(logoUrl) ? logoUrl : '',
+      portalDesign: normalizePortalDesign(org.billing?.portalDesign),
+      voucherDesign: normalizeVoucherDesign(org.billing?.voucherDesign),
+      portalHeadline: clipPortalCopy('portalHeadline', org.billing?.portalHeadline),
+      portalSubtitle: clipPortalCopy('portalSubtitle', org.billing?.portalSubtitle),
+      portalButtonLabel: clipPortalCopy('portalButtonLabel', org.billing?.portalButtonLabel),
+      portalBuyLabel: clipPortalCopy('portalBuyLabel', org.billing?.portalBuyLabel),
+      voucherTitle: clipPortalCopy('voucherTitle', org.billing?.voucherTitle),
     },
   };
 }

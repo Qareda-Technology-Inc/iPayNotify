@@ -24,6 +24,17 @@ const organizationBillingSchema = new mongoose.Schema(
     payoutNote: { type: String, trim: true, default: '' },
     /** Public HTTPS URL for portal / checkout logo (optional white-label). */
     logoUrl: { type: String, trim: true, default: '' },
+    /** Captive login skin: midnight | sunrise | signal */
+    portalDesign: { type: String, trim: true, default: 'midnight' },
+    /** Voucher PDF skin: grid | ticket | strip */
+    voucherDesign: { type: String, trim: true, default: 'grid' },
+    /** Optional login copy. Empty uses the selected design's default wording. */
+    portalHeadline: { type: String, trim: true, default: '' },
+    portalSubtitle: { type: String, trim: true, default: '' },
+    portalButtonLabel: { type: String, trim: true, default: '' },
+    portalBuyLabel: { type: String, trim: true, default: '' },
+    /** Optional title on printed vouchers. Empty uses "Wi‑Fi Access". */
+    voucherTitle: { type: String, trim: true, default: '' },
   },
   { _id: false }
 );
