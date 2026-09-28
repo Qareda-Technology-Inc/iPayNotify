@@ -1,51 +1,41 @@
 # WireGuard auto-register for RouterOS v7+
-# -----------------------------------------------------------------------------
-# Router phones home to the cloud API (no need for cloud to reach LAN).
-#
-# 1) Download this .rsc from QareFi (Add router)
-# 2) /tool fetch ... OR Winbox Files Upload, then: /import qarefi-install.rsc
-# 3) In QareFi: Finish tab -> peer appears -> enter SSH user/password
-# -----------------------------------------------------------------------------
+# ASCII only. Locals without underscores (import-safe).
+# Usage: /tool fetch ... dst-path=qarefi-install.rsc ; /import qarefi-install.rsc
 
-:local API_BASE "https://ipaynotifyserver.onrender.com"
-# Filled by QareFi when you download (links peer to your organization)
-:local ORG_ID ""
-# "auto" = /system identity name (set a clear identity per site in Winbox)
-:local SITE_NAME "auto"
-# "auto" = first DHCP server network, else bridge LAN address as /24
-:local LAN_SUBNET "auto"
-:local REGISTER_TOKEN ""
-:local WG_IFACE "wg-qarefi"
-:local WG_LISTEN_PORT 51820
-:local WG_MTU 1420
-:local WG_POOL "10.66.54.0/24"
-:local VPN_MGMT_COMMENT "QareFi: VPN management"
+{
+:local apibase "https://ipaynotifyserver.onrender.com"
+:local orgid ""
+:local sitename "auto"
+:local lansubnet "auto"
+:local regtoken ""
+:local wgiface "wg-qarefi"
+:local wgport 51820
+:local wgmtu 1420
+:local wgpool "10.66.54.0/24"
+:local vpnmgmt "QareFi: VPN management"
 
 :log info "wg-auto-register: starting"
 
-# --- Auto SITE_NAME from System -> Identity ---
-:if (($SITE_NAME = "") || ($SITE_NAME = "auto") || ($SITE_NAME = "site-unnamed")) do={
-  :set SITE_NAME [/system identity get name]
+:if (($sitename = "") || ($sitename = "auto") || ($sitename = "site-unnamed")) do={
+  :set sitename [/system identity get name]
 }
-# Spaces break form POST - use dashes
-:while ([:find $SITE_NAME " "] != nil) do={
-  :local sp [:find $SITE_NAME " "]
-  :set SITE_NAME ([:pick $SITE_NAME 0 $sp] . "-" . [:pick $SITE_NAME ($sp + 1) [:len $SITE_NAME]])
+:while ([:find $sitename " "] != nil) do={
+  :local sp [:find $sitename " "]
+  :set sitename ([:pick $sitename 0 $sp] . "-" . [:pick $sitename ($sp + 1) [:len $sitename]])
 }
-:if ([:len $SITE_NAME] < 2) do={
-  :set SITE_NAME ("mt-" . [/system routerboard get serial-number])
+:if ([:len $sitename] < 2) do={
+  :set sitename ("mt-" . [/system routerboard get serial-number])
 }
-:log info ("wg-auto-register: siteName=" . $SITE_NAME)
+:log info ("wg-auto-register: siteName=" . $sitename)
 
-# --- Auto LAN_SUBNET from DHCP network or bridge IP ---
-:if (($LAN_SUBNET = "") || ($LAN_SUBNET = "auto")) do={
-  :set LAN_SUBNET ""
+:if (($lansubnet = "") || ($lansubnet = "auto")) do={
+  :set lansubnet ""
   :local dhcpNets [/ip dhcp-server network find]
   :if ([:len $dhcpNets] > 0) do={
-    :set LAN_SUBNET [/ip dhcp-server network get ($dhcpNets->0) address]
-    :log info ("wg-auto-register: LAN from DHCP network=" . $LAN_SUBNET)
+    :set lansubnet [/ip dhcp-server network get ($dhcpNets->0) address]
+    :log info ("wg-auto-register: LAN from DHCP network=" . $lansubnet)
   }
-  :if ([:len $LAN_SUBNET] = 0) do={
+  :if ([:len $lansubnet] = 0) do={
     :local brIds [/ip address find where interface~"bridge" && disabled=no]
     :if ([:len $brIds] = 0) do={
       :set brIds [/ip address find where interface="ether1" && disabled=no]
@@ -60,46 +50,46 @@
         :local d3 [:find $ipOnly "." ($d2 + 1)]
         :if ($d3 != nil) do={
           :local prefix [:pick $ipOnly 0 $d3]
-          :set LAN_SUBNET ($prefix . ".0/24")
-          :log info ("wg-auto-register: LAN from interface IP=" . $LAN_SUBNET)
+          :set lansubnet ($prefix . ".0/24")
+          :log info ("wg-auto-register: LAN from interface IP=" . $lansubnet)
         }
       }
     }
   }
 }
-:if ([:len $LAN_SUBNET] > 0) do={
-  :log info ("wg-auto-register: lanSubnet=" . $LAN_SUBNET)
+:if ([:len $lansubnet] > 0) do={
+  :log info ("wg-auto-register: lanSubnet=" . $lansubnet)
 } else={
   :log warning "wg-auto-register: lanSubnet empty (optional)"
 }
 
-:if ([:len [/interface wireguard find where name=$WG_IFACE]] = 0) do={
-  /interface wireguard add name=$WG_IFACE listen-port=$WG_LISTEN_PORT mtu=$WG_MTU disabled=no comment="QareFi auto VPN"
-  :log info ("wg-auto-register: created interface " . $WG_IFACE)
+:if ([:len [/interface wireguard find where name=$wgiface]] = 0) do={
+  /interface wireguard add name=$wgiface listen-port=$wgport mtu=$wgmtu disabled=no comment="QareFi auto VPN"
+  :log info ("wg-auto-register: created interface " . $wgiface)
 } else={
-  :log info ("wg-auto-register: interface exists " . $WG_IFACE)
+  :log info ("wg-auto-register: interface exists " . $wgiface)
 }
 
 :delay 2s
-:local MY_PUB [/interface wireguard get [find where name=$WG_IFACE] public-key]
-:if ([:len $MY_PUB] < 40) do={
+:local mypub [/interface wireguard get [find where name=$wgiface] public-key]
+:if ([:len $mypub] < 40) do={
   :log error "wg-auto-register: FAILED - could not read local public-key"
   :error "missing public-key"
 }
-:log info ("wg-auto-register: local public-key ok len=" . [:len $MY_PUB])
+:log info ("wg-auto-register: local public-key ok len=" . [:len $mypub])
 
-:local httpData ("publicKey=" . $MY_PUB . "&siteName=" . $SITE_NAME)
-:if ([:len $LAN_SUBNET] > 0) do={
-  :set httpData ($httpData . "&lanSubnet=" . $LAN_SUBNET)
+:local httpData ("publicKey=" . $mypub . "&siteName=" . $sitename)
+:if ([:len $lansubnet] > 0) do={
+  :set httpData ($httpData . "&lanSubnet=" . $lansubnet)
 }
-:if ([:len $REGISTER_TOKEN] > 0) do={
-  :set httpData ($httpData . "&token=" . $REGISTER_TOKEN)
+:if ([:len $regtoken] > 0) do={
+  :set httpData ($httpData . "&token=" . $regtoken)
 }
-:if ([:len $ORG_ID] > 0) do={
-  :set httpData ($httpData . "&organizationId=" . $ORG_ID)
+:if ([:len $orgid] > 0) do={
+  :set httpData ($httpData . "&organizationId=" . $orgid)
 }
 
-:local url ($API_BASE . "/api/routers/register")
+:local url ($apibase . "/api/routers/register")
 :local tmpFile "wg-register-response.txt"
 
 :log info ("wg-auto-register: posting to " . $url)
@@ -162,7 +152,7 @@
   :error ("registration failed: " . $errMsg)
 }
 
-:if ([:len $allowedIps] = 0) do={ :set allowedIps $WG_POOL }
+:if ([:len $allowedIps] = 0) do={ :set allowedIps $wgpool }
 
 :local colon [:find $endpoint ":"]
 :if ($colon = nil) do={
@@ -175,24 +165,23 @@
 :log info ("wg-auto-register: assigned tunnelIp=" . $tunnelIp)
 
 :local addrComment "QareFi WG tunnel"
-:if ([:len [/ip address find where interface=$WG_IFACE comment=$addrComment]] = 0) do={
-  /ip address add address=($tunnelIp . "/24") interface=$WG_IFACE comment=$addrComment
+:if ([:len [/ip address find where interface=$wgiface comment=$addrComment]] = 0) do={
+  /ip address add address=($tunnelIp . "/24") interface=$wgiface comment=$addrComment
 } else={
-  /ip address set [find where interface=$WG_IFACE comment=$addrComment] address=($tunnelIp . "/24")
+  /ip address set [find where interface=$wgiface comment=$addrComment] address=($tunnelIp . "/24")
 }
 
-:if ([:len [/interface wireguard peers find where interface=$WG_IFACE public-key="$serverPublicKey"]] = 0) do={
-  /interface wireguard peers add interface=$WG_IFACE public-key="$serverPublicKey" endpoint-address=$epHost endpoint-port=$epPort allowed-address="$allowedIps" persistent-keepalive=25s comment="QareFi VPS"
+:if ([:len [/interface wireguard peers find where interface=$wgiface public-key=$serverPublicKey]] = 0) do={
+  /interface wireguard peers add interface=$wgiface public-key=$serverPublicKey endpoint-address=$epHost endpoint-port=$epPort allowed-address=$allowedIps persistent-keepalive=25s comment="QareFi VPS"
 } else={
-  /interface wireguard peers set [find where interface=$WG_IFACE public-key="$serverPublicKey"] endpoint-address=$epHost endpoint-port=$epPort allowed-address="$allowedIps" persistent-keepalive=25s comment="QareFi VPS"
+  /interface wireguard peers set [find where interface=$wgiface public-key=$serverPublicKey] endpoint-address=$epHost endpoint-port=$epPort allowed-address=$allowedIps persistent-keepalive=25s comment="QareFi VPS"
 }
 
-# Allow cloud management over the VPN (SSH / Winbox / API)
-:if ([:len [/ip firewall filter find where comment=$VPN_MGMT_COMMENT]] = 0) do={
+:if ([:len [/ip firewall filter find where comment=$vpnmgmt]] = 0) do={
   :do {
-    /ip firewall filter add chain=input action=accept src-address=$WG_POOL comment=$VPN_MGMT_COMMENT place-before=0
+    /ip firewall filter add chain=input action=accept src-address=$wgpool comment=$vpnmgmt place-before=0
   } on-error={
-    /ip firewall filter add chain=input action=accept src-address=$WG_POOL comment=$VPN_MGMT_COMMENT
+    /ip firewall filter add chain=input action=accept src-address=$wgpool comment=$vpnmgmt
   }
 }
 
@@ -207,3 +196,4 @@
 
 :log info ("wg-auto-register: SUCCESS - tunnelIp=" . $tunnelIp . " - finish Add router in QareFi with SSH login")
 :do { /file remove [find where name=$tmpFile] } on-error={}
+}

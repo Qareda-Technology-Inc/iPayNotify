@@ -29,9 +29,19 @@ function escapeRosString(s) {
     .replace(/\$/g, '\\$');
 }
 
+/** Token as form-safe value (no raw $ in the .rsc file). Express decodes it on register. */
+function rosFormToken(token) {
+  return encodeURIComponent(String(token || '').trim()).replace(/"/g, '%22');
+}
+
+function replaceLocal(body, name, value) {
+  const re = new RegExp(`:local ${name} "[^"]*"`);
+  /* Function replacer — string replacer treats $ specially and corrupts tokens */
+  return body.replace(re, () => `:local ${name} "${value}"`);
+}
+
 /**
- * Build a ready-to-import .rsc with API_BASE + REGISTER_TOKEN (+ optional ORG_ID) filled.
- * SITE_NAME / LAN_SUBNET stay "auto" unless overridden so each router detects its own.
+ * Build a ready-to-import .rsc with apibase + regtoken (+ optional orgid) filled.
  */
 export function buildWireGuardInstallScript(overrides = {}) {
   let body = loadTemplate();
@@ -46,34 +56,16 @@ export function buildWireGuardInstallScript(overrides = {}) {
   const orgId = String(overrides.organizationId || '').trim();
   const pool = String(config.wireguard?.tunnelPool || '10.66.54.0/24').trim();
 
-  body = body.replace(
-    /:local API_BASE "[^"]*"/,
-    `:local API_BASE "${escapeRosString(apiBase)}"`
-  );
-  body = body.replace(
-    /:local REGISTER_TOKEN "[^"]*"/,
-    `:local REGISTER_TOKEN "${escapeRosString(token)}"`
-  );
-  body = body.replace(
-    /:local ORG_ID "[^"]*"/,
-    `:local ORG_ID "${escapeRosString(orgId)}"`
-  );
-  body = body.replace(
-    /:local WG_POOL "[^"]*"/,
-    `:local WG_POOL "${escapeRosString(pool)}"`
-  );
+  body = replaceLocal(body, 'apibase', escapeRosString(apiBase));
+  body = replaceLocal(body, 'regtoken', rosFormToken(token));
+  body = replaceLocal(body, 'orgid', escapeRosString(orgId));
+  body = replaceLocal(body, 'wgpool', escapeRosString(pool));
 
   if (overrides.siteName != null && String(overrides.siteName).trim()) {
-    body = body.replace(
-      /:local SITE_NAME "[^"]*"/,
-      `:local SITE_NAME "${escapeRosString(String(overrides.siteName).trim())}"`
-    );
+    body = replaceLocal(body, 'sitename', escapeRosString(String(overrides.siteName).trim()));
   }
   if (overrides.lanSubnet != null && String(overrides.lanSubnet).trim()) {
-    body = body.replace(
-      /:local LAN_SUBNET "[^"]*"/,
-      `:local LAN_SUBNET "${escapeRosString(String(overrides.lanSubnet).trim())}"`
-    );
+    body = replaceLocal(body, 'lansubnet', escapeRosString(String(overrides.lanSubnet).trim()));
   }
 
   return body;
