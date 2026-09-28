@@ -9,8 +9,30 @@ import { syncWireGuardPeerToVps } from '../services/wireguard/wgPeerSync.js';
 export const wireguardRegisterRouter = express.Router();
 
 const WG_PUBKEY_RE = /^[A-Za-z0-9+/]{42,44}={0,2}$/;
+const WG_PUBKEY_URL_RE = /^[A-Za-z0-9_-]{42,44}={0,2}$/;
 const IPV4_CIDR_RE =
   /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\/(?:3[0-2]|[12]?\d)$/;
+
+function normalizeWireGuardPublicKey(raw, keyFormat) {
+  let k = String(raw || '').trim();
+  const fmt = String(keyFormat || '').trim().toLowerCase();
+  if (fmt === 'base64url' || (/[-_]/.test(k) && !/[+/]/.test(k))) {
+    k = k.replace(/-/g, '+').replace(/_/g, '/');
+    while (k.length % 4 !== 0) k += '=';
+  }
+  return k;
+}
+
+function sanitizeSiteName(raw) {
+  let s = String(raw || '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (s.length > 80) s = s.slice(0, 80);
+  return s;
+}
 
 function mergeInput(req) {
   const q = req.query && typeof req.query === 'object' ? req.query : {};
@@ -62,8 +84,11 @@ async function handleWireGuardRegister(req, res) {
       }
 
       const input = mergeInput(req);
-      const publicKey = String(input.publicKey || input.public_key || '').trim();
-      const siteName = String(input.siteName || input.site_name || '').trim();
+      const publicKey = normalizeWireGuardPublicKey(
+        input.publicKey || input.public_key,
+        input.keyFormat || input.key_format
+      );
+      const siteName = sanitizeSiteName(input.siteName || input.site_name);
       const lanSubnet = String(input.lanSubnet || input.lan_subnet || '').trim();
       const tokenRaw = String(
         input.token || input.registerToken || req.get('x-wg-register-token') || ''
@@ -87,6 +112,7 @@ async function handleWireGuardRegister(req, res) {
       if (!publicKey || !WG_PUBKEY_RE.test(publicKey)) {
         return plainText(res, 400, [
           'error=publicKey is required and must be a WireGuard public key',
+          `debugKeyLen=${publicKey.length}`,
           'ok=false',
         ]);
       }

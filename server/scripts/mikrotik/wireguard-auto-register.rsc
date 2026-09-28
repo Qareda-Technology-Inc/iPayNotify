@@ -14,13 +14,20 @@
 :if (($sitename = "") || ($sitename = "auto")) do={
   :set sitename [/system identity get name]
 }
+# Collapse spaces to single dash; keep only safe chars
 :local guard 0
-:while (([:find $sitename " "] != nil) && ($guard < 20)) do={
+:while (([:find $sitename " "] != nil) && ($guard < 40)) do={
   :local sp [:find $sitename " "]
   :set sitename ([:pick $sitename 0 $sp] . "-" . [:pick $sitename ($sp + 1) [:len $sitename]])
   :set guard ($guard + 1)
 }
+:while (([:find $sitename "--"] != nil) && ($guard < 80)) do={
+  :local sp [:find $sitename "--"]
+  :set sitename ([:pick $sitename 0 $sp] . "-" . [:pick $sitename ($sp + 2) [:len $sitename]])
+  :set guard ($guard + 1)
+}
 :if ([:len $sitename] < 2) do={ :set sitename "mt-site" }
+:if ([:len $sitename] > 40) do={ :set sitename [:pick $sitename 0 40] }
 :put ("QAREFI: 3 site=" . $sitename)
 
 :put "QAREFI: 4 wireguard"
@@ -44,37 +51,42 @@
 }
 :put "QAREFI: 5 pubkey ok"
 
+# base64url so MikroTik does not mangle + / = in the query string
 :local pk $mypub
 :set guard 0
 :while (([:find $pk "+"] != nil) && ($guard < 80)) do={
   :local i [:find $pk "+"]
-  :set pk ([:pick $pk 0 $i] . "%2B" . [:pick $pk ($i + 1) [:len $pk]])
+  :set pk ([:pick $pk 0 $i] . "-" . [:pick $pk ($i + 1) [:len $pk]])
   :set guard ($guard + 1)
 }
 :set guard 0
 :while (([:find $pk "/"] != nil) && ($guard < 80)) do={
   :local i [:find $pk "/"]
-  :set pk ([:pick $pk 0 $i] . "%2F" . [:pick $pk ($i + 1) [:len $pk]])
+  :set pk ([:pick $pk 0 $i] . "_" . [:pick $pk ($i + 1) [:len $pk]])
   :set guard ($guard + 1)
 }
 :set guard 0
-:while (([:find $pk "="] != nil) && ($guard < 10)) do={
+:while (([:find $pk "="] != nil) && ($guard < 8)) do={
   :local i [:find $pk "="]
-  :set pk ([:pick $pk 0 $i] . "%3D" . [:pick $pk ($i + 1) [:len $pk]])
+  :set pk ([:pick $pk 0 $i] . [:pick $pk ($i + 1) [:len $pk]])
   :set guard ($guard + 1)
 }
 
-:local url ($apibase . "/api/routers/register?publicKey=" . $pk . "&siteName=" . $sitename)
+:local url ($apibase . "/api/routers/register?publicKey=" . $pk . "&siteName=" . $sitename . "&keyFormat=base64url")
 :if ([:len $lansubnet] > 0) do={ :set url ($url . "&lanSubnet=" . $lansubnet) }
 :if ([:len $regtoken] > 0) do={ :set url ($url . "&token=" . $regtoken) }
 :if ([:len $orgid] > 0) do={ :set url ($url . "&organizationId=" . $orgid) }
 
-:local tmpfile "q.rsc"
+:local tmpfile "q.txt"
 :put "QAREFI: 6 register"
 :do {
   /tool fetch url=$url dst-path=$tmpfile mode=https keep-result=yes
 } on-error={
   :put "QAREFI: FAIL register fetch"
+  :do {
+    :local rawerr [/file get [find where name=$tmpfile] contents]
+    :put ("QAREFI: body=" . $rawerr)
+  } on-error={}
   :error "fetch"
 }
 :put "QAREFI: 7 response ok"
