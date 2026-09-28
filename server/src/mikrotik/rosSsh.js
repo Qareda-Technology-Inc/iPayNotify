@@ -72,8 +72,8 @@ const MIKROTIK_SSH_ALGORITHMS = {
 };
 
 export function connectSsh(creds) {
-  const { host, port, username, password } = creds;
-  const endpoint = `${host}:${port}`;
+  const { host, port, username, password, sock } = creds;
+  const endpoint = sock ? `${host}:${port} (via WireGuard jump)` : `${host}:${port}`;
   return new Promise((resolve, reject) => {
     const conn = new Client();
     const t = setTimeout(() => {
@@ -107,8 +107,8 @@ export function connectSsh(creds) {
         if (/handshake|timed out while waiting/i.test(msg)) {
           hint =
             `SSH handshake failed for ${endpoint} (${msg}). ` +
-            `TCP may be open but the service is not speaking SSH — confirm the public port forwards to RouterOS ssh (usually 22), ` +
-            `or switch this router to transport "api" and use the api service port (usually 8728).`;
+            `TCP may be open but the service is not speaking SSH — confirm RouterOS ssh is enabled (IP → Services → ssh), ` +
+            `or use transport "api" (8728). If the host is a WireGuard tunnel IP and the API is not on the WG VPS, set WG_MIKROTIK_JUMP=auto.`;
         } else if (/ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT/i.test(msg)) {
           hint = `Cannot reach MikroTik SSH at ${endpoint}: ${msg}`;
         }
@@ -116,19 +116,24 @@ export function connectSsh(creds) {
         err.status = 502;
         err.cause = e;
         reject(err);
-      })
-      .connect({
-        host,
-        port,
-        username,
-        password,
-        tryKeyboard: true,
-        readyTimeout: 30000,
-        keepaliveInterval: 15000,
-        /* MikroTik is not OpenSSH; relax vendor quirks for KEX/handshake */
-        strictVendor: false,
-        algorithms: MIKROTIK_SSH_ALGORITHMS,
       });
+
+    const opts = {
+      username,
+      password,
+      tryKeyboard: true,
+      readyTimeout: 30000,
+      keepaliveInterval: 15000,
+      strictVendor: false,
+      algorithms: MIKROTIK_SSH_ALGORITHMS,
+    };
+    if (sock) {
+      opts.sock = sock;
+    } else {
+      opts.host = host;
+      opts.port = port;
+    }
+    conn.connect(opts);
   });
 }
 

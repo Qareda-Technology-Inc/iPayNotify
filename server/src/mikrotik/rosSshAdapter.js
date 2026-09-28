@@ -12,6 +12,7 @@ import {
   parseIdentityName,
   sshLoginRejectedError,
 } from './rosSsh.js';
+import { openWgJumpStream } from './wgJump.js';
 
 function listKindFromPrintCmd(cmd) {
   if (cmd === '/ppp/active/print') return 'ppp';
@@ -141,12 +142,24 @@ export class SshRosAdapter {
   }
 }
 
-export async function withRouterSsh(router, fn) {
+export async function withRouterSsh(router, fn, opts = {}) {
   const creds = normalizeRouterForSsh(router);
   let conn;
+  let bastion;
   try {
-    conn = await connectSsh(creds);
+    if (opts.useWgJump) {
+      const jump = await openWgJumpStream(creds.host, creds.port);
+      bastion = jump.bastion;
+      conn = await connectSsh({ ...creds, sock: jump.stream });
+    } else {
+      conn = await connectSsh(creds);
+    }
   } catch (e) {
+    try {
+      bastion?.end();
+    } catch {
+      /* ignore */
+    }
     if (isSshAuthFailure(e)) throw sshLoginRejectedError(creds);
     if (!e.status) e.status = 502;
     throw e;
@@ -157,6 +170,11 @@ export async function withRouterSsh(router, fn) {
   } finally {
     try {
       conn.end();
+    } catch {
+      /* ignore */
+    }
+    try {
+      bastion?.end();
     } catch {
       /* ignore */
     }

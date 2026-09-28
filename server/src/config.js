@@ -216,6 +216,16 @@ export const config = {
     get hasEnvSshKey() {
       return Boolean(this.vpsSshKeyPath || this.vpsSshPrivateKey);
     },
+    /**
+     * When Node API is not on the WG VPS, tunnel IPs (10.66.54.x) are reached by
+     * SSH-jumping through WG_VPS_HOST. auto|always|never (env WG_MIKROTIK_JUMP).
+     */
+    get mikrotikJump() {
+      const raw = String(process.env.WG_MIKROTIK_JUMP || 'auto').trim().toLowerCase();
+      if (raw === 'always' || raw === '1' || raw === 'true') return 'always';
+      if (raw === 'never' || raw === '0' || raw === 'false') return 'never';
+      return 'auto';
+    },
     /** e.g. "10.66.54." from tunnelPool 10.66.54.0/24 */
     get tunnelPrefix() {
       const m = String(this.tunnelPool || '').match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)0\/24$/);
