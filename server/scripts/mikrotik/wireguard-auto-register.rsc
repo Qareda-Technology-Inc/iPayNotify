@@ -1,11 +1,10 @@
 # WireGuard auto-register for RouterOS v7+
 # -----------------------------------------------------------------------------
-# ZenFi-style: router phones home to the cloud API (no need for cloud → LAN).
+# Router phones home to the cloud API (no need for cloud to reach LAN).
 #
-# 1) Download this .rsc from QareFi (Add router → Download script)
-# 2) Winbox → Files → Upload, then Terminal: /import wireguard-auto-register.rsc
-#    or paste into /system script and run
-# 3) In QareFi: refresh → peer appears → enter SSH username/password to finish
+# 1) Download this .rsc from QareFi (Add router)
+# 2) /tool fetch ... OR Winbox Files Upload, then: /import qarefi-install.rsc
+# 3) In QareFi: Finish tab -> peer appears -> enter SSH user/password
 # -----------------------------------------------------------------------------
 
 :local API_BASE "https://ipaynotifyserver.onrender.com"
@@ -24,11 +23,11 @@
 
 :log info "wg-auto-register: starting"
 
-# --- Auto SITE_NAME from System → Identity ---
+# --- Auto SITE_NAME from System -> Identity ---
 :if (($SITE_NAME = "") || ($SITE_NAME = "auto") || ($SITE_NAME = "site-unnamed")) do={
   :set SITE_NAME [/system identity get name]
 }
-# Spaces break form POST — use dashes
+# Spaces break form POST - use dashes
 :while ([:find $SITE_NAME " "] != nil) do={
   :local sp [:find $SITE_NAME " "]
   :set SITE_NAME ([:pick $SITE_NAME 0 $sp] . "-" . [:pick $SITE_NAME ($sp + 1) [:len $SITE_NAME]])
@@ -84,7 +83,7 @@
 :delay 2s
 :local MY_PUB [/interface wireguard get [find where name=$WG_IFACE] public-key]
 :if ([:len $MY_PUB] < 40) do={
-  :log error "wg-auto-register: FAILED — could not read local public-key"
+  :log error "wg-auto-register: FAILED - could not read local public-key"
   :error "missing public-key"
 }
 :log info ("wg-auto-register: local public-key ok len=" . [:len $MY_PUB])
@@ -108,18 +107,18 @@
 :do {
   /tool fetch url=$url http-method=post http-data=$httpData http-header-field="Content-Type: application/x-www-form-urlencoded" dst-path=$tmpFile keep-result=yes
 } on-error={
-  :log error "wg-auto-register: FAILED — /tool fetch error (DNS, TLS, or URL)"
+  :log error "wg-auto-register: FAILED - /tool fetch error (DNS, TLS, or URL)"
   :error "fetch failed"
 }
 
 :if ([:len [/file find where name=$tmpFile]] = 0) do={
-  :log error "wg-auto-register: FAILED — empty fetch result"
+  :log error "wg-auto-register: FAILED - empty fetch result"
   :error "no response file"
 }
 
 :local raw [/file get [find where name=$tmpFile] contents]
 :if ([:len $raw] = 0) do={
-  :log error "wg-auto-register: FAILED — blank response body"
+  :log error "wg-auto-register: FAILED - blank response body"
   :error "blank response"
 }
 
@@ -159,7 +158,7 @@
 }
 
 :if (($okFlag != "true") || ([:len $tunnelIp] = 0) || ([:len $serverPublicKey] = 0) || ([:len $endpoint] = 0)) do={
-  :log error ("wg-auto-register: FAILED — ok=" . $okFlag . " error=" . $errMsg)
+  :log error ("wg-auto-register: FAILED - ok=" . $okFlag . " error=" . $errMsg)
   :error ("registration failed: " . $errMsg)
 }
 
@@ -167,7 +166,7 @@
 
 :local colon [:find $endpoint ":"]
 :if ($colon = nil) do={
-  :log error "wg-auto-register: FAILED — endpoint missing port"
+  :log error "wg-auto-register: FAILED - endpoint missing port"
   :error "bad endpoint"
 }
 :local epHost [:pick $endpoint 0 $colon]
@@ -206,5 +205,5 @@
   :if ([:len $wbId] > 0) do={ /ip service set $wbId disabled=no }
 } on-error={}
 
-:log info ("wg-auto-register: SUCCESS — tunnelIp=" . $tunnelIp . " — finish Add router in QareFi with SSH login")
+:log info ("wg-auto-register: SUCCESS - tunnelIp=" . $tunnelIp . " - finish Add router in QareFi with SSH login")
 :do { /file remove [find where name=$tmpFile] } on-error={}

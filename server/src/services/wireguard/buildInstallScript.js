@@ -22,7 +22,11 @@ function loadTemplate() {
 }
 
 function escapeRosString(s) {
-  return String(s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  /* RouterOS expands $var inside "..."; also escape quotes/backslashes */
+  return String(s || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, '\\$');
 }
 
 /**
