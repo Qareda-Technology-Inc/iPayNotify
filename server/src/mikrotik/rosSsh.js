@@ -208,6 +208,55 @@ export function parseDetailPrintOutput(stdout) {
   return rows;
 }
 
+/** A new as-value / detail row, not a terminal wrap of the previous one. */
+function isNewAsValueRecord(line) {
+  const t = String(line || '').trim();
+  if (/^\.id\s*=/i.test(t)) return true;
+  if (/^(?:#\s*)?\d+\s+\.id\s*=/i.test(t)) return true;
+  if (/^\*[0-9A-Fa-f]+\s+\S+=/.test(t)) return true;
+  /* Detail table: `0 user=…` or `0 R user=…` */
+  if (/^\d+\s+(?:[A-Z]{1,4}\s+)?[A-Za-z_][A-Za-z0-9_.-]*=/.test(t)) return true;
+  return false;
+}
+
+function isAsValueNoise(line) {
+  const t = String(line || '').trim();
+  if (!t) return true;
+  if (t.startsWith(';;;')) return true;
+  if (/^flags:/i.test(t)) return true;
+  if (t.startsWith('#') && !t.includes('=')) return true;
+  return false;
+}
+
+/**
+ * SSH wraps long `print as-value` lines at the terminal width. The next physical
+ * line is the rest of the same record (often starting at `uptime=` / `bytes-in=`).
+ * Joining them stops one hotspot session from being counted as two rows.
+ */
+function joinWrappedAsValueLines(stdout) {
+  const records = [];
+  let cur = '';
+  for (const raw of String(stdout || '').split(/\r?\n/)) {
+    const line = raw.replace(/\r$/, '');
+    if (isAsValueNoise(line)) continue;
+    const trimmed = line.trim();
+    if (!cur) {
+      cur = trimmed;
+      continue;
+    }
+    if (isNewAsValueRecord(trimmed)) {
+      records.push(cur);
+      cur = trimmed;
+      continue;
+    }
+    if (trimmed.startsWith(';') || cur.endsWith(';') || cur.endsWith('=')) cur += trimmed;
+    else if (/^[A-Za-z_][A-Za-z0-9_.-]*=/.test(trimmed)) cur += ` ${trimmed}`;
+    else cur += trimmed;
+  }
+  if (cur) records.push(cur);
+  return records;
+}
+
 /**
  * RouterOS `print as-value without-paging` (one logical record per line): `key=value;key=value`.
  * Also accepts space-separated `key=value` (terse-like) on a single line.
@@ -216,7 +265,7 @@ export function parseAsValuePrintOutput(stdout) {
   const rows = [];
   if (!stdout || typeof stdout !== 'string') return rows;
 
-  for (const raw of stdout.split('\n')) {
+  for (const raw of joinWrappedAsValueLines(stdout)) {
     let line = raw.replace(/\r$/, '').trim();
     if (!line || line.startsWith(';;;')) continue;
     if (/^flags:/i.test(line)) continue;
