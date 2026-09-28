@@ -45,6 +45,57 @@ function plainText(res, status, lines) {
   res.status(status).type('text/plain').send(body);
 }
 
+function rosQuote(s) {
+  return `"${String(s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$')}"`;
+}
+
+/** Router imports this file. No key=value parsing (RouterOS often returns empty file contents). */
+function applyScript(peer, wg) {
+  const endpoint = String(wg.endpoint || '');
+  const colon = endpoint.lastIndexOf(':');
+  const epHost = colon > 0 ? endpoint.slice(0, colon) : endpoint;
+  const epPort = colon > 0 ? endpoint.slice(colon + 1) : '51820';
+  const allowed = wg.clientAllowedIps || wg.tunnelPool || '10.66.54.0/24';
+  const tunnel = `${peer.tunnelIp}/24`;
+  const key = rosQuote(wg.serverPublicKey);
+  const host = rosQuote(epHost);
+  const port = rosQuote(epPort);
+  const allow = rosQuote(allowed);
+  const addr = rosQuote(tunnel);
+  return `{
+:put "QAREFI: 9 apply"
+:if ([:len [/ip address find where interface="wg-qarefi" comment="QareFi WG tunnel"]] = 0) do={
+  /ip address add address=${addr} interface="wg-qarefi" comment="QareFi WG tunnel"
+} else={
+  /ip address set [find where interface="wg-qarefi" comment="QareFi WG tunnel"] address=${addr}
+}
+:if ([:len [/interface wireguard peers find where interface="wg-qarefi" comment="QareFi VPS"]] = 0) do={
+  /interface wireguard peers add interface="wg-qarefi" public-key=${key} endpoint-address=${host} endpoint-port=${port} allowed-address=${allow} persistent-keepalive=25s comment="QareFi VPS"
+} else={
+  /interface wireguard peers set [find where interface="wg-qarefi" comment="QareFi VPS"] public-key=${key} endpoint-address=${host} endpoint-port=${port} allowed-address=${allow} persistent-keepalive=25s comment="QareFi VPS"
+}
+:if ([:len [/ip firewall filter find where comment="QareFi: VPN management"]] = 0) do={
+  :do {
+    /ip firewall filter add chain=input action=accept src-address=${allow} comment="QareFi: VPN management" place-before=0
+  } on-error={
+    /ip firewall filter add chain=input action=accept src-address=${allow} comment="QareFi: VPN management"
+  }
+}
+:put "QAREFI: SUCCESS ${peer.tunnelIp}"
+:log warning "QAREFI: SUCCESS ${peer.tunnelIp}"
+}
+`;
+}
+
+function sendRegister(req, res, status, lines, peer, wg) {
+  const format = String(req.query?.format || req.body?.format || '').toLowerCase();
+  if ((status === 200 || status === 201) && format === 'rsc' && peer && wg?.serverPublicKey && wg?.endpoint) {
+    res.status(status).type('text/plain; charset=utf-8').send(applyScript(peer, wg));
+    return;
+  }
+  return plainText(res, status, lines);
+}
+
 function successLines(peer, wg) {
   return [
     `tunnelIp=${peer.tunnelIp}`,
@@ -175,7 +226,7 @@ async function handleWireGuardRegister(req, res) {
           console.error('[wireguard] re-sync failed', peer.tunnelIp, e?.message || e);
         }
         await peer.save();
-        return plainText(res, 200, [...successLines(peer, wg), 'ok=true', 'existing=true']);
+        return sendRegister(req, res, 200, [...successLines(peer, wg), 'ok=true', 'existing=true'], peer, wg);
       }
 
       const tunnelIp = await allocateNextTunnelIp({ kind: 'router' });
@@ -198,7 +249,7 @@ async function handleWireGuardRegister(req, res) {
               peer.organizationId = organizationIdFinal;
               await peer.save();
             }
-            return plainText(res, 200, [...successLines(peer, wg), 'ok=true', 'existing=true']);
+            return sendRegister(req, res, 200, [...successLines(peer, wg), 'ok=true', 'existing=true'], peer, wg);
           }
         }
         throw e;
@@ -230,7 +281,7 @@ async function handleWireGuardRegister(req, res) {
         organizationId: organizationIdFinal ? String(organizationIdFinal) : null,
         publicKeyPrefix: `${publicKey.slice(0, 12)}…`,
       });
-      return plainText(res, 201, [...successLines(peer, wg), 'ok=true', 'existing=false']);
+      return sendRegister(req, res, 201, [...successLines(peer, wg), 'ok=true', 'existing=false'], peer, wg);
     } catch (e) {
       console.error('[wireguard] register error', e?.message || e);
       return plainText(res, e?.status || 500, [
