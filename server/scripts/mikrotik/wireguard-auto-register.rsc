@@ -52,25 +52,33 @@
 }
 :put "QAREFI: 5 pubkey ok"
 
-# base64url so MikroTik does not mangle + / = in the query string
+# base64url — store special chars in variables (RouterOS breaks on [:find x "/"])
 :local pk $mypub
-:set guard 0
-:while (([:find $pk "+"] != nil) && ($guard < 80)) do={
-  :local i [:find $pk "+"]
+:local plus "+"
+:local slash "/"
+:local eq "="
+:local guard 0
+:while (([:find $pk $plus] != nil) && ($guard < 80)) do={
+  :local i [:find $pk $plus]
   :set pk ([:pick $pk 0 $i] . "-" . [:pick $pk ($i + 1) [:len $pk]])
   :set guard ($guard + 1)
 }
 :set guard 0
-:while (([:find $pk "/"] != nil) && ($guard < 80)) do={
-  :local i [:find $pk "/"]
+:while (([:find $pk $slash] != nil) && ($guard < 80)) do={
+  :local i [:find $pk $slash]
   :set pk ([:pick $pk 0 $i] . "_" . [:pick $pk ($i + 1) [:len $pk]])
   :set guard ($guard + 1)
 }
 :set guard 0
-:while (([:find $pk "="] != nil) && ($guard < 8)) do={
-  :local i [:find $pk "="]
+:while (([:find $pk $eq] != nil) && ($guard < 8)) do={
+  :local i [:find $pk $eq]
   :set pk ([:pick $pk 0 $i] . [:pick $pk ($i + 1) [:len $pk]])
   :set guard ($guard + 1)
+}
+:put ("QAREFI: 5b keylen=" . [:len $pk] . " key=" . $pk)
+:if (([:len $pk] < 40) || ([:len $pk] > 50)) do={
+  :put "QAREFI: FAIL key encode"
+  :error "encode"
 }
 
 :local url ($apibase . "/api/routers/register/pk/" . $pk . "?siteName=" . $sitename . "&keyFormat=base64url")
@@ -84,7 +92,7 @@
 
 :local tmpfile "q.txt"
 :put "QAREFI: 6 register"
-:put ("QAREFI: 6a " . $url)
+:put ("QAREFI: 6a key=" . $pk)
 :do {
   /tool fetch url=$url dst-path=$tmpfile mode=https keep-result=yes
 } on-error={

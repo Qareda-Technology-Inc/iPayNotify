@@ -132,7 +132,14 @@ async function handleWireGuardRegister(req, res) {
         return plainText(res, 400, [
           'error=publicKey is required and must be a WireGuard public key',
           `debugKeyLen=${publicKey.length}`,
-          `debugKeyPrefix=${publicKey.slice(0, 12)}`,
+          `debugKeyPrefix=${publicKey.slice(0, 16)}`,
+          'ok=false',
+        ]);
+      }
+      /* Detect MikroTik [:find "/"] corruption (key becomes underscores) */
+      if ((publicKey.match(/_/g) || []).length > 10) {
+        return plainText(res, 400, [
+          'error=publicKey looks corrupted (too many underscores) — update install script',
           'ok=false',
         ]);
       }
