@@ -52,49 +52,38 @@
 }
 :put "QAREFI: 5 pubkey ok"
 
-# base64url — store special chars in variables (RouterOS breaks on [:find x "/"])
+# Only encode "+" (form bodies treat + as space). Do NOT search for "/" —
+# a script line containing the two-char string quote-slash-quote breaks /import
+# and the replace loop then inserts junk until the key is ~200 chars.
 :local pk $mypub
 :local plus "+"
-:local slash "/"
-:local eq "="
 :local guard 0
-:while (([:find $pk $plus] != nil) && ($guard < 80)) do={
+:while (([:find $pk $plus] != nil) && ($guard < 20)) do={
   :local i [:find $pk $plus]
-  :set pk ([:pick $pk 0 $i] . "-" . [:pick $pk ($i + 1) [:len $pk]])
+  :local nxt ($i + 1)
+  :set pk ([:pick $pk 0 $i] . "%2B" . [:pick $pk $nxt [:len $pk]])
   :set guard ($guard + 1)
 }
-:set guard 0
-:while (([:find $pk $slash] != nil) && ($guard < 80)) do={
-  :local i [:find $pk $slash]
-  :set pk ([:pick $pk 0 $i] . "_" . [:pick $pk ($i + 1) [:len $pk]])
-  :set guard ($guard + 1)
-}
-:set guard 0
-:while (([:find $pk $eq] != nil) && ($guard < 8)) do={
-  :local i [:find $pk $eq]
-  :set pk ([:pick $pk 0 $i] . [:pick $pk ($i + 1) [:len $pk]])
-  :set guard ($guard + 1)
-}
-:put ("QAREFI: 5b keylen=" . [:len $pk] . " key=" . $pk)
-:if (([:len $pk] < 40) || ([:len $pk] > 50)) do={
+:put ("QAREFI: 5b keylen=" . [:len $pk])
+:if (([:len $pk] < 40) || ([:len $pk] > 90)) do={
   :put "QAREFI: FAIL key encode"
   :error "encode"
 }
 
-:local url ($apibase . "/api/routers/register/pk/" . $pk . "?siteName=" . $sitename . "&keyFormat=base64url")
-:if ([:len $lansubnet] > 0) do={ :set url ($url . "&lanSubnet=" . $lansubnet) }
+:local url ($apibase . "/api/routers/register")
+:local httpdata ("publicKey=" . $pk . "&siteName=" . $sitename)
+:if ([:len $lansubnet] > 0) do={ :set httpdata ($httpdata . "&lanSubnet=" . $lansubnet) }
 :if ([:len $bootcode] > 0) do={
-  :set url ($url . "&boot=" . $bootcode)
+  :set httpdata ($httpdata . "&boot=" . $bootcode)
 } else={
-  :if ([:len $regtoken] > 0) do={ :set url ($url . "&token=" . $regtoken) }
+  :if ([:len $regtoken] > 0) do={ :set httpdata ($httpdata . "&token=" . $regtoken) }
 }
-:if ([:len $orgid] > 0) do={ :set url ($url . "&organizationId=" . $orgid) }
+:if ([:len $orgid] > 0) do={ :set httpdata ($httpdata . "&organizationId=" . $orgid) }
 
 :local tmpfile "q.txt"
 :put "QAREFI: 6 register"
-:put ("QAREFI: 6a key=" . $pk)
 :do {
-  /tool fetch url=$url dst-path=$tmpfile mode=https keep-result=yes
+  /tool fetch url=$url http-method=post http-data=$httpdata http-header-field="Content-Type: application/x-www-form-urlencoded" dst-path=$tmpfile mode=https keep-result=yes
 } on-error={
   :put "QAREFI: FAIL register fetch"
   :do {
