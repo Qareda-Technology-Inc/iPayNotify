@@ -47,13 +47,11 @@ function parseOrgId(raw) {
 }
 
 /**
- * POST /api/routers/register
- * Body/query: publicKey, siteName, lanSubnet?[, token][, organizationId]
- * Response: plain text key=value (RouterOS-friendly). Never JSON.
+ * GET|POST /api/routers/register
+ * Query/body: publicKey, siteName, lanSubnet?[, token][, organizationId]
+ * Response: plain text key=value (RouterOS-friendly). GET preferred for MikroTik /tool fetch.
  */
-wireguardRegisterRouter.post(
-  '/register',
-  asyncHandler(async (req, res) => {
+async function handleWireGuardRegister(req, res) {
     try {
       const wg = config.wireguard;
       if (!wg?.serverPublicKey || !wg?.endpoint) {
@@ -184,8 +182,10 @@ wireguardRegisterRouter.post(
         'ok=false',
       ]);
     }
-  })
-);
+}
+
+wireguardRegisterRouter.post('/register', asyncHandler(handleWireGuardRegister));
+wireguardRegisterRouter.get('/register', asyncHandler(handleWireGuardRegister));
 
 wireguardRegisterRouter.get(
   '/register/ping',

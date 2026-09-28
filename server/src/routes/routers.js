@@ -102,22 +102,26 @@ routersApi.get(
       expiresAt,
     });
 
-    const fileName = 'qarefi-install.rsc';
-    const scriptName = 'qarefiinstall';
+    const fileName = 'r.rsc';
     const fetchUrl = `${apiBase}/api/routers/b/${code}.rsc`;
     const wakeUrl = `${apiBase}/api/health`;
-    const wakeCmd = `/tool fetch url="${wakeUrl}" keep-result=no check-certificate=no`;
-    const fetchCmd = `/tool fetch url="${fetchUrl}" dst-path=${fileName} check-certificate=no`;
     /*
-     * Avoid /import — unreliable on many ROS builds.
-     * Load file contents into /system script and run (works when import is silent/broken).
+     * NicksWifi-style: one pasteable { } block —
+     * DNS → ping check → fetch mode=https → /import → cleanup
      */
-    const runCmd =
-      `/system script remove [find where name="${scriptName}"]; ` +
-      `/system script add name=${scriptName} policy=read,write,policy,test,sensitive ` +
-      `source=[/file get [/file find where name="${fileName}"] contents]; ` +
-      `/system script run ${scriptName}`;
-    const oneShot = `${fetchCmd}\n${runCmd}`;
+    const pasteBlock =
+      `{ ` +
+      `:put "QAREFI: bootstrap"; ` +
+      `/tool fetch url="${fetchUrl}" dst-path="${fileName}" mode=https; ` +
+      `:delay 2s; ` +
+      `/import file-name="${fileName}"; ` +
+      `:delay 1s; ` +
+      `:do { /file remove "${fileName}" } on-error={} ` +
+      `}`;
+
+    const wakeCmd = `/tool fetch url="${wakeUrl}" keep-result=no mode=https`;
+    const fetchCmd = `/tool fetch url="${fetchUrl}" dst-path=${fileName} mode=https`;
+    const importCmd = `/import file-name=${fileName}`;
 
     res.json({
       code,
@@ -127,12 +131,13 @@ routersApi.get(
       wakeUrl,
       wakeCmd,
       fetchCmd,
-      importCmd: runCmd,
-      runCmd,
-      oneShot,
-      steps: [wakeCmd, fetchCmd, runCmd],
+      importCmd,
+      runCmd: pasteBlock,
+      oneShot: pasteBlock,
+      pasteBlock,
+      steps: [pasteBlock],
       hint:
-        'Run 3 separate Terminal commands. Step 3 uses /system script (not /import). You must see QAREFI: lines. If step 3 says source too long, say so.',
+        'Paste the { ... } block into Terminal. It only fetches r.rsc and /imports it. The script creates WireGuard tunnel wg-qarefi + one VPN management firewall accept — it does not change DNS, DHCP, or WAN.',
     });
   })
 );

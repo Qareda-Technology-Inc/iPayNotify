@@ -234,43 +234,32 @@ export function AddRouterWizard({ onCreated, onCancel }) {
                 />
               </label>
               <ol className="list-decimal space-y-1.5 pl-4 text-xs text-slate-400">
-                <li>Open your API health URL in a browser first (wakes Render if asleep)</li>
-                <li>On MikroTik: paste the wake test, wait until status finished</li>
-                <li>Paste the install command (short URL + check-certificate=no)</li>
-                <li>Open “2. Finish” when the peer appears</li>
+                <li>Open API health URL in a browser (wake Render if asleep)</li>
+                <li>Copy the paste block below into MikroTik Terminal (one shot, like NicksWifi)</li>
+                <li>Watch for QAREFI: SUCCESS — then open “2. Finish”</li>
               </ol>
               <button
                 type="button"
                 onClick={loadFetchCommands}
                 className="flex h-11 w-full items-center justify-center rounded-xl bg-emerald-600 text-sm font-semibold text-white hover:bg-emerald-500"
               >
-                Get /tool fetch command
+                Get paste command
               </button>
-              {fetchCmds?.wakeCmd ? (
+              {fetchCmds?.pasteBlock || fetchCmds?.oneShot ? (
                 <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-950/60 p-3">
                   <p className="text-[11px] text-amber-200/90">
-                    Run as <span className="font-semibold">3 separate</span> commands. Step 3 uses{' '}
-                    <span className="font-mono">/system script</span> (not /import). You must see{' '}
-                    <span className="font-mono">QAREFI:</span> in Terminal.
+                    Paste this <span className="font-semibold">entire</span> block into Terminal (includes DNS +
+                    fetch mode=https + /import).
                   </p>
-                  {(fetchCmds.steps || [fetchCmds.wakeCmd, fetchCmds.fetchCmd, fetchCmds.importCmd]).map(
-                    (cmd, i) => (
-                      <div key={i} className="space-y-1">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                          Step {i + 1}
-                        </p>
-                        <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-emerald-200/90">
-                          {cmd}
-                        </pre>
-                      </div>
-                    )
-                  )}
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-emerald-200/90">
+                    {fetchCmds.pasteBlock || fetchCmds.oneShot}
+                  </pre>
                   <button
                     type="button"
                     onClick={copyOneShot}
                     className="w-full rounded-lg border border-slate-600 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
                   >
-                    {copied ? 'Copied all steps' : 'Copy all steps'}
+                    {copied ? 'Copied' : 'Copy paste block'}
                   </button>
                 </div>
               ) : null}
