@@ -112,6 +112,27 @@ function looksLikeMac(s) {
   return /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i.test(String(s || '').trim());
 }
 
+function formatBytes(n) {
+  if (!Number.isFinite(n) || n < 0) return '';
+  if (n < 1024) return `${Math.round(n)} B`;
+  if (n < 1048576) return `${(n / 1024).toFixed(1)} KiB`;
+  if (n < 1073741824) return `${(n / 1048576).toFixed(1)} MiB`;
+  return `${(n / 1073741824).toFixed(2)} GiB`;
+}
+
+function formatQuota(bytesIn, bytesOut, limitTotal) {
+  const bi = Number(bytesIn);
+  const bo = Number(bytesOut);
+  const used =
+    (Number.isFinite(bi) ? bi : 0) + (Number.isFinite(bo) ? bo : 0);
+  const limit = Number(limitTotal);
+  const hasUsed = Number.isFinite(bi) || Number.isFinite(bo);
+  const hasLimit = Number.isFinite(limit) && limit > 0;
+  if (!hasUsed && !hasLimit) return '—';
+  if (hasLimit) return `${formatBytes(used)} / ${formatBytes(limit)}`;
+  return formatBytes(used);
+}
+
 /**
  * Hotspot active: real username only (never use MAC as the name).
  */
@@ -124,8 +145,11 @@ function mapHotspotActiveRow(r) {
   const address = rosFirstStr(r, ['address']);
   const bi = rosFirstNumber(r, ['bytes-in', 'bytes_in', 'rx-byte']);
   const bo = rosFirstNumber(r, ['bytes-out', 'bytes_out', 'tx-byte']);
+  const limitTotal = rosFirstNumber(r, ['limit-bytes-total', 'limit-bytes']);
 
   if (!user && !address && !mac) return null;
+
+  const timeLeft = rosFirstStr(r, ['session-time-left', 'limit-uptime']);
 
   return {
     id: r['.id'] ?? r.id ?? r.numbers ?? null,
@@ -133,6 +157,8 @@ function mapHotspotActiveRow(r) {
     address: address || '—',
     macAddress: mac && looksLikeMac(mac) ? mac : mac || '—',
     uptime: rosFirstStr(r, ['uptime', 'session-time']) || '—',
+    timeLeft: timeLeft || '',
+    quota: formatQuota(bi, bo, limitTotal),
     statistics: formatTrafficStats(bi, bo),
   };
 }
@@ -213,7 +239,7 @@ function mapRouterDetails(identityRows, resourceRows, boardRows) {
   const freeMem = rosFirstNumber(res, ['free-memory', 'free_memory']);
   const totalMem = rosFirstNumber(res, ['total-memory', 'total_memory']);
   return {
-    identity: rosFirstStr(id, ['name']) || 'MikroTik',
+    identity: rosFirstStr(id, ['name']) || '—',
     version: rosFirstStr(res, ['version']) || '—',
     boardName: rosFirstStr(res, ['board-name']) || rosFirstStr(board, ['board-name', 'model']) || '—',
     architecture: rosFirstStr(res, ['architecture-name', 'cpu']) || '—',

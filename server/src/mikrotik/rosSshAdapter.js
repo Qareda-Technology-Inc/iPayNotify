@@ -8,6 +8,7 @@ import {
   normalizeRouterForSsh,
   parseActiveListStdout,
   parseAsValuePrintOutput,
+  parseColonDetailOutput,
   parseDetailPrintOutput,
   parseIdentityName,
   sshLoginRejectedError,
@@ -112,11 +113,14 @@ export class SshRosAdapter {
 
     if (typeof cmd === 'string' && cmd.endsWith('/print')) {
       const base = cmd.replace(/\/print$/, '').split('/').filter(Boolean).join(' ');
-      if (base === 'system identity') {
-        return [{ name: parseIdentityName(out) }];
-      }
       const asRows = parseAsValuePrintOutput(out);
       if (asRows.length > 0) return asRows;
+      if (base === 'system identity') {
+        const name = parseIdentityName(out);
+        if (name) return [{ name }];
+      }
+      const colon = parseColonDetailOutput(out);
+      if (colon) return [colon];
       return parseDetailPrintOutput(out);
     }
 

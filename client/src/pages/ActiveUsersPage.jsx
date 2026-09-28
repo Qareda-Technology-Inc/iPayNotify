@@ -252,20 +252,26 @@ export function ActiveUsersPage() {
                     <h2 className="truncate text-lg font-medium text-white">{r.routerName}</h2>
                     <p className="mt-0.5 truncate font-mono text-xs text-slate-500">{r.host}</p>
                   </div>
-                  {r.details && (
+                  {r.details && (r.details.identity !== '—' || r.details.version !== '—' || r.details.uptime !== '—') && (
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 sm:grid-cols-3">
-                      <div>
-                        <span className="text-slate-600">Identity</span>
-                        <p className="font-medium text-slate-200">{r.details.identity}</p>
-                      </div>
-                      <div>
-                        <span className="text-slate-600">Version</span>
-                        <p className="font-medium text-slate-200">{r.details.version}</p>
-                      </div>
-                      <div>
-                        <span className="text-slate-600">Uptime</span>
-                        <p className="font-medium text-slate-200">{r.details.uptime}</p>
-                      </div>
+                      {r.details.identity && r.details.identity !== '—' ? (
+                        <div>
+                          <span className="text-slate-600">Identity</span>
+                          <p className="font-medium text-slate-200">{r.details.identity}</p>
+                        </div>
+                      ) : null}
+                      {r.details.version && r.details.version !== '—' ? (
+                        <div>
+                          <span className="text-slate-600">Version</span>
+                          <p className="font-medium text-slate-200">{r.details.version}</p>
+                        </div>
+                      ) : null}
+                      {r.details.uptime && r.details.uptime !== '—' ? (
+                        <div>
+                          <span className="text-slate-600">Router uptime</span>
+                          <p className="font-medium text-slate-200">{r.details.uptime}</p>
+                        </div>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -294,15 +300,14 @@ export function ActiveUsersPage() {
                         <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
                           <tr>
                             <th className="px-3 py-2">User</th>
-                            <th className="px-3 py-2">IP</th>
                             <th className="px-3 py-2">Uptime</th>
-                            <th className="hidden px-3 py-2 sm:table-cell">Traffic</th>
+                            <th className="px-3 py-2">Quota</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/80 text-slate-300">
                           {(r.hotspotActive || []).length === 0 ? (
                             <tr>
-                              <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
+                              <td colSpan={3} className="px-3 py-6 text-center text-slate-500">
                                 No hotspot sessions
                               </td>
                             </tr>
@@ -312,11 +317,13 @@ export function ActiveUsersPage() {
                                 <td className="px-3 py-2 font-mono text-sm text-cyan-200/90">
                                   {row.user}
                                 </td>
-                                <td className="px-3 py-2 font-mono text-xs">{row.address || '—'}</td>
-                                <td className="px-3 py-2 text-xs text-slate-400">{row.uptime}</td>
-                                <td className="hidden px-3 py-2 font-mono text-xs text-slate-400 sm:table-cell">
-                                  {row.statistics}
+                                <td className="px-3 py-2 text-xs text-slate-300">
+                                  <div>{row.uptime}</div>
+                                  {row.timeLeft ? (
+                                    <div className="text-[11px] text-slate-500">left {row.timeLeft}</div>
+                                  ) : null}
                                 </td>
+                                <td className="px-3 py-2 font-mono text-xs text-slate-300">{row.quota || '—'}</td>
                               </tr>
                             ))
                           )}

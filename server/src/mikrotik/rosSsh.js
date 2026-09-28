@@ -488,7 +488,20 @@ export function parseIdentityName(stdout) {
     /^\s*name:\s*(.+)$/im.exec(stdout) ||
     /\bname="([^"]+)"/i.exec(stdout) ||
     /\bname=(\S+)/i.exec(stdout);
-  return m ? String(m[1]).trim().replace(/^"|"$/g, '') : 'MikroTik';
+  return m ? String(m[1]).trim().replace(/^"|"$/g, '') : '';
+}
+
+/** RouterOS default print uses `key: value` (not `key=value`) — system resource/identity. */
+export function parseColonDetailOutput(stdout) {
+  const obj = {};
+  for (const raw of String(stdout || '').split('\n')) {
+    const line = raw.replace(/\r$/, '').trim();
+    const m = /^([a-z0-9][a-z0-9-]{0,40}):\s*(.*)$/i.exec(line);
+    if (!m) continue;
+    if (/^flags$/i.test(m[1])) continue;
+    obj[m[1]] = m[2].trim();
+  }
+  return Object.keys(obj).length ? obj : null;
 }
 
 /**
@@ -526,8 +539,8 @@ export function buildExecFromWriteArgs(cmd) {
     if (cmd.endsWith('/print')) {
       const base = cmd.slice(0, -'/print'.length);
       const verb = apiPathToCliVerb(base);
-      if (verb === '/system identity') {
-        return '/system identity print without-paging';
+      if (verb === '/system identity' || verb === '/system resource' || verb === '/system routerboard') {
+        return `${verb} print as-value without-paging`;
       }
       if (isActiveSessionsListPrint(cmd)) {
         return `${verb} print as-value without-paging`;
