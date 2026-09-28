@@ -188,41 +188,43 @@ export function ActiveUsersPage() {
       </div>
 
       {(data || loading) && (
-        <div className="mt-6 flex flex-wrap gap-4 text-sm">
-          <div className="rounded-xl border border-slate-600/60 bg-slate-900/60 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              {search || typeFilter !== 'all' || routerFilter ? 'Matching' : 'Total live'}
-            </p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums text-white">
-              {data
-                ? search || typeFilter !== 'all' || routerFilter
-                  ? filteredTotals.all
-                  : totals?.all ?? filteredTotals.all
-                : '—'}
-            </p>
-          </div>
-          <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/25 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-cyan-400/90">Hotspot</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums text-cyan-100">
-              {data
-                ? search || typeFilter !== 'all' || routerFilter
-                  ? filteredTotals.hotspot
-                  : totals?.hotspot ?? 0
-                : '—'}
-            </p>
-          </div>
-          <div className="rounded-xl border border-violet-500/30 bg-violet-950/25 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-violet-400/90">PPP</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums text-violet-100">
-              {data
-                ? search || typeFilter !== 'all' || routerFilter
-                  ? filteredTotals.ppp
-                  : totals?.ppp ?? 0
-                : '—'}
-            </p>
+        <div className="mt-6">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-slate-600/60 bg-slate-900/60 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                {search || typeFilter !== 'all' || routerFilter ? 'Matching' : 'Total live'}
+              </p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-white">
+                {data
+                  ? search || typeFilter !== 'all' || routerFilter
+                    ? filteredTotals.all
+                    : totals?.all ?? filteredTotals.all
+                  : '—'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/25 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-cyan-400/90">Hotspot</p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-cyan-100">
+                {data
+                  ? search || typeFilter !== 'all' || routerFilter
+                    ? filteredTotals.hotspot
+                    : totals?.hotspot ?? 0
+                  : '—'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-violet-500/30 bg-violet-950/25 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-violet-400/90">PPP</p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-violet-100">
+                {data
+                  ? search || typeFilter !== 'all' || routerFilter
+                    ? filteredTotals.ppp
+                    : totals?.ppp ?? 0
+                  : '—'}
+              </p>
+            </div>
           </div>
           {data?.at && (
-            <p className="self-end text-xs text-slate-500">
+            <p className="mt-2 text-xs text-slate-500">
               Snapshot: {new Date(data.at).toLocaleString()}
               {refreshing ? ' · updating…' : ''}
             </p>
@@ -252,28 +254,23 @@ export function ActiveUsersPage() {
                     <h2 className="truncate text-lg font-medium text-white">{r.routerName}</h2>
                     <p className="mt-0.5 truncate font-mono text-xs text-slate-500">{r.host}</p>
                   </div>
-                  {r.details && (r.details.identity !== '—' || r.details.version !== '—' || r.details.uptime !== '—') && (
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 sm:grid-cols-3">
-                      {r.details.identity && r.details.identity !== '—' ? (
-                        <div>
-                          <span className="text-slate-600">Identity</span>
-                          <p className="font-medium text-slate-200">{r.details.identity}</p>
-                        </div>
-                      ) : null}
-                      {r.details.version && r.details.version !== '—' ? (
-                        <div>
-                          <span className="text-slate-600">Version</span>
-                          <p className="font-medium text-slate-200">{r.details.version}</p>
-                        </div>
-                      ) : null}
-                      {r.details.uptime && r.details.uptime !== '—' ? (
-                        <div>
-                          <span className="text-slate-600">Router uptime</span>
-                          <p className="font-medium text-slate-200">{r.details.uptime}</p>
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
+                  <div className="grid w-full grid-cols-3 gap-2 sm:w-auto sm:min-w-[22rem]">
+                    {[
+                      ['Identity', r.details?.identity],
+                      ['Version', r.details?.version],
+                      ['Uptime', r.details?.uptime],
+                    ].map(([label, value]) => (
+                      <div
+                        key={label}
+                        className="h-14 overflow-auto rounded-lg border border-slate-800 bg-slate-950/50 px-2.5 py-1.5"
+                      >
+                        <span className="text-[10px] uppercase tracking-wide text-slate-600">{label}</span>
+                        <p className="whitespace-nowrap text-xs font-medium text-slate-200">
+                          {value && value !== '—' ? value : '—'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 {r.error && (
                   <p className="mt-2 rounded-lg border border-amber-500/35 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
@@ -289,19 +286,23 @@ export function ActiveUsersPage() {
                   )}
               </div>
 
-              <div className="grid gap-6 p-4 sm:p-5 lg:grid-cols-2">
+              <div
+                className={`grid items-stretch gap-4 p-4 sm:p-5 ${
+                  typeFilter === 'all' ? 'lg:grid-cols-2' : 'grid-cols-1'
+                }`}
+              >
                 {typeFilter !== 'ppp' ? (
-                  <div className="min-w-0">
+                  <div className="flex min-h-0 min-w-0 flex-col">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-cyan-500/90">
                       Hotspot active ({r.hotspotActive?.length ?? 0})
                     </h3>
-                    <div className="mt-2 overflow-x-auto rounded-xl border border-slate-800">
-                      <table className="w-full min-w-[300px] text-left text-sm">
-                        <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
+                    <div className="mt-2 h-72 overflow-auto rounded-xl border border-slate-800">
+                      <table className="w-full table-fixed text-left text-sm">
+                        <thead className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950 text-xs text-slate-500">
                           <tr>
-                            <th className="px-3 py-2">User</th>
-                            <th className="px-3 py-2">Uptime</th>
-                            <th className="px-3 py-2">Quota</th>
+                            <th className="w-1/3 px-3 py-2">User</th>
+                            <th className="w-1/3 px-3 py-2">Uptime</th>
+                            <th className="w-1/3 px-3 py-2">Quota</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/80 text-slate-300">
@@ -314,16 +315,26 @@ export function ActiveUsersPage() {
                           ) : (
                             r.hotspotActive.map((row, i) => (
                               <tr key={row.id || `${row.user}-${row.address}-${i}`}>
-                                <td className="px-3 py-2 font-mono text-sm text-cyan-200/90">
-                                  {row.user}
+                                <td className="px-3 py-2 align-top">
+                                  <div className="overflow-x-auto whitespace-nowrap font-mono text-sm text-cyan-200/90">
+                                    {row.user || '—'}
+                                  </div>
                                 </td>
-                                <td className="px-3 py-2 text-xs text-slate-300">
-                                  <div>{row.uptime}</div>
+                                <td className="px-3 py-2 align-top">
+                                  <div className="overflow-x-auto whitespace-nowrap text-xs text-slate-300">
+                                    {row.uptime || '—'}
+                                  </div>
                                   {row.timeLeft ? (
-                                    <div className="text-[11px] text-slate-500">left {row.timeLeft}</div>
+                                    <div className="overflow-x-auto whitespace-nowrap text-[11px] text-slate-500">
+                                      left {row.timeLeft}
+                                    </div>
                                   ) : null}
                                 </td>
-                                <td className="px-3 py-2 font-mono text-xs text-slate-300">{row.quota || '—'}</td>
+                                <td className="px-3 py-2 align-top">
+                                  <div className="overflow-x-auto whitespace-nowrap font-mono text-xs text-slate-300">
+                                    {row.quota || '—'}
+                                  </div>
+                                </td>
                               </tr>
                             ))
                           )}
@@ -334,17 +345,17 @@ export function ActiveUsersPage() {
                 ) : null}
 
                 {typeFilter !== 'hotspot' ? (
-                  <div className="min-w-0">
+                  <div className="flex min-h-0 min-w-0 flex-col">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-violet-500/90">
                       PPP active ({r.pppActive?.length ?? 0})
                     </h3>
-                    <div className="mt-2 overflow-x-auto rounded-xl border border-slate-800">
-                      <table className="w-full min-w-[280px] text-left text-sm">
-                        <thead className="border-b border-slate-800 bg-slate-950/80 text-xs text-slate-500">
+                    <div className="mt-2 h-72 overflow-auto rounded-xl border border-slate-800">
+                      <table className="w-full table-fixed text-left text-sm">
+                        <thead className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950 text-xs text-slate-500">
                           <tr>
-                            <th className="px-3 py-2">Username</th>
-                            <th className="px-3 py-2">IP</th>
-                            <th className="px-3 py-2">Uptime</th>
+                            <th className="w-1/3 px-3 py-2">Username</th>
+                            <th className="w-1/3 px-3 py-2">IP</th>
+                            <th className="w-1/3 px-3 py-2">Uptime</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/80 text-slate-300">
@@ -357,11 +368,21 @@ export function ActiveUsersPage() {
                           ) : (
                             r.pppActive.map((row, i) => (
                               <tr key={row.id || `${row.secret}-${i}`}>
-                                <td className="px-3 py-2 font-mono text-sm text-violet-200/90">
-                                  {row.secret}
+                                <td className="px-3 py-2 align-top">
+                                  <div className="overflow-x-auto whitespace-nowrap font-mono text-sm text-violet-200/90">
+                                    {row.secret || '—'}
+                                  </div>
                                 </td>
-                                <td className="px-3 py-2 font-mono text-xs">{row.address}</td>
-                                <td className="px-3 py-2 text-xs text-slate-400">{row.uptime}</td>
+                                <td className="px-3 py-2 align-top">
+                                  <div className="overflow-x-auto whitespace-nowrap font-mono text-xs">
+                                    {row.address || '—'}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <div className="overflow-x-auto whitespace-nowrap text-xs text-slate-400">
+                                    {row.uptime || '—'}
+                                  </div>
+                                </td>
                               </tr>
                             ))
                           )}
