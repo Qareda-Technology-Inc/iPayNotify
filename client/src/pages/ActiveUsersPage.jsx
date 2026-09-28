@@ -347,7 +347,7 @@ export function ActiveUsersPage() {
                 {typeFilter !== 'hotspot' ? (
                   <div className="flex min-h-0 min-w-0 flex-col">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-violet-500/90">
-                      PPP active ({r.pppActive?.length ?? 0})
+                      PPPoE active ({r.pppActive?.length ?? 0})
                     </h3>
                     <div className="mt-2 h-72 overflow-auto rounded-xl border border-slate-800">
                       <table className="w-full table-fixed text-left text-sm">
@@ -362,7 +362,7 @@ export function ActiveUsersPage() {
                           {(r.pppActive || []).length === 0 ? (
                             <tr>
                               <td colSpan={3} className="px-3 py-6 text-center text-slate-500">
-                                No PPP sessions
+                                No PPPoE sessions
                               </td>
                             </tr>
                           ) : (

@@ -42,6 +42,15 @@ export async function printPppSecrets(api) {
 }
 
 export async function printPppActive(api) {
+  /* API query words are ignored by the SSH adapter; SSH adds `where service=pppoe` itself. */
+  if (typeof api.execCli !== 'function') {
+    try {
+      const raw = await api.write('/ppp/active/print', ['?service=pppoe']);
+      return normalizePrintRows(raw);
+    } catch {
+      /* full list; PPPoE rows are kept when mapped */
+    }
+  }
   const raw = await api.write('/ppp/active/print');
   return normalizePrintRows(raw);
 }
