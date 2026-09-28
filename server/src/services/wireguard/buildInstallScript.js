@@ -60,6 +60,9 @@ export function buildWireGuardInstallScript(overrides = {}) {
   body = replaceLocal(body, 'regtoken', rosFormToken(token));
   body = replaceLocal(body, 'orgid', escapeRosString(orgId));
   body = replaceLocal(body, 'wgpool', escapeRosString(pool));
+  if (overrides.bootCode != null && String(overrides.bootCode).trim()) {
+    body = replaceLocal(body, 'bootcode', escapeRosString(String(overrides.bootCode).trim()));
+  }
 
   if (overrides.siteName != null && String(overrides.siteName).trim()) {
     body = replaceLocal(body, 'sitename', escapeRosString(String(overrides.siteName).trim()));

@@ -103,8 +103,27 @@ async function handleWireGuardRegister(req, res) {
         input.organizationId || input.organization_id || input.orgId
       );
 
+      /* Auth: valid bootstrap code OR WG_REGISTER_TOKEN (when configured) */
+      let resolvedOrgId = organizationId;
+      const boot = String(input.boot || input.bootCode || input.bootstrapCode || '').trim();
+      let bootOk = false;
+      if (boot) {
+        try {
+          const { InstallBootstrapCode } = await import('../models/InstallBootstrapCode.js');
+          const row = await InstallBootstrapCode.findOne({ code: boot }).lean();
+          bootOk = Boolean(row && (!row.expiresAt || new Date(row.expiresAt) >= new Date()));
+          if (bootOk && row.organizationId) {
+            if (organizationId && String(row.organizationId) !== String(organizationId)) {
+              return plainText(res, 403, ['error=Bootstrap code org mismatch', 'ok=false']);
+            }
+            resolvedOrgId = row.organizationId;
+          }
+        } catch {
+          bootOk = false;
+        }
+      }
       if (wg.registerToken) {
-        if (!token || token !== wg.registerToken) {
+        if (!bootOk && (!token || token !== wg.registerToken)) {
           return plainText(res, 401, ['error=Invalid or missing registration token', 'ok=false']);
         }
       }
@@ -113,6 +132,7 @@ async function handleWireGuardRegister(req, res) {
         return plainText(res, 400, [
           'error=publicKey is required and must be a WireGuard public key',
           `debugKeyLen=${publicKey.length}`,
+          `debugKeyPrefix=${publicKey.slice(0, 12)}`,
           'ok=false',
         ]);
       }
@@ -126,12 +146,14 @@ async function handleWireGuardRegister(req, res) {
         ]);
       }
 
+      const organizationIdFinal = resolvedOrgId;
+
       let peer = await WireGuardPeer.findOne({ publicKey });
       if (peer) {
         peer.lastSeen = new Date();
         if (siteName && siteName !== peer.siteName) peer.siteName = siteName;
         if (lanSubnet && lanSubnet !== peer.lanSubnet) peer.lanSubnet = lanSubnet;
-        if (organizationId && !peer.organizationId) peer.organizationId = organizationId;
+        if (organizationIdFinal && !peer.organizationId) peer.organizationId = organizationIdFinal;
         try {
           await syncWireGuardPeerToVps({
             publicKey: peer.publicKey,
@@ -158,14 +180,14 @@ async function handleWireGuardRegister(req, res) {
           kind: 'router',
           status: 'active',
           lastSeen: new Date(),
-          ...(organizationId ? { organizationId } : {}),
+          ...(organizationIdFinal ? { organizationId: organizationIdFinal } : {}),
         });
       } catch (e) {
         if (e?.code === 11000) {
           peer = await WireGuardPeer.findOne({ publicKey });
           if (peer) {
-            if (organizationId && !peer.organizationId) {
-              peer.organizationId = organizationId;
+            if (organizationIdFinal && !peer.organizationId) {
+              peer.organizationId = organizationIdFinal;
               await peer.save();
             }
             return plainText(res, 200, [...successLines(peer, wg), 'ok=true', 'existing=true']);
@@ -197,7 +219,7 @@ async function handleWireGuardRegister(req, res) {
       console.log('[wireguard] registered', {
         siteName,
         tunnelIp,
-        organizationId: organizationId ? String(organizationId) : null,
+        organizationId: organizationIdFinal ? String(organizationIdFinal) : null,
         publicKeyPrefix: `${publicKey.slice(0, 12)}…`,
       });
       return plainText(res, 201, [...successLines(peer, wg), 'ok=true', 'existing=false']);
@@ -212,6 +234,22 @@ async function handleWireGuardRegister(req, res) {
 
 wireguardRegisterRouter.post('/register', asyncHandler(handleWireGuardRegister));
 wireguardRegisterRouter.get('/register', asyncHandler(handleWireGuardRegister));
+
+/**
+ * Path-based key (MikroTik-safe — avoids query-string +/= mangling).
+ * GET /api/routers/register/pk/:publicKey?siteName=&organizationId=&boot=&token=
+ */
+wireguardRegisterRouter.get(
+  '/register/pk/:publicKey',
+  asyncHandler(async (req, res) => {
+    req.query = {
+      ...(req.query || {}),
+      publicKey: req.params.publicKey,
+      keyFormat: req.query?.keyFormat || 'base64url',
+    };
+    return handleWireGuardRegister(req, res);
+  })
+);
 
 wireguardRegisterRouter.get(
   '/register/ping',
@@ -286,6 +324,7 @@ wireguardRegisterRouter.get(
     );
     const script = buildWireGuardInstallScript({
       organizationId: String(row.organizationId),
+      bootCode: code,
       ...(row.siteName ? { siteName: row.siteName } : {}),
       ...(row.lanSubnet ? { lanSubnet: row.lanSubnet } : {}),
     });

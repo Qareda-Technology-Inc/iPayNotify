@@ -6,6 +6,7 @@
 :local sitename "auto"
 :local lansubnet ""
 :local regtoken ""
+:local bootcode ""
 :local wgiface "wg-qarefi"
 :local wgpool "10.66.54.0/24"
 :local vpnmgmt "QareFi: VPN management"
@@ -72,20 +73,26 @@
   :set guard ($guard + 1)
 }
 
-:local url ($apibase . "/api/routers/register?publicKey=" . $pk . "&siteName=" . $sitename . "&keyFormat=base64url")
+:local url ($apibase . "/api/routers/register/pk/" . $pk . "?siteName=" . $sitename . "&keyFormat=base64url")
 :if ([:len $lansubnet] > 0) do={ :set url ($url . "&lanSubnet=" . $lansubnet) }
-:if ([:len $regtoken] > 0) do={ :set url ($url . "&token=" . $regtoken) }
+:if ([:len $bootcode] > 0) do={
+  :set url ($url . "&boot=" . $bootcode)
+} else={
+  :if ([:len $regtoken] > 0) do={ :set url ($url . "&token=" . $regtoken) }
+}
 :if ([:len $orgid] > 0) do={ :set url ($url . "&organizationId=" . $orgid) }
 
 :local tmpfile "q.txt"
 :put "QAREFI: 6 register"
+:put ("QAREFI: 6a " . $url)
 :do {
   /tool fetch url=$url dst-path=$tmpfile mode=https keep-result=yes
 } on-error={
   :put "QAREFI: FAIL register fetch"
   :do {
-    :local rawerr [/file get [find where name=$tmpfile] contents]
-    :put ("QAREFI: body=" . $rawerr)
+    :if ([:len [/file find where name=$tmpfile]] > 0) do={
+      :put ("QAREFI: body=" . [/file get [find where name=$tmpfile] contents])
+    }
   } on-error={}
   :error "fetch"
 }
