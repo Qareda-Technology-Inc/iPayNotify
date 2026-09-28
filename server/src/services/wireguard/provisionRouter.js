@@ -2,10 +2,12 @@ import { Router as MikrotikRouter } from '../../models/index.js';
 import { config } from '../../config.js';
 import { withRouterMikrotik } from '../../mikrotik/routeros.js';
 import { parseRouterConnectString } from '../../utils/routerConnect.js';
+import { cliEscapeValue } from '../../mikrotik/rosSsh.js';
 import { isValidSitePublicIp } from '../portalContextService.js';
 import { assertOrgLimit } from '../orgLimitsService.js';
 import { registerWireGuardPeer } from './registerPeer.js';
 import { isWireGuardFullyConfigured } from './wgVpsSshKey.js';
+import { isWgTunnelHost } from '../../mikrotik/wgJump.js';
 
 const WG_IFACE = 'wg-qarefi';
 const WG_LISTEN_PORT = 51820;
@@ -49,9 +51,20 @@ function isPrivateOrLocalIp(ip) {
 
 function isConnectFailure(err) {
   const m = String(err?.message || err);
-  return /handshake|timed out|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT|Cannot connect|connect ECONN|socket|API.*fail|not speaking SSH|network/i.test(
+  /* Command/config errors are NOT reachability problems */
+  if (/already have|entry already exists|no such item|invalid value|input does not match/i.test(m)) {
+    return false;
+  }
+  return /handshake|timed out|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT|Cannot connect|connect ECONN|socket|not speaking SSH|WireGuard jump:|network/i.test(
     m
   );
+}
+
+function isPrivateLanHost(host) {
+  const h = String(host || '').trim();
+  if (!h) return false;
+  if (isWgTunnelHost(h)) return false;
+  return isPrivateOrLocalIp(h);
 }
 
 /**
@@ -188,33 +201,93 @@ async function configureTunnelOnRouter(api, { tunnelIp, serverPublicKey, endpoin
   const epHost = endpoint.slice(0, colon);
   const epPort = endpoint.slice(colon + 1);
   const addr = `${tunnelIp}/24`;
+  const isSsh = typeof api?.execCli === 'function';
 
   const addrRows = asRows(await api.write('/ip/address/print'));
   const existingAddr = addrRows.find(
     (r) =>
       pick(r, 'interface') === WG_IFACE &&
-      (pick(r, 'comment') === TUNNEL_ADDR_COMMENT || pick(r, 'address').startsWith(`${tunnelIp}/`))
+      (pick(r, 'comment') === TUNNEL_ADDR_COMMENT ||
+        pick(r, 'address').startsWith(`${tunnelIp}/`) ||
+        pick(r, 'address').startsWith(String(tunnelIp).replace(/\.\d+$/, '.')))
   );
   if (!existingAddr) {
-    await api.write([
-      '/ip/address/add',
-      `=address=${addr}`,
-      `=interface=${WG_IFACE}`,
-      `=comment=${TUNNEL_ADDR_COMMENT}`,
-    ]);
+    try {
+      if (isSsh) {
+        await api.execCli(
+          `/ip address add address=${cliEscapeValue(addr)} interface=${cliEscapeValue(WG_IFACE)} comment=${cliEscapeValue(TUNNEL_ADDR_COMMENT)}`
+        );
+      } else {
+        await api.write([
+          '/ip/address/add',
+          `=address=${addr}`,
+          `=interface=${WG_IFACE}`,
+          `=comment=${TUNNEL_ADDR_COMMENT}`,
+        ]);
+      }
+    } catch (e) {
+      if (!/already have|entry already exists/i.test(String(e?.message || e))) throw e;
+    }
   } else {
     const id = pick(existingAddr, '.id', 'numbers');
-    if (id) {
+    if (id && !isSsh) {
       await api.write(['/ip/address/set', `=.id=${id}`, `=address=${addr}`]);
+    } else if (isSsh) {
+      await api
+        .execCli(
+          `/ip address set [find interface=${cliEscapeValue(WG_IFACE)} and comment=${cliEscapeValue(TUNNEL_ADDR_COMMENT)}] address=${cliEscapeValue(addr)}`
+        )
+        .catch(() => {});
     }
   }
 
   const peerRows = asRows(await api.write('/interface/wireguard/peers/print'));
-  const existingPeer = peerRows.find(
-    (r) =>
-      pick(r, 'interface') === WG_IFACE &&
-      pick(r, 'public-key', 'publicKey') === serverPublicKey
-  );
+  const existingPeer = peerRows.find((r) => {
+    if (pick(r, 'interface') !== WG_IFACE) return false;
+    const pk = pick(r, 'public-key', 'publicKey', 'public_key');
+    const comment = pick(r, 'comment');
+    return pk === serverPublicKey || comment === 'QareFi VPS';
+  });
+
+  const setPeerCli = () =>
+    api.execCli(
+      `/interface wireguard peers set [find interface=${cliEscapeValue(WG_IFACE)} and comment=${cliEscapeValue('QareFi VPS')}] ` +
+        `public-key=${cliEscapeValue(serverPublicKey)} ` +
+        `endpoint-address=${cliEscapeValue(epHost)} endpoint-port=${cliEscapeValue(epPort)} ` +
+        `allowed-address=${cliEscapeValue(allowedIps)} persistent-keepalive=25s`
+    );
+
+  const addPeerCli = () =>
+    api.execCli(
+      `/interface wireguard peers add interface=${cliEscapeValue(WG_IFACE)} ` +
+        `public-key=${cliEscapeValue(serverPublicKey)} ` +
+        `endpoint-address=${cliEscapeValue(epHost)} endpoint-port=${cliEscapeValue(epPort)} ` +
+        `allowed-address=${cliEscapeValue(allowedIps)} persistent-keepalive=25s ` +
+        `comment=${cliEscapeValue('QareFi VPS')}`
+    );
+
+  if (isSsh) {
+    /* Prefer set-by-comment; if missing, add; if add says exists, set by public-key */
+    try {
+      await setPeerCli();
+    } catch {
+      try {
+        await addPeerCli();
+      } catch (e) {
+        if (/already have|entry already exists/i.test(String(e?.message || e))) {
+          await api.execCli(
+            `/interface wireguard peers set [find interface=${cliEscapeValue(WG_IFACE)} and public-key=${cliEscapeValue(serverPublicKey)}] ` +
+              `endpoint-address=${cliEscapeValue(epHost)} endpoint-port=${cliEscapeValue(epPort)} ` +
+              `allowed-address=${cliEscapeValue(allowedIps)} persistent-keepalive=25s comment=${cliEscapeValue('QareFi VPS')}`
+          );
+        } else {
+          throw e;
+        }
+      }
+    }
+    return;
+  }
+
   const peerFields = [
     `=interface=${WG_IFACE}`,
     `=public-key=${serverPublicKey}`,
@@ -225,17 +298,40 @@ async function configureTunnelOnRouter(api, { tunnelIp, serverPublicKey, endpoin
     '=comment=QareFi VPS',
   ];
   if (!existingPeer) {
-    await api.write(['/interface/wireguard/peers/add', ...peerFields]);
+    try {
+      await api.write(['/interface/wireguard/peers/add', ...peerFields]);
+    } catch (e) {
+      if (!/already have|entry already exists/i.test(String(e?.message || e))) throw e;
+      const again = asRows(await api.write('/interface/wireguard/peers/print')).find(
+        (r) =>
+          pick(r, 'interface') === WG_IFACE &&
+          (pick(r, 'public-key', 'publicKey') === serverPublicKey || pick(r, 'comment') === 'QareFi VPS')
+      );
+      const id = pick(again, '.id', 'numbers');
+      if (id) {
+        await api.write([
+          '/interface/wireguard/peers/set',
+          `=.id=${id}`,
+          `=endpoint-address=${epHost}`,
+          `=endpoint-port=${epPort}`,
+          `=allowed-address=${allowedIps}`,
+          '=persistent-keepalive=25s',
+          '=comment=QareFi VPS',
+        ]);
+      }
+    }
   } else {
     const id = pick(existingPeer, '.id', 'numbers');
     if (id) {
       await api.write([
         '/interface/wireguard/peers/set',
         `=.id=${id}`,
+        `=public-key=${serverPublicKey}`,
         `=endpoint-address=${epHost}`,
         `=endpoint-port=${epPort}`,
         `=allowed-address=${allowedIps}`,
         '=persistent-keepalive=25s',
+        '=comment=QareFi VPS',
       ]);
     }
   }
@@ -336,18 +432,31 @@ async function withProvisionTransport(opts, fn) {
       return { result, transport, sshPort, apiPort };
     } catch (e) {
       errors.push({ transport, message: e?.message || String(e) });
-      /* Router was reached but VPS key / register failed — do not try the other transport. */
+      /* Router was reached but config/register failed — stop; do not pretend it is unreachable */
       if (isFatalProvisionError(e)) throw e;
-      if (transportPref !== 'auto' && transportPref === transport) throw e;
-      if (!isConnectFailure(e) && !/login|password|auth|rejected|CANTLOGIN|public key/i.test(String(e?.message))) {
-        if (transportPref !== 'auto') throw e;
+      if (!isConnectFailure(e)) {
+        const err = new Error(
+          `Reached ${host} over ${transport}, but provisioning failed: ${e?.message || e}`
+        );
+        err.status = Number(e?.status) || 502;
+        err.cause = e;
+        throw err;
       }
+      if (transportPref !== 'auto' && transportPref === transport) throw e;
     }
   }
 
   const detail = errors.map((x) => `${x.transport}: ${x.message}`).join(' | ');
+  let hint = '';
+  if (isPrivateLanHost(host)) {
+    hint =
+      ` ${host} is a private LAN address — the cloud API cannot reach it. ` +
+      `From production, use the WireGuard tunnel IP (e.g. 10.66.54.2), or run Add router while connected via the tunnel.`;
+  } else if (isWgTunnelHost(host)) {
+    hint = ` Ensure WG_MIKROTIK_JUMP=auto and the VPS SSH key is installed; on the VPS: ping ${host}; sudo wg show.`;
+  }
   const err = new Error(
-    `Could not reach the router at ${host}. Tried ${order.join(' then ')}. ${detail}`
+    `Could not reach the router at ${host}. Tried ${order.join(' then ')}. ${detail}.${hint}`
   );
   err.status = 502;
   throw err;
@@ -415,6 +524,16 @@ export async function provisionMikrotikRouter({
   }
 
   const connectHost = parsed.host;
+  if (isPrivateLanHost(connectHost) && !isWgTunnelHost(connectHost)) {
+    const err = new Error(
+      `${connectHost} is a private LAN IP. The cloud API cannot reach site LAN addresses. ` +
+        `Use the existing WireGuard tunnel IP (e.g. 10.66.54.2) to re-link this router to the cloud DB, ` +
+        `or add the router from a machine that can reach it and complete WireGuard first.`
+    );
+    err.status = 400;
+    throw err;
+  }
+
   let lan = String(lanSubnet || '').trim();
   if (lan && !IPV4_CIDR_RE.test(lan)) {
     const err = new Error('LAN subnet must be IPv4 CIDR e.g. 192.168.88.0/24');
@@ -464,6 +583,8 @@ export async function provisionMikrotikRouter({
         publicKey,
         siteName: name,
         lanSubnet: lan,
+        /* Re-link existing live tunnel into cloud DB without changing IP */
+        preferredTunnelIp: isWgTunnelHost(connectHost) ? connectHost : '',
       });
 
       await configureTunnelOnRouter(api, {
@@ -499,25 +620,47 @@ export async function provisionMikrotikRouter({
     siteIp = connectHost;
   }
 
-  const doc = await MikrotikRouter.create({
+  const existingDoc = await MikrotikRouter.findOne({
     organizationId,
-    name,
-    comment: name,
     host: work.tunnelIp,
-    transport: usedTransport === 'api' ? 'api' : 'ssh',
-    apiPort: 8728,
-    sshPort: 22,
-    sshUser: user,
-    sshPassword: pass,
-    apiUser: user,
-    apiPassword: pass,
-    defaultPppProfile: 'default',
-    expiredPppProfile: 'nonpayment',
-    ...(siteIp ? { sitePublicIp: siteIp } : {}),
   });
+
+  let doc;
+  if (existingDoc) {
+    existingDoc.name = name;
+    existingDoc.comment = name;
+    existingDoc.transport = usedTransport === 'api' ? 'api' : 'ssh';
+    existingDoc.apiPort = 8728;
+    existingDoc.sshPort = 22;
+    existingDoc.sshUser = user;
+    existingDoc.sshPassword = pass;
+    existingDoc.apiUser = user;
+    existingDoc.apiPassword = pass;
+    if (siteIp) existingDoc.sitePublicIp = siteIp;
+    await existingDoc.save();
+    doc = existingDoc;
+  } else {
+    doc = await MikrotikRouter.create({
+      organizationId,
+      name,
+      comment: name,
+      host: work.tunnelIp,
+      transport: usedTransport === 'api' ? 'api' : 'ssh',
+      apiPort: 8728,
+      sshPort: 22,
+      sshUser: user,
+      sshPassword: pass,
+      apiUser: user,
+      apiPassword: pass,
+      defaultPppProfile: 'default',
+      expiredPppProfile: 'nonpayment',
+      ...(siteIp ? { sitePublicIp: siteIp } : {}),
+    });
+  }
 
   return {
     ok: true,
+    updated: Boolean(existingDoc),
     router: {
       id: String(doc._id),
       name: doc.name,

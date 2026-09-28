@@ -24,7 +24,15 @@ function routerHost(router) {
 /** SSH handshake hang / dead port — worth trying the other transport once. */
 function isTransportConnectFailure(err) {
   const m = String(err?.message ?? err);
-  return /handshake|Timed out while waiting|not speaking SSH|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENOTFOUND|Cannot connect|connect ECONN|socket hang up|timeout|Cannot reach|WireGuard jump/i.test(
+  /* RouterOS command/config errors mean we already reached the device */
+  if (
+    /already have|entry already exists|no such item|invalid value|input does not match|failure:|expected end of command/i.test(
+      m
+    )
+  ) {
+    return false;
+  }
+  return /handshake|Timed out while waiting|not speaking SSH|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENOTFOUND|Cannot connect|connect ECONN|socket hang up|timeout|Cannot reach|WireGuard jump:/i.test(
     m
   );
 }
@@ -96,6 +104,8 @@ export async function withRouterMikrotik(router, fn) {
       return await runPreferred(router, fn, { useWgJump: true });
     } catch (jumpErr) {
       if (jumpMode === 'always') throw jumpErr;
+      /* Command ran on the router — do not mask as unreachable / retry direct */
+      if (!isTransportConnectFailure(jumpErr)) throw jumpErr;
       /* auto: fall back to direct (API co-located on VPS, or jump misconfigured) */
       try {
         return await runWithTransportFallback(router, fn, { useWgJump: false });

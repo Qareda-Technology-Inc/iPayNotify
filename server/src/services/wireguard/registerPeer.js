@@ -1,6 +1,6 @@
 import { config } from '../../config.js';
 import { WireGuardPeer } from '../../models/WireGuardPeer.js';
-import { allocateNextTunnelIp } from './allocateTunnelIp.js';
+import { allocateNextTunnelIp, isValidTunnelIp } from './allocateTunnelIp.js';
 import { syncWireGuardPeerToVps } from './wgPeerSync.js';
 import { isWireGuardFullyConfigured } from './wgVpsSshKey.js';
 
@@ -10,7 +10,7 @@ const IPV4_CIDR_RE =
 
 /**
  * Idempotent WireGuard peer registration (DB + VPS sync).
- * @param {{ publicKey: string, siteName: string, lanSubnet?: string }} input
+ * @param {{ publicKey: string, siteName: string, lanSubnet?: string, preferredTunnelIp?: string }} input
  */
 export async function registerWireGuardPeer(input) {
   const wg = config.wireguard;
@@ -30,6 +30,7 @@ export async function registerWireGuardPeer(input) {
   const publicKey = String(input.publicKey || '').trim();
   const siteName = String(input.siteName || '').trim();
   const lanSubnet = String(input.lanSubnet || '').trim();
+  const preferredTunnelIp = String(input.preferredTunnelIp || '').trim();
 
   if (!publicKey || !WG_PUBKEY_RE.test(publicKey)) {
     const err = new Error('Valid WireGuard publicKey required');
@@ -55,7 +56,13 @@ export async function registerWireGuardPeer(input) {
     if (siteName && siteName !== peer.siteName) peer.siteName = siteName;
     if (lanSubnet !== peer.lanSubnet) peer.lanSubnet = lanSubnet;
   } else {
-    const tunnelIp = await allocateNextTunnelIp({ kind: 'router' });
+    /* Re-link: keep the tunnel IP we are already connected through when free */
+    let tunnelIp = '';
+    if (preferredTunnelIp && isValidTunnelIp(preferredTunnelIp, 'router')) {
+      const taken = await WireGuardPeer.findOne({ tunnelIp: preferredTunnelIp }).lean();
+      if (!taken) tunnelIp = preferredTunnelIp;
+    }
+    if (!tunnelIp) tunnelIp = await allocateNextTunnelIp({ kind: 'router' });
     try {
       peer = await WireGuardPeer.create({
         siteName,
@@ -69,8 +76,21 @@ export async function registerWireGuardPeer(input) {
     } catch (e) {
       if (e?.code === 11000) {
         peer = await WireGuardPeer.findOne({ publicKey });
+        if (!peer) {
+          peer = await WireGuardPeer.findOne({ tunnelIp });
+          if (peer && peer.publicKey !== publicKey) {
+            const err = new Error(
+              `Tunnel IP ${tunnelIp} is already registered to another peer. Use a different address or remove the old peer first.`
+            );
+            err.status = 409;
+            throw err;
+          }
+        }
         if (!peer) throw e;
         existing = true;
+        peer.lastSeen = new Date();
+        if (siteName) peer.siteName = siteName;
+        if (lanSubnet !== peer.lanSubnet) peer.lanSubnet = lanSubnet;
       } else {
         throw e;
       }
