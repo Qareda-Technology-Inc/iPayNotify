@@ -1,8 +1,10 @@
-# WireGuard auto-register for RouterOS v7+
-# ASCII only. Locals without underscores (import-safe).
-# Usage: /tool fetch ... dst-path=qarefi-install.rsc ; /import qarefi-install.rsc
+# QareFi WireGuard auto-register (RouterOS v7+)
+# Uses :put so Terminal shows progress during /import
 
 {
+:put "QAREFI: import started"
+:log warning "QAREFI: import started"
+
 :local apibase "https://ipaynotifyserver.onrender.com"
 :local orgid ""
 :local sitename "auto"
@@ -14,8 +16,6 @@
 :local wgpool "10.66.54.0/24"
 :local vpnmgmt "QareFi: VPN management"
 
-:log info "wg-auto-register: starting"
-
 :if (($sitename = "") || ($sitename = "auto") || ($sitename = "site-unnamed")) do={
   :set sitename [/system identity get name]
 }
@@ -26,155 +26,162 @@
 :if ([:len $sitename] < 2) do={
   :set sitename ("mt-" . [/system routerboard get serial-number])
 }
-:log info ("wg-auto-register: siteName=" . $sitename)
+:put ("QAREFI: site=" . $sitename)
 
 :if (($lansubnet = "") || ($lansubnet = "auto")) do={
   :set lansubnet ""
-  :local dhcpNets [/ip dhcp-server network find]
-  :if ([:len $dhcpNets] > 0) do={
-    :set lansubnet [/ip dhcp-server network get ($dhcpNets->0) address]
-    :log info ("wg-auto-register: LAN from DHCP network=" . $lansubnet)
-  }
-  :if ([:len $lansubnet] = 0) do={
-    :local brIds [/ip address find where interface~"bridge" && disabled=no]
-    :if ([:len $brIds] = 0) do={
-      :set brIds [/ip address find where interface="ether1" && disabled=no]
+  :do {
+    :local dhcpnets [/ip dhcp-server network find]
+    :if ([:len $dhcpnets] > 0) do={
+      :set lansubnet [/ip dhcp-server network get [:pick $dhcpnets 0] address]
     }
-    :if ([:len $brIds] > 0) do={
-      :local addr [/ip address get ($brIds->0) address]
-      :local slash [:find $addr "/"]
-      :if ($slash != nil) do={
-        :local ipOnly [:pick $addr 0 $slash]
-        :local d1 [:find $ipOnly "."]
-        :local d2 [:find $ipOnly "." ($d1 + 1)]
-        :local d3 [:find $ipOnly "." ($d2 + 1)]
-        :if ($d3 != nil) do={
-          :local prefix [:pick $ipOnly 0 $d3]
-          :set lansubnet ($prefix . ".0/24")
-          :log info ("wg-auto-register: LAN from interface IP=" . $lansubnet)
+  } on-error={}
+  :if ([:len $lansubnet] = 0) do={
+    :do {
+      :local brids [/ip address find where interface~"bridge" && disabled=no]
+      :if ([:len $brids] = 0) do={
+        :set brids [/ip address find where interface="ether1" && disabled=no]
+      }
+      :if ([:len $brids] > 0) do={
+        :local addr [/ip address get [:pick $brids 0] address]
+        :local slash [:find $addr "/"]
+        :if ($slash != nil) do={
+          :local iponly [:pick $addr 0 $slash]
+          :local d1 [:find $iponly "."]
+          :local d2 [:find $iponly "." ($d1 + 1)]
+          :local d3 [:find $iponly "." ($d2 + 1)]
+          :if ($d3 != nil) do={
+            :set lansubnet ([:pick $iponly 0 $d3] . ".0/24")
+          }
         }
       }
-    }
+    } on-error={}
   }
 }
-:if ([:len $lansubnet] > 0) do={
-  :log info ("wg-auto-register: lanSubnet=" . $lansubnet)
-} else={
-  :log warning "wg-auto-register: lanSubnet empty (optional)"
-}
+:put ("QAREFI: lan=" . $lansubnet)
 
-:if ([:len [/interface wireguard find where name=$wgiface]] = 0) do={
-  /interface wireguard add name=$wgiface listen-port=$wgport mtu=$wgmtu disabled=no comment="QareFi auto VPN"
-  :log info ("wg-auto-register: created interface " . $wgiface)
-} else={
-  :log info ("wg-auto-register: interface exists " . $wgiface)
+:do {
+  :if ([:len [/interface wireguard find where name=$wgiface]] = 0) do={
+    /interface wireguard add name=$wgiface listen-port=$wgport mtu=$wgmtu disabled=no comment="QareFi auto VPN"
+    :put "QAREFI: created wg interface"
+  } else={
+    :put "QAREFI: wg interface exists"
+  }
+} on-error={
+  :put "QAREFI: FAILED - no WireGuard (need RouterOS 7+)"
+  :log error "QAREFI: FAILED - WireGuard not available"
+  :error "no wireguard"
 }
 
 :delay 2s
-:local mypub [/interface wireguard get [find where name=$wgiface] public-key]
+:local mypub ""
+:do {
+  :set mypub [/interface wireguard get [find where name=$wgiface] public-key]
+} on-error={}
 :if ([:len $mypub] < 40) do={
-  :log error "wg-auto-register: FAILED - could not read local public-key"
+  :put "QAREFI: FAILED - cannot read public-key"
+  :log error "QAREFI: FAILED - cannot read public-key"
   :error "missing public-key"
 }
-:log info ("wg-auto-register: local public-key ok len=" . [:len $mypub])
+:put "QAREFI: pubkey ok"
 
-:local httpData ("publicKey=" . $mypub . "&siteName=" . $sitename)
+:local httpdata ("publicKey=" . $mypub . "&siteName=" . $sitename)
 :if ([:len $lansubnet] > 0) do={
-  :set httpData ($httpData . "&lanSubnet=" . $lansubnet)
+  :set httpdata ($httpdata . "&lanSubnet=" . $lansubnet)
 }
 :if ([:len $regtoken] > 0) do={
-  :set httpData ($httpData . "&token=" . $regtoken)
+  :set httpdata ($httpdata . "&token=" . $regtoken)
 }
 :if ([:len $orgid] > 0) do={
-  :set httpData ($httpData . "&organizationId=" . $orgid)
+  :set httpdata ($httpdata . "&organizationId=" . $orgid)
 }
 
 :local url ($apibase . "/api/routers/register")
-:local tmpFile "wg-register-response.txt"
-
-:log info ("wg-auto-register: posting to " . $url)
+:local tmpfile "wg-register-response.txt"
+:put ("QAREFI: posting " . $url)
 
 :do {
-  /tool fetch url=$url http-method=post http-data=$httpData http-header-field="Content-Type: application/x-www-form-urlencoded" dst-path=$tmpFile keep-result=yes check-certificate=no
+  /tool fetch url=$url http-method=post http-data=$httpdata http-header-field="Content-Type: application/x-www-form-urlencoded" dst-path=$tmpfile keep-result=yes check-certificate=no
 } on-error={
-  :log error "wg-auto-register: FAILED - /tool fetch error (DNS, TLS, or URL)"
+  :put "QAREFI: FAILED - register fetch error"
+  :log error "QAREFI: FAILED - register fetch error"
   :error "fetch failed"
 }
 
-:if ([:len [/file find where name=$tmpFile]] = 0) do={
-  :log error "wg-auto-register: FAILED - empty fetch result"
+:if ([:len [/file find where name=$tmpfile]] = 0) do={
+  :put "QAREFI: FAILED - no response file"
   :error "no response file"
 }
 
-:local raw [/file get [find where name=$tmpFile] contents]
+:local raw [/file get [find where name=$tmpfile] contents]
+:put ("QAREFI: response bytes=" . [:len $raw])
 :if ([:len $raw] = 0) do={
-  :log error "wg-auto-register: FAILED - blank response body"
+  :put "QAREFI: FAILED - blank response"
   :error "blank response"
 }
 
-:local tunnelIp ""
+:local tunnelip ""
 :local serverpub ""
 :local endpoint ""
-:local allowedIps ""
-:local okFlag ""
-:local errMsg ""
+:local allowedips ""
+:local okflag ""
+:local errmsg ""
 
 :local pos 0
-:local textLen [:len $raw]
-:while ($pos < $textLen) do={
+:local textlen [:len $raw]
+:while ($pos < $textlen) do={
   :local nl [:find $raw "\n" $pos]
   :local line ""
   :if ($nl = nil) do={
-    :set line [:pick $raw $pos $textLen]
-    :set pos $textLen
+    :set line [:pick $raw $pos $textlen]
+    :set pos $textlen
   } else={
     :set line [:pick $raw $pos $nl]
     :set pos ($nl + 1)
   }
   :local cr [:find $line "\r"]
   :if ($cr != nil) do={ :set line [:pick $line 0 $cr] }
-
   :local eq [:find $line "="]
   :if ($eq != nil) do={
     :local k [:pick $line 0 $eq]
     :local v [:pick $line ($eq + 1) [:len $line]]
-    :if ($k = "tunnelIp") do={ :set tunnelIp $v }
+    :if ($k = "tunnelIp") do={ :set tunnelip $v }
     :if ($k = "serverPublicKey") do={ :set serverpub $v }
     :if ($k = "endpoint") do={ :set endpoint $v }
-    :if ($k = "allowedIps") do={ :set allowedIps $v }
-    :if ($k = "ok") do={ :set okFlag $v }
-    :if ($k = "error") do={ :set errMsg $v }
+    :if ($k = "allowedIps") do={ :set allowedips $v }
+    :if ($k = "ok") do={ :set okflag $v }
+    :if ($k = "error") do={ :set errmsg $v }
   }
 }
 
-:if (($okFlag != "true") || ([:len $tunnelIp] = 0) || ([:len $serverpub] = 0) || ([:len $endpoint] = 0)) do={
-  :log error ("wg-auto-register: FAILED - ok=" . $okFlag . " error=" . $errMsg)
-  :error ("registration failed: " . $errMsg)
+:put ("QAREFI: ok=" . $okflag . " tunnel=" . $tunnelip . " err=" . $errmsg)
+:if (($okflag != "true") || ([:len $tunnelip] = 0) || ([:len $serverpub] = 0) || ([:len $endpoint] = 0)) do={
+  :put ("QAREFI: FAILED - register rejected: " . $errmsg)
+  :log error ("QAREFI: FAILED - register rejected: " . $errmsg)
+  :error ("registration failed: " . $errmsg)
 }
 
-:if ([:len $allowedIps] = 0) do={ :set allowedIps $wgpool }
+:if ([:len $allowedips] = 0) do={ :set allowedips $wgpool }
 
 :local colon [:find $endpoint ":"]
 :if ($colon = nil) do={
-  :log error "wg-auto-register: FAILED - endpoint missing port"
+  :put "QAREFI: FAILED - bad endpoint"
   :error "bad endpoint"
 }
-:local epHost [:pick $endpoint 0 $colon]
-:local epPort [:pick $endpoint ($colon + 1) [:len $endpoint]]
+:local ephost [:pick $endpoint 0 $colon]
+:local epport [:pick $endpoint ($colon + 1) [:len $endpoint]]
 
-:log info ("wg-auto-register: assigned tunnelIp=" . $tunnelIp)
-
-:local addrComment "QareFi WG tunnel"
-:if ([:len [/ip address find where interface=$wgiface comment=$addrComment]] = 0) do={
-  /ip address add address=($tunnelIp . "/24") interface=$wgiface comment=$addrComment
+:local addrcomment "QareFi WG tunnel"
+:if ([:len [/ip address find where interface=$wgiface comment=$addrcomment]] = 0) do={
+  /ip address add address=($tunnelip . "/24") interface=$wgiface comment=$addrcomment
 } else={
-  /ip address set [find where interface=$wgiface comment=$addrComment] address=($tunnelIp . "/24")
+  /ip address set [find where interface=$wgiface comment=$addrcomment] address=($tunnelip . "/24")
 }
 
 :if ([:len [/interface wireguard peers find where interface=$wgiface public-key=$serverpub]] = 0) do={
-  /interface wireguard peers add interface=$wgiface public-key=$serverpub endpoint-address=$epHost endpoint-port=$epPort allowed-address=$allowedIps persistent-keepalive=25s comment="QareFi VPS"
+  /interface wireguard peers add interface=$wgiface public-key=$serverpub endpoint-address=$ephost endpoint-port=$epport allowed-address=$allowedips persistent-keepalive=25s comment="QareFi VPS"
 } else={
-  /interface wireguard peers set [find where interface=$wgiface public-key=$serverpub] endpoint-address=$epHost endpoint-port=$epPort allowed-address=$allowedIps persistent-keepalive=25s comment="QareFi VPS"
+  /interface wireguard peers set [find where interface=$wgiface public-key=$serverpub] endpoint-address=$ephost endpoint-port=$epport allowed-address=$allowedips persistent-keepalive=25s comment="QareFi VPS"
 }
 
 :if ([:len [/ip firewall filter find where comment=$vpnmgmt]] = 0) do={
@@ -186,14 +193,15 @@
 }
 
 :do {
-  :local sshId [/ip service find where name="ssh"]
-  :if ([:len $sshId] > 0) do={ /ip service set $sshId disabled=no }
-  :local apiId [/ip service find where name="api"]
-  :if ([:len $apiId] > 0) do={ /ip service set $apiId disabled=no }
-  :local wbId [/ip service find where name="winbox"]
-  :if ([:len $wbId] > 0) do={ /ip service set $wbId disabled=no }
+  :local sshid [/ip service find where name="ssh"]
+  :if ([:len $sshid] > 0) do={ /ip service set $sshid disabled=no }
+  :local apiid [/ip service find where name="api"]
+  :if ([:len $apiid] > 0) do={ /ip service set $apiid disabled=no }
+  :local wbid [/ip service find where name="winbox"]
+  :if ([:len $wbid] > 0) do={ /ip service set $wbid disabled=no }
 } on-error={}
 
-:log info ("wg-auto-register: SUCCESS - tunnelIp=" . $tunnelIp . " - finish Add router in QareFi with SSH login")
-:do { /file remove [find where name=$tmpFile] } on-error={}
+:put ("QAREFI: SUCCESS tunnelIp=" . $tunnelip)
+:log warning ("QAREFI: SUCCESS tunnelIp=" . $tunnelip)
+:do { /file remove [find where name=$tmpfile] } on-error={}
 }

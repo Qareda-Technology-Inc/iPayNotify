@@ -248,28 +248,29 @@ export function AddRouterWizard({ onCreated, onCancel }) {
               </button>
               {fetchCmds?.wakeCmd ? (
                 <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-950/60 p-3">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    A) Wake / TLS test (should finish in seconds)
+                  <p className="text-[11px] text-amber-200/90">
+                    Run these as <span className="font-semibold">3 separate</span> Terminal commands. After
+                    import you must see lines starting with <span className="font-mono">QAREFI:</span>
                   </p>
-                  <pre className="max-h-20 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-sky-200/90">
-                    {fetchCmds.wakeCmd}
-                  </pre>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    B) Install (copy this)
-                  </p>
-                  <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-emerald-200/90">
-                    {fetchCmds.oneShot}
-                  </pre>
+                  {(fetchCmds.steps || [fetchCmds.wakeCmd, fetchCmds.fetchCmd, fetchCmds.importCmd]).map(
+                    (cmd, i) => (
+                      <div key={i} className="space-y-1">
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                          Step {i + 1}
+                        </p>
+                        <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-emerald-200/90">
+                          {cmd}
+                        </pre>
+                      </div>
+                    )
+                  )}
                   <button
                     type="button"
                     onClick={copyOneShot}
                     className="w-full rounded-lg border border-slate-600 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
                   >
-                    {copied ? 'Copied install command' : 'Copy install command'}
+                    {copied ? 'Copied all steps' : 'Copy all steps'}
                   </button>
-                  {fetchCmds.fetchUrl ? (
-                    <p className="break-all text-[10px] text-slate-500">Short URL: {fetchCmds.fetchUrl}</p>
-                  ) : null}
                 </div>
               ) : null}
               <button

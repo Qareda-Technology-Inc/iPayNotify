@@ -105,11 +105,11 @@ routersApi.get(
     const fileName = 'qarefi-install.rsc';
     const fetchUrl = `${apiBase}/api/routers/b/${code}.rsc`;
     const wakeUrl = `${apiBase}/api/health`;
-    /* check-certificate=no avoids MikroTik hanging on TLS CA store issues */
     const wakeCmd = `/tool fetch url="${wakeUrl}" keep-result=no check-certificate=no`;
     const fetchCmd = `/tool fetch url="${fetchUrl}" dst-path=${fileName} check-certificate=no`;
-    const importCmd = `/import file-name=${fileName}`;
-    const oneShot = `${fetchCmd}; :delay 3s; ${importCmd}`;
+    /* Run import alone so Terminal shows :put lines from the script */
+    const importCmd = `/import ${fileName}`;
+    const oneShot = `${fetchCmd}\n${importCmd}`;
 
     res.json({
       code,
@@ -121,8 +121,9 @@ routersApi.get(
       fetchCmd,
       importCmd,
       oneShot,
+      steps: [wakeCmd, fetchCmd, importCmd],
       hint:
-        '1) Open wakeUrl in a browser first if Render was asleep. 2) Paste wakeCmd on the router (should finish in a few seconds). 3) Paste oneShot. If fetch hangs, TLS/DNS is the problem — use wakeCmd with check-certificate=no (already included).',
+        'Run THREE separate commands (not one long line). After /import you must see QAREFI: lines in Terminal. If you only see fetch status, import never ran.',
     });
   })
 );
