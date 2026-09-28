@@ -273,7 +273,7 @@ export function HotspotPanel() {
         <h2 className="text-lg font-semibold text-white">Hotspot & vouchers</h2>
         <p className="mt-1 max-w-2xl text-sm text-slate-400">
           Pick a router, its hotspot server, an internet plan, and quantity. Preview unique 6-digit
-          codes, then create and push them to MikroTik. Login page and print layout live under{' '}
+          codes, then create and push them to MikroTik. The Wi‑Fi login page is pushed onto the router from{' '}
           <Link to="/hotspot/portal" className="text-indigo-300 hover:text-indigo-200">
             Captive portal
           </Link>

@@ -15,8 +15,31 @@ import {
   resolvePortalRouter,
   resolvePortalSiteFromRequest,
 } from '../services/portalContextService.js';
+import { buildCaptiveLoginHtml } from '../services/captivePortalHtml.js';
+import { captiveBuyUrl } from '../services/captivePortalPushService.js';
 
 export const publicPortalRouter = express.Router();
+
+publicPortalRouter.get(
+  '/captive/:slug/login.html',
+  asyncHandler(async (req, res) => {
+    const ctx = await resolvePortalRouter(req, req.params.slug);
+    if (!ctx.resolved) {
+      return res.status(404).type('text/plain').send('Unknown hotspot site');
+    }
+    const html = buildCaptiveLoginHtml({
+      designId: ctx.branding?.portalDesign,
+      brandName: ctx.branding?.displayName,
+      headline: ctx.branding?.portalHeadline,
+      subtitle: ctx.branding?.portalSubtitle,
+      buttonLabel: ctx.branding?.portalButtonLabel,
+      buyLabel: ctx.branding?.portalBuyLabel,
+      buyUrl: captiveBuyUrl(req.params.slug),
+    });
+    res.set('Cache-Control', 'no-store');
+    res.type('html').send(html);
+  })
+);
 
 function portalUnresolvedError(ctx) {
   if (ctx?.reason === 'org_suspended') {

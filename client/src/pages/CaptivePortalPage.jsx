@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { apiFetch } from '../api.js';
+import { routerDisplayName } from '../utils/routerDisplayName.js';
 import { CaptiveLoginView } from '../portal/CaptiveLoginView.jsx';
 import { PORTAL_DESIGNS, VOUCHER_DESIGNS, portalCopy } from '../portal/designs.js';
 
@@ -51,25 +51,29 @@ function VoucherMock({ designId, title }) {
   );
 }
 
-async function copyText(text) {
-  await navigator.clipboard.writeText(text);
-}
-
 export function CaptivePortalPage() {
   const [org, setOrg] = useState(null);
   const [portalDesign, setPortalDesign] = useState('midnight');
   const [voucherDesign, setVoucherDesign] = useState('grid');
   const [copy, setCopy] = useState(EMPTY_COPY);
+  const [routers, setRouters] = useState([]);
+  const [routerId, setRouterId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [pushing, setPushing] = useState(false);
   const [err, setErr] = useState('');
   const [info, setInfo] = useState('');
-  const [copied, setCopied] = useState('');
 
   const load = useCallback(async () => {
     setErr('');
-    const o = await apiFetch('/api/organization');
+    const [o, routersRes] = await Promise.all([
+      apiFetch('/api/organization'),
+      apiFetch('/api/routers').catch(() => []),
+    ]);
     setOrg(o);
+    const list = Array.isArray(routersRes) ? routersRes : [];
+    setRouters(list);
+    setRouterId((id) => id || list.find((r) => r.portalSlug)?._id || list[0]?._id || '');
     setPortalDesign(o?.billing?.portalDesign || 'midnight');
     setVoucherDesign(o?.billing?.voucherDesign || 'grid');
     const b = o?.billing || {};
@@ -88,30 +92,35 @@ export function CaptivePortalPage() {
       .finally(() => setLoading(false));
   }, [load]);
 
+  async function saveBilling() {
+    const updated = await apiFetch('/api/organization', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        billing: { portalDesign, voucherDesign, ...copy },
+      }),
+    });
+    setOrg(updated);
+    setPortalDesign(updated?.billing?.portalDesign || portalDesign);
+    setVoucherDesign(updated?.billing?.voucherDesign || voucherDesign);
+    const b = updated?.billing || {};
+    setCopy({
+      portalHeadline: b.portalHeadline || '',
+      portalSubtitle: b.portalSubtitle || '',
+      portalButtonLabel: b.portalButtonLabel || '',
+      portalBuyLabel: b.portalBuyLabel || '',
+      voucherTitle: b.voucherTitle || '',
+    });
+    return updated;
+  }
+
   async function onSave(e) {
     e.preventDefault();
     setSaving(true);
     setErr('');
     setInfo('');
     try {
-      const updated = await apiFetch('/api/organization', {
-        method: 'PATCH',
-        body: JSON.stringify({
-          billing: { portalDesign, voucherDesign, ...copy },
-        }),
-      });
-      setOrg(updated);
-      setPortalDesign(updated?.billing?.portalDesign || portalDesign);
-      setVoucherDesign(updated?.billing?.voucherDesign || voucherDesign);
-      const b = updated?.billing || {};
-      setCopy({
-        portalHeadline: b.portalHeadline || '',
-        portalSubtitle: b.portalSubtitle || '',
-        portalButtonLabel: b.portalButtonLabel || '',
-        portalBuyLabel: b.portalBuyLabel || '',
-        voucherTitle: b.voucherTitle || '',
-      });
-      setInfo('Saved. The login page and the next PDF download use this wording.');
+      await saveBilling();
+      setInfo('Saved. Push to a router when you want guests to see this login page.');
     } catch (e2) {
       setErr(e2.message || 'Save failed');
     } finally {
@@ -119,12 +128,29 @@ export function CaptivePortalPage() {
     }
   }
 
-  async function onCopy(id, text) {
+  async function onPush() {
+    if (!routerId) {
+      setErr('Select a router first.');
+      return;
+    }
+    setPushing(true);
+    setErr('');
+    setInfo('');
     try {
-      await copyText(text);
-      setCopied(id);
-    } catch {
-      setErr('Could not copy. Select the text and copy it manually.');
+      await saveBilling();
+      const result = await apiFetch(`/api/hotspot/routers/${routerId}/push-captive-portal`, {
+        method: 'POST',
+        body: '{}',
+      });
+      const files = (result.files || []).join(', ') || 'the hotspot login page';
+      const garden = result.walledGarden?.ok
+        ? ''
+        : ` Buy-a-code may not open until the walled garden is updated (${result.walledGarden?.error || 'sync failed'}).`;
+      setInfo(`Pushed ${files} on ${result.routerName || 'the router'}.${garden}`);
+    } catch (e2) {
+      setErr(e2.message || 'Could not push the login page');
+    } finally {
+      setPushing(false);
     }
   }
 
@@ -143,7 +169,6 @@ export function CaptivePortalPage() {
 
   const brandName = String(org?.billing?.merchantDisplayName || org?.name || 'Wi‑Fi').trim();
   const logoUrl = String(org?.billing?.logoUrl || '').trim();
-  const sites = Array.isArray(org?.portalSites) ? org.portalSites : [];
   const printTitle = portalCopy('midnight', { voucherTitle: copy.voucherTitle }).voucherTitle;
   const fieldClass =
     'mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none ring-emerald-500/40 focus:ring-2';
@@ -158,12 +183,9 @@ export function CaptivePortalPage() {
         <div>
           <h2 className="text-lg font-semibold text-white">Captive portal</h2>
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Choose a login design and a voucher layout, then change the wording. Leave a field blank
-            to keep that design&apos;s default. The name and logo come from{' '}
-            <Link to="/org/settings" className="text-indigo-300 hover:text-indigo-200">
-              Organisation
-            </Link>
-            .
+            This is the page guests see on the router when they join the Wi‑Fi. Pick the look, then
+            push it. It replaces <span className="font-mono text-slate-300">login.html</span> in the
+            hotspot folder.
           </p>
         </div>
         <button
@@ -185,6 +207,38 @@ export function CaptivePortalPage() {
           {info}
         </p>
       ) : null}
+
+      <section className="space-y-4 rounded-2xl border border-emerald-700/40 bg-emerald-950/20 p-5">
+        <h3 className="text-sm font-semibold text-white">Push to router</h3>
+        <p className="text-sm text-slate-400">
+          Choose the site, then send the selected design. The router downloads it over HTTPS and
+          stores it as the hotspot login page. The router needs a portal slug under Network → Routers.
+        </p>
+        <label className="block text-sm text-slate-300">
+          Router
+          <select
+            value={routerId}
+            onChange={(e) => setRouterId(e.target.value)}
+            className={fieldClass}
+          >
+            {routers.length === 0 ? <option value="">No routers yet</option> : null}
+            {routers.map((r) => (
+              <option key={r._id} value={r._id}>
+                {routerDisplayName(r) || r.host}
+                {r.portalSlug ? '' : ' (no portal slug)'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={pushing || saving || !routerId}
+          onClick={onPush}
+          className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+        >
+          {pushing ? 'Pushing…' : 'Save and push to router'}
+        </button>
+      </section>
 
       <section className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
         <h3 className="text-sm font-semibold text-white">Wording</h3>
@@ -333,39 +387,6 @@ export function CaptivePortalPage() {
             );
           })}
         </div>
-      </section>
-
-      <section className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-        <h3 className="text-sm font-semibold text-white">Router login link</h3>
-        <p className="text-sm text-slate-400">
-          Point the hotspot login page at this address. The router must allow HTTP PAP login, and
-          this site must stay in the walled garden.
-        </p>
-        {sites.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            No portal slug yet. Set one on a router under Network → Routers.
-          </p>
-        ) : (
-          <ul className="space-y-4">
-            {sites.map((s) => (
-              <li key={s.id} className="space-y-2">
-                <p className="text-sm text-slate-200">{s.name}</p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <code className="min-w-0 flex-1 truncate rounded-lg bg-slate-950 px-3 py-2 text-xs text-slate-300">
-                    {s.loginUrl}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={() => onCopy(s.id, s.loginUrl || '')}
-                    className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800"
-                  >
-                    {copied === s.id ? 'Copied' : 'Copy link'}
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
     </form>
   );

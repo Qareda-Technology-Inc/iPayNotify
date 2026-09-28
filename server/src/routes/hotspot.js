@@ -10,6 +10,7 @@ import {
   syncVoucherToRouter,
 } from '../services/hotspotService.js';
 import { syncHotspotExpiryScheduler } from '../services/hotspotExpirySchedulerService.js';
+import { pushCaptivePortalToRouter } from '../services/captivePortalPushService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
 import { orgQuery } from '../utils/tenantScope.js';
@@ -31,6 +32,14 @@ hotspotRouter.post(
   asyncHandler(async (req, res) => {
     const result = await syncHotspotExpiryScheduler(req.params.id, req.organizationId);
     res.json(result);
+  })
+);
+
+hotspotRouter.post(
+  '/routers/:id/push-captive-portal',
+  requireRoles('super_admin', 'org_admin', 'org_staff'),
+  asyncHandler(async (req, res) => {
+    res.json(await pushCaptivePortalToRouter(req.params.id, req.organizationId));
   })
 );
 
