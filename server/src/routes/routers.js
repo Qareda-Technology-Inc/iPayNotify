@@ -103,13 +103,21 @@ routersApi.get(
     });
 
     const fileName = 'qarefi-install.rsc';
+    const scriptName = 'qarefiinstall';
     const fetchUrl = `${apiBase}/api/routers/b/${code}.rsc`;
     const wakeUrl = `${apiBase}/api/health`;
     const wakeCmd = `/tool fetch url="${wakeUrl}" keep-result=no check-certificate=no`;
     const fetchCmd = `/tool fetch url="${fetchUrl}" dst-path=${fileName} check-certificate=no`;
-    /* Run import alone so Terminal shows :put lines from the script */
-    const importCmd = `/import ${fileName}`;
-    const oneShot = `${fetchCmd}\n${importCmd}`;
+    /*
+     * Avoid /import — unreliable on many ROS builds.
+     * Load file contents into /system script and run (works when import is silent/broken).
+     */
+    const runCmd =
+      `/system script remove [find where name="${scriptName}"]; ` +
+      `/system script add name=${scriptName} policy=read,write,policy,test,sensitive ` +
+      `source=[/file get [/file find where name="${fileName}"] contents]; ` +
+      `/system script run ${scriptName}`;
+    const oneShot = `${fetchCmd}\n${runCmd}`;
 
     res.json({
       code,
@@ -119,11 +127,12 @@ routersApi.get(
       wakeUrl,
       wakeCmd,
       fetchCmd,
-      importCmd,
+      importCmd: runCmd,
+      runCmd,
       oneShot,
-      steps: [wakeCmd, fetchCmd, importCmd],
+      steps: [wakeCmd, fetchCmd, runCmd],
       hint:
-        'Run THREE separate commands (not one long line). After /import you must see QAREFI: lines in Terminal. If you only see fetch status, import never ran.',
+        'Run 3 separate Terminal commands. Step 3 uses /system script (not /import). You must see QAREFI: lines. If step 3 says source too long, say so.',
     });
   })
 );

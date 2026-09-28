@@ -249,8 +249,9 @@ export function AddRouterWizard({ onCreated, onCancel }) {
               {fetchCmds?.wakeCmd ? (
                 <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-950/60 p-3">
                   <p className="text-[11px] text-amber-200/90">
-                    Run these as <span className="font-semibold">3 separate</span> Terminal commands. After
-                    import you must see lines starting with <span className="font-mono">QAREFI:</span>
+                    Run as <span className="font-semibold">3 separate</span> commands. Step 3 uses{' '}
+                    <span className="font-mono">/system script</span> (not /import). You must see{' '}
+                    <span className="font-mono">QAREFI:</span> in Terminal.
                   </p>
                   {(fetchCmds.steps || [fetchCmds.wakeCmd, fetchCmds.fetchCmd, fetchCmds.importCmd]).map(
                     (cmd, i) => (
