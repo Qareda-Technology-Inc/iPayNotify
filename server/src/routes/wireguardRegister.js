@@ -67,9 +67,15 @@ wireguardRegisterRouter.post(
       const publicKey = String(input.publicKey || input.public_key || '').trim();
       const siteName = String(input.siteName || input.site_name || '').trim();
       const lanSubnet = String(input.lanSubnet || input.lan_subnet || '').trim();
-      const token = String(
+      const tokenRaw = String(
         input.token || input.registerToken || req.get('x-wg-register-token') || ''
       ).trim();
+      let token = tokenRaw;
+      try {
+        if (/%[0-9A-Fa-f]{2}/.test(tokenRaw)) token = decodeURIComponent(tokenRaw);
+      } catch {
+        token = tokenRaw;
+      }
       const organizationId = parseOrgId(
         input.organizationId || input.organization_id || input.orgId
       );
@@ -196,7 +202,7 @@ wireguardRegisterRouter.get(
 /**
  * Public .rsc download for MikroTik /tool fetch (no JWT).
  * GET /api/routers/bootstrap.rsc?token=&organizationId=&siteName=
- * token must match WG_REGISTER_TOKEN when that env is set.
+ * Prefer short codes: GET /api/routers/b/:code.rsc
  */
 wireguardRegisterRouter.get(
   ['/bootstrap.rsc', '/bootstrap'],
@@ -224,6 +230,42 @@ wireguardRegisterRouter.get(
     });
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', 'inline; filename="wireguard-auto-register.rsc"');
+    res.send(script);
+  })
+);
+
+/**
+ * Short-code bootstrap (no special characters — MikroTik-safe).
+ * GET /api/routers/b/:code.rsc
+ */
+wireguardRegisterRouter.get(
+  ['/b/:code.rsc', '/b/:code'],
+  asyncHandler(async (req, res) => {
+    const code = String(req.params.code || '')
+      .replace(/\.rsc$/i, '')
+      .trim();
+    if (!code || code.length < 8) {
+      return res.status(400).type('text/plain').send('error=Invalid code\n');
+    }
+    const { InstallBootstrapCode } = await import('../models/InstallBootstrapCode.js');
+    const row = await InstallBootstrapCode.findOne({ code }).lean();
+    if (!row || (row.expiresAt && new Date(row.expiresAt) < new Date())) {
+      return res
+        .status(404)
+        .type('text/plain')
+        .send('error=Code expired or unknown. Get a new command from QareFi Add router.\n');
+    }
+    const { buildWireGuardInstallScript } = await import(
+      '../services/wireguard/buildInstallScript.js'
+    );
+    const script = buildWireGuardInstallScript({
+      organizationId: String(row.organizationId),
+      ...(row.siteName ? { siteName: row.siteName } : {}),
+      ...(row.lanSubnet ? { lanSubnet: row.lanSubnet } : {}),
+    });
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'inline; filename="qarefi-install.rsc"');
+    res.setHeader('Cache-Control', 'no-store');
     res.send(script);
   })
 );

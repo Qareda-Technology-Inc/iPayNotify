@@ -234,11 +234,10 @@ export function AddRouterWizard({ onCreated, onCancel }) {
                 />
               </label>
               <ol className="list-decimal space-y-1.5 pl-4 text-xs text-slate-400">
-                <li>Get the Terminal command (fetch) or download the .rsc</li>
-                <li>
-                  On MikroTik Terminal paste the one-shot fetch+import (router needs internet)
-                </li>
-                <li>Open tab “2. Finish” when the peer appears (auto-refresh)</li>
+                <li>Open your API health URL in a browser first (wakes Render if asleep)</li>
+                <li>On MikroTik: paste the wake test, wait until status finished</li>
+                <li>Paste the install command (short URL + check-certificate=no)</li>
+                <li>Open “2. Finish” when the peer appears</li>
               </ol>
               <button
                 type="button"
@@ -247,10 +246,16 @@ export function AddRouterWizard({ onCreated, onCancel }) {
               >
                 Get /tool fetch command
               </button>
-              {fetchCmds?.oneShot ? (
+              {fetchCmds?.wakeCmd ? (
                 <div className="space-y-2 rounded-xl border border-slate-700/80 bg-slate-950/60 p-3">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    Paste in MikroTik Terminal
+                    A) Wake / TLS test (should finish in seconds)
+                  </p>
+                  <pre className="max-h-20 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-sky-200/90">
+                    {fetchCmds.wakeCmd}
+                  </pre>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    B) Install (copy this)
                   </p>
                   <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-emerald-200/90">
                     {fetchCmds.oneShot}
@@ -260,8 +265,11 @@ export function AddRouterWizard({ onCreated, onCancel }) {
                     onClick={copyOneShot}
                     className="w-full rounded-lg border border-slate-600 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800"
                   >
-                    {copied ? 'Copied' : 'Copy command'}
+                    {copied ? 'Copied install command' : 'Copy install command'}
                   </button>
+                  {fetchCmds.fetchUrl ? (
+                    <p className="break-all text-[10px] text-slate-500">Short URL: {fetchCmds.fetchUrl}</p>
+                  ) : null}
                 </div>
               ) : null}
               <button
@@ -270,7 +278,7 @@ export function AddRouterWizard({ onCreated, onCancel }) {
                 onClick={downloadScript}
                 className="flex h-10 w-full items-center justify-center rounded-xl border border-slate-600 text-sm font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50"
               >
-                {downloading ? 'Preparing…' : 'Or download .rsc file'}
+                {downloading ? 'Preparing…' : 'Or download .rsc (after redeploy)'}
               </button>
               {peers.length ? (
                 <button

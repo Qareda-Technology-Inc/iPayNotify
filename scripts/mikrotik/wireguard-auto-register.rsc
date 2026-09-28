@@ -95,7 +95,7 @@
 :log info ("wg-auto-register: posting to " . $url)
 
 :do {
-  /tool fetch url=$url http-method=post http-data=$httpData http-header-field="Content-Type: application/x-www-form-urlencoded" dst-path=$tmpFile keep-result=yes
+  /tool fetch url=$url http-method=post http-data=$httpData http-header-field="Content-Type: application/x-www-form-urlencoded" dst-path=$tmpFile keep-result=yes check-certificate=no
 } on-error={
   :log error "wg-auto-register: FAILED - /tool fetch error (DNS, TLS, or URL)"
   :error "fetch failed"
@@ -113,7 +113,7 @@
 }
 
 :local tunnelIp ""
-:local serverPublicKey ""
+:local serverpub ""
 :local endpoint ""
 :local allowedIps ""
 :local okFlag ""
@@ -139,7 +139,7 @@
     :local k [:pick $line 0 $eq]
     :local v [:pick $line ($eq + 1) [:len $line]]
     :if ($k = "tunnelIp") do={ :set tunnelIp $v }
-    :if ($k = "serverPublicKey") do={ :set serverPublicKey $v }
+    :if ($k = "serverPublicKey") do={ :set serverpub $v }
     :if ($k = "endpoint") do={ :set endpoint $v }
     :if ($k = "allowedIps") do={ :set allowedIps $v }
     :if ($k = "ok") do={ :set okFlag $v }
@@ -147,7 +147,7 @@
   }
 }
 
-:if (($okFlag != "true") || ([:len $tunnelIp] = 0) || ([:len $serverPublicKey] = 0) || ([:len $endpoint] = 0)) do={
+:if (($okFlag != "true") || ([:len $tunnelIp] = 0) || ([:len $serverpub] = 0) || ([:len $endpoint] = 0)) do={
   :log error ("wg-auto-register: FAILED - ok=" . $okFlag . " error=" . $errMsg)
   :error ("registration failed: " . $errMsg)
 }
@@ -171,10 +171,10 @@
   /ip address set [find where interface=$wgiface comment=$addrComment] address=($tunnelIp . "/24")
 }
 
-:if ([:len [/interface wireguard peers find where interface=$wgiface public-key=$serverPublicKey]] = 0) do={
-  /interface wireguard peers add interface=$wgiface public-key=$serverPublicKey endpoint-address=$epHost endpoint-port=$epPort allowed-address=$allowedIps persistent-keepalive=25s comment="QareFi VPS"
+:if ([:len [/interface wireguard peers find where interface=$wgiface public-key=$serverpub]] = 0) do={
+  /interface wireguard peers add interface=$wgiface public-key=$serverpub endpoint-address=$epHost endpoint-port=$epPort allowed-address=$allowedIps persistent-keepalive=25s comment="QareFi VPS"
 } else={
-  /interface wireguard peers set [find where interface=$wgiface public-key=$serverPublicKey] endpoint-address=$epHost endpoint-port=$epPort allowed-address=$allowedIps persistent-keepalive=25s comment="QareFi VPS"
+  /interface wireguard peers set [find where interface=$wgiface public-key=$serverpub] endpoint-address=$epHost endpoint-port=$epPort allowed-address=$allowedIps persistent-keepalive=25s comment="QareFi VPS"
 }
 
 :if ([:len [/ip firewall filter find where comment=$vpnmgmt]] = 0) do={

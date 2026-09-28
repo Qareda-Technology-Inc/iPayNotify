@@ -66,39 +66,63 @@ routersApi.get(
 );
 
 /**
- * Ready-to-paste MikroTik Terminal commands (/tool fetch + /import).
+ * Ready-to-paste MikroTik Terminal commands.
+ * Uses a short bootstrap code (no special chars in URL) + check-certificate=no
+ * because MikroTik TLS verify often hangs ("status: connecting" forever).
  * GET /api/routers/install-script/commands?siteName=
  */
 routersApi.get(
   '/install-script/commands',
   asyncHandler(async (req, res) => {
     const siteName = String(req.query.siteName || '').trim();
+    const lanSubnet = String(req.query.lanSubnet || '').trim();
     const apiBase = String(config.publicApiUrl || '')
       .trim()
       .replace(/\/$/, '');
     if (!apiBase) {
       return res.status(503).json({
         error:
-          'PUBLIC_API_URL is not set on the server. Set it to your live API origin (e.g. https://ipaynotifyserver.onrender.com) so routers can /tool fetch the script.',
+          'PUBLIC_API_URL is not set on the server. Set it to your live API origin (e.g. https://ipaynotifyserver.onrender.com).',
       });
     }
-    const q = new URLSearchParams();
-    const token = String(config.wireguard?.registerToken || '').trim();
-    if (token) q.set('token', token);
-    if (req.organizationId) q.set('organizationId', String(req.organizationId));
-    if (siteName) q.set('siteName', siteName);
-    const qs = q.toString();
-    const fetchUrl = `${apiBase}/api/routers/bootstrap.rsc${qs ? `?${qs}` : ''}`;
+    if (!req.organizationId) {
+      return res.status(400).json({ error: 'Organization context required' });
+    }
+
+    const { InstallBootstrapCode, newBootstrapCode } = await import(
+      '../models/InstallBootstrapCode.js'
+    );
+    const code = newBootstrapCode();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    await InstallBootstrapCode.create({
+      code,
+      organizationId: req.organizationId,
+      siteName,
+      lanSubnet,
+      expiresAt,
+    });
+
     const fileName = 'qarefi-install.rsc';
-    const fetchCmd = `/tool fetch url="${fetchUrl}" dst-path=${fileName}`;
-    const importCmd = `/import ${fileName}`;
+    const fetchUrl = `${apiBase}/api/routers/b/${code}.rsc`;
+    const wakeUrl = `${apiBase}/api/health`;
+    /* check-certificate=no avoids MikroTik hanging on TLS CA store issues */
+    const wakeCmd = `/tool fetch url="${wakeUrl}" keep-result=no check-certificate=no`;
+    const fetchCmd = `/tool fetch url="${fetchUrl}" dst-path=${fileName} check-certificate=no`;
+    const importCmd = `/import file-name=${fileName}`;
+    const oneShot = `${fetchCmd}; :delay 3s; ${importCmd}`;
+
     res.json({
+      code,
+      expiresAt,
       fetchUrl,
       fileName,
+      wakeUrl,
+      wakeCmd,
       fetchCmd,
       importCmd,
-      oneShot: `${fetchCmd}; :delay 2s; ${importCmd}`,
-      hint: 'Paste oneShot (or fetchCmd then importCmd) into MikroTik Terminal while the router has internet.',
+      oneShot,
+      hint:
+        '1) Open wakeUrl in a browser first if Render was asleep. 2) Paste wakeCmd on the router (should finish in a few seconds). 3) Paste oneShot. If fetch hangs, TLS/DNS is the problem — use wakeCmd with check-certificate=no (already included).',
     });
   })
 );
