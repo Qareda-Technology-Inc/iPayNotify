@@ -615,6 +615,14 @@ export function cliEscapeValue(v) {
   return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+/**
+ * Always-quoted literal for `[find name=…]`. Unquoted `482193` or `5-Hours` is parsed as a
+ * number/expression in find, so it never equals the string name.
+ */
+export function rosFindLit(v) {
+  return `"${String(v ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
 /** API-style `=key=value` words → CLI args */
 export function rosApiWordsToCli(pairWords) {
   const parts = [];

@@ -8,7 +8,7 @@ import {
   normalizeMacAddress,
 } from '../utils/mikroTicketComment.js';
 import { resolveRouter } from './routerResolver.js';
-import { cliEscapeValue } from '../mikrotik/rosSsh.js';
+import { rosFindLit } from '../mikrotik/rosSsh.js';
 import { organizationIdForRouter } from '../db/defaultOrganizationId.js';
 import { syncHotspotExpiryScheduler } from './hotspotExpirySchedulerService.js';
 
@@ -234,7 +234,7 @@ export async function syncVoucherToRouter(voucher) {
   await withRouterMikrotik(router, async (api) => {
     if (typeof api.execCli === 'function') {
       await api
-        .execCli(`/ip hotspot user remove [find name=${cliEscapeValue(voucher.code)}]`)
+        .execCli(`/ip hotspot user remove [find where name=${rosFindLit(voucher.code)}]`)
         .catch(() => {});
     } else {
       const existing = await hs.findHotspotUserByName(api, voucher.code);
@@ -290,7 +290,7 @@ async function pushVoucherBatchToRouter(vouchers, router, pkg) {
       });
       if (typeof api.execCli === 'function') {
         await api
-          .execCli(`/ip hotspot user remove [find name=${cliEscapeValue(voucher.code)}]`)
+          .execCli(`/ip hotspot user remove [find where name=${rosFindLit(voucher.code)}]`)
           .catch(() => {});
       }
       await hs.addHotspotUser(api, {

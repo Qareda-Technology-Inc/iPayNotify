@@ -29,8 +29,9 @@ export function formatLimitUptime(totalSeconds) {
 }
 
 /**
- * MikroTik hotspot/PPP rate-limit: rx/tx from router view
- * (rx = download to client, tx = upload from client).
+ * MikroTik hotspot/PPP rate-limit is `rx/tx` from the router's side:
+ * rx = what the router receives (client upload), tx = what it sends (client download).
+ * So "Up 5 / Down 10" becomes `5M/10M`.
  * @param {number|null|undefined} downMbps
  * @param {number|null|undefined} upMbps
  */
@@ -41,10 +42,10 @@ export function formatRateLimit(downMbps, upMbps) {
   const hasUp = Number.isFinite(up) && up > 0;
   if (!hasDown && !hasUp) return undefined;
   const fmt = (n) => {
-    if (n >= 1) return `${n}M`;
+    if (n >= 1) return `${Number(n.toFixed(3))}M`;
     return `${Math.round(n * 1000)}k`;
   };
-  return `${fmt(hasDown ? down : up)}/${fmt(hasUp ? up : down)}`;
+  return `${fmt(hasUp ? up : down)}/${fmt(hasDown ? down : up)}`;
 }
 
 /** Split seconds into { days, hours, minutes }. */

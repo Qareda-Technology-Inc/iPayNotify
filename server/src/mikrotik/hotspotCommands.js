@@ -1,5 +1,5 @@
 import { rosPairs, formatLimitUptime, formatRateLimit } from '../utils/rosParams.js';
-import { cliEscapeValue, parseDetailPrintOutput } from './rosSsh.js';
+import { cliEscapeValue, parseDetailPrintOutput, rosFindLit } from './rosSsh.js';
 import { normalizePrintRows } from './helpers.js';
 
 function rowName(r) {
@@ -26,7 +26,7 @@ export async function findHotspotUserByName(api, name) {
 
   if (typeof api?.execCli !== 'function') return null;
 
-  const lit = cliEscapeValue(want);
+  const lit = rosFindLit(want);
 
   try {
     const cnt = await api.execCli(`/ip hotspot user print count-only where name=${lit}`);
@@ -85,7 +85,7 @@ async function hotspotProfileExists(api, name) {
   }
 
   if (typeof api?.execCli !== 'function') return false;
-  const lit = cliEscapeValue(want);
+  const lit = rosFindLit(want);
 
   try {
     const detail = await api.execCli(
@@ -141,9 +141,36 @@ function assertCliOk(stdout, context) {
   }
 }
 
+function normalizeRate(v) {
+  return String(v || '')
+    .replace(/^"|"$/g, '')
+    .trim()
+    .toUpperCase()
+    .replace(/(\d)000K/g, '$1M');
+}
+
+function sameRateLimit(a, b) {
+  return normalizeRate(a).split(' ')[0] === normalizeRate(b).split(' ')[0];
+}
+
+/** Current rate-limit on the profile, '' when unlimited, null when it cannot be read. */
+async function readHotspotProfileRateLimit(api, findLit) {
+  try {
+    const out = String(
+      await api.execCli(`/ip hotspot user profile print detail without-paging where name=${findLit}`)
+    );
+    const m = /rate-limit=("([^"]*)"|(\S+))/.exec(out);
+    if (!m) return '';
+    return m[2] ?? m[3] ?? '';
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Create or update a hotspot user profile from a QareFi package.
- * Minimal add first (name only), then set rate-limit / shared-users — more reliable over SSH.
+ * New profiles are added with rate-limit in the same command; existing ones are updated,
+ * then the rate-limit is read back from the router.
  */
 export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
   const name = String(profileName || 'default').trim() || 'default';
@@ -157,40 +184,50 @@ export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
     .trim()
     .replace(/:/g, '-');
   const nameLit = cliEscapeValue(name);
+  /* Always quote inside [find]: an unquoted `5-Hours` is read as an expression and matches nothing,
+   * so `set` silently changes no profile and the speed never reaches the router. */
+  const findLit = rosFindLit(name);
   const exists = await hotspotProfileExists(api, name);
 
   if (typeof api?.execCli === 'function') {
+    const props = [];
+    if (rateLimit) props.push(`rate-limit=${cliEscapeValue(rateLimit)}`);
+    if (shared) props.push(`shared-users=${cliEscapeValue(shared)}`);
+    if (comment) props.push(`comment=${cliEscapeValue(comment)}`);
+    const propStr = props.join(' ');
+
+    let added = false;
     if (!exists) {
       try {
-        const out = await api.execCli(`/ip hotspot user profile add name=${nameLit}`);
+        const out = await api.execCli(
+          `/ip hotspot user profile add name=${nameLit}${propStr ? ` ${propStr}` : ''}`
+        );
         assertCliOk(out, 'Hotspot profile add');
+        added = true;
       } catch (e) {
         const msg = String(e?.message || e);
         if (!/already have/i.test(msg)) throw e;
       }
     }
 
-    let setLine = `/ip hotspot user profile set [find name=${nameLit}]`;
-    if (rateLimit) setLine += ` rate-limit=${cliEscapeValue(rateLimit)}`;
-    if (shared) setLine += ` shared-users=${cliEscapeValue(shared)}`;
-    if (comment) setLine += ` comment=${cliEscapeValue(comment)}`;
-    try {
-      const out = await api.execCli(setLine);
+    if (!added && propStr) {
+      const out = await api.execCli(
+        `/ip hotspot user profile set [find where name=${findLit}] ${propStr}`
+      );
       assertCliOk(out, 'Hotspot profile set');
-    } catch (e) {
-      /* set can fail if find matched nothing — try add+set once more */
-      const msg = String(e?.message || e);
-      if (/no such item|not found|empty/i.test(msg) || !exists) {
-        const outAdd = await api.execCli(`/ip hotspot user profile add name=${nameLit}`);
-        assertCliOk(outAdd, 'Hotspot profile add (retry)');
-        const outSet = await api.execCli(setLine);
-        assertCliOk(outSet, 'Hotspot profile set (retry)');
-      } else {
-        throw e;
-      }
     }
 
     const ok = await hotspotProfileExists(api, name);
+    if (ok && rateLimit) {
+      const applied = await readHotspotProfileRateLimit(api, findLit);
+      if (applied != null && !sameRateLimit(applied, rateLimit)) {
+        const err = new Error(
+          `Hotspot profile “${name}” rate-limit is “${applied || 'unlimited'}” on the router, expected “${rateLimit}”.`
+        );
+        err.status = 502;
+        throw err;
+      }
+    }
     if (!ok) {
       let sample = '';
       try {
@@ -358,10 +395,10 @@ export async function addHotspotUser(api, opts) {
 export async function disconnectHotspotUser(api, username) {
   const name = String(username || '').trim();
   if (!name) return;
-  const lit = cliEscapeValue(name);
+  const lit = rosFindLit(name);
   if (typeof api?.execCli === 'function') {
-    await api.execCli(`/ip hotspot active remove [find user=${lit}]`).catch(() => {});
-    await api.execCli(`/ip hotspot user remove [find name=${lit}]`).catch(() => {});
+    await api.execCli(`/ip hotspot active remove [find where user=${lit}]`).catch(() => {});
+    await api.execCli(`/ip hotspot user remove [find where name=${lit}]`).catch(() => {});
     return;
   }
   const active = normalizePrintRows(await api.write('/ip/hotspot/active/print'));
@@ -378,10 +415,10 @@ export async function disconnectHotspotUser(api, username) {
 export async function setHotspotUserLimitUptime(api, username, seconds) {
   const limit = formatLimitUptime(seconds);
   if (!limit) return;
-  const lit = cliEscapeValue(username);
+  const lit = rosFindLit(username);
   if (typeof api?.execCli === 'function') {
     const out = await api.execCli(
-      `/ip hotspot user set [find name=${lit}] limit-uptime=${cliEscapeValue(limit)}`
+      `/ip hotspot user set [find where name=${lit}] limit-uptime=${cliEscapeValue(limit)}`
     );
     assertCliOk(out, 'Hotspot limit-uptime');
     return;
@@ -414,7 +451,7 @@ export async function removeHotspotUser(api, internalId) {
 export async function setHotspotUserComment(api, username, comment) {
   if (typeof api?.execCli === 'function') {
     return api.execCli(
-      `/ip hotspot user set [find name=${cliEscapeValue(username)}] comment=${cliEscapeValue(comment)}`
+      `/ip hotspot user set [find where name=${rosFindLit(username)}] comment=${cliEscapeValue(comment)}`
     );
   }
   const row = await findHotspotUserByName(api, username);
@@ -431,12 +468,12 @@ export async function setHotspotUserComment(api, username, comment) {
  * Sets mac-address + comment in one CLI call when possible.
  */
 export async function setHotspotUserMacAndComment(api, username, mac, comment) {
-  const nameLit = cliEscapeValue(username);
+  const nameLit = rosFindLit(username);
   const macLit = cliEscapeValue(mac);
   const commentLit = cliEscapeValue(comment);
   if (typeof api?.execCli === 'function') {
     const out = await api.execCli(
-      `/ip hotspot user set [find name=${nameLit}] mac-address=${macLit} comment=${commentLit}`
+      `/ip hotspot user set [find where name=${nameLit}] mac-address=${macLit} comment=${commentLit}`
     );
     assertCliOk(out, 'Hotspot user mac/comment set');
     return out;
