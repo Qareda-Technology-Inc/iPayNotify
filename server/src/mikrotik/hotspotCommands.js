@@ -427,7 +427,7 @@ export async function setHotspotUserComment(api, username, comment) {
 }
 
 /**
- * Lock hotspot user to a MAC (MikroTicket-style device binding).
+ * Lock hotspot user to a MAC after the first login.
  * Sets mac-address + comment in one CLI call when possible.
  */
 export async function setHotspotUserMacAndComment(api, username, mac, comment) {

@@ -28,7 +28,7 @@ const hotspotVoucherSchema = new mongoose.Schema(
     validUntil: { type: Date },
     /** First time this code appeared in /ip/hotspot/active. */
     usedAt: { type: Date },
-    /** MAC locked to this voucher after first activation (MikroTicket mc:). */
+    /** MAC locked to this voucher after first activation. */
     lockedMac: { type: String, trim: true, default: '' },
     /** Last reconcile snapshot from MikroTik hotspot user / active. */
     lastSeenAt: { type: Date },

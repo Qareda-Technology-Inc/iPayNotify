@@ -1,17 +1,17 @@
 import { formatExpiryComment } from './expiryComment.js';
 
 /**
- * MikroTicket-compatible hotspot user comment.
- * Create:  Mikroticket-dc:2026-09-17 12:37:25-ot:1-em:<voucherId>
+ * Hotspot user comment shown on the router.
+ * Create:  QareFi-dc:2026-09-17 12:37:25-ot:1-em:<voucherId>
  * Active:  …-da:2026-09-26 20:26:02-mc:92:D4:5A:3C:76:C7
- * Optional QareFi wall-clock stamp appended for our expiry scheduler.
+ * Optional wall-clock stamp appended for the expiry scheduler.
  */
 
 function pad2(n) {
   return String(n).padStart(2, '0');
 }
 
-/** `YYYY-MM-DD HH:mm:ss` (UTC) — same shape as MikroTicket comments. */
+/** `YYYY-MM-DD HH:mm:ss` (UTC). */
 export function formatMikroTicketDate(date) {
   const d = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(d.getTime())) return '';
@@ -63,7 +63,7 @@ export function formatMikroTicketComment(opts = {}) {
   const em = String(opts.voucherId || '')
     .replace(/[^a-f0-9]/gi, '')
     .slice(0, 24);
-  let comment = `Mikroticket-dc:${dc}-ot:${ot}-em:${em || '0'}`;
+  let comment = `QareFi-dc:${dc}-ot:${ot}-em:${em || '0'}`;
 
   const mac = normalizeMacAddress(opts.mac);
   if (opts.activatedAt && mac) {

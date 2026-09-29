@@ -676,7 +676,9 @@ export async function reconcileHotspotVoucherUsage(organizationId) {
 
           await v.save();
 
-          if (justActivated && (v.lockedMac || v.validUntil)) {
+          const routerComment = String(userRow?.comment || active?.comment || '');
+          const renameComment = /mikroticket/i.test(routerComment);
+          if (renameComment || (justActivated && (v.lockedMac || v.validUntil))) {
             try {
               const comment = formatMikroTicketComment({
                 createdAt: v.createdAt,
