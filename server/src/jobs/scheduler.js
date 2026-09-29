@@ -3,12 +3,14 @@ import {
   runMidnightBillingJob,
   enforceExpiredPppoeAccounts,
 } from '../services/renewalService.js';
+import { enforceHotspotPlans } from '../services/hotspotService.js';
 import { runExpiryReminderSmsJob } from '../services/expiryReminderSmsService.js';
 import { expireStalePendingPayments } from '../services/paymentService.js';
 import { config } from '../config.js';
 
 let task;
 let pppoeExpiryTask;
+let hotspotPlanTask;
 let expiryReminderSmsTask;
 let stalePaymentsTask;
 
@@ -49,6 +51,27 @@ export function startBillingScheduler() {
       { timezone: config.cronTz }
     );
     console.log(`[billing] PPPoE expiry check "${expr}" (${config.cronTz})`);
+  }
+
+  if (!hotspotPlanTask) {
+    hotspotPlanTask = cron.schedule(
+      '*/2 * * * *',
+      async () => {
+        try {
+          const summary = await enforceHotspotPlans();
+          const kicked = summary.usage?.kicked || 0;
+          const exhausted = summary.usage?.exhausted || 0;
+          const removed = summary.purge?.removed || 0;
+          if (kicked > 0 || exhausted > 0 || removed > 0) {
+            console.log('[billing] hotspot plan tick', new Date().toISOString(), summary);
+          }
+        } catch (e) {
+          console.error('[billing] hotspot plan tick failed', e);
+        }
+      },
+      { timezone: config.cronTz }
+    );
+    console.log(`[billing] hotspot plan check every 2 minutes (${config.cronTz})`);
   }
 
   if (config.expiryReminderSms.enabled && !expiryReminderSmsTask) {
@@ -103,6 +126,10 @@ export function stopBillingScheduler() {
   if (pppoeExpiryTask) {
     pppoeExpiryTask.stop();
     pppoeExpiryTask = null;
+  }
+  if (hotspotPlanTask) {
+    hotspotPlanTask.stop();
+    hotspotPlanTask = null;
   }
   if (expiryReminderSmsTask) {
     expiryReminderSmsTask.stop();

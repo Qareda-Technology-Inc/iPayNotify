@@ -351,6 +351,50 @@ export async function addHotspotUser(api, opts) {
   return row;
 }
 
+/**
+ * Drop the live session and the hotspot user. Removing the user alone leaves
+ * an already-open session online past the plan.
+ */
+export async function disconnectHotspotUser(api, username) {
+  const name = String(username || '').trim();
+  if (!name) return;
+  const lit = cliEscapeValue(name);
+  if (typeof api?.execCli === 'function') {
+    await api.execCli(`/ip hotspot active remove [find user=${lit}]`).catch(() => {});
+    await api.execCli(`/ip hotspot user remove [find name=${lit}]`).catch(() => {});
+    return;
+  }
+  const active = normalizePrintRows(await api.write('/ip/hotspot/active/print'));
+  for (const row of active) {
+    const u = String(row.user || row.name || '').trim();
+    if (u !== name || !row['.id']) continue;
+    await api.write(['/ip/hotspot/active/remove', `=.id=${row['.id']}`]).catch(() => {});
+  }
+  const user = await findHotspotUserByName(api, name);
+  if (user?.['.id']) await removeHotspotUser(api, user['.id']);
+}
+
+/** Absolute online cap. MikroTik compares this to the user's accumulated uptime. */
+export async function setHotspotUserLimitUptime(api, username, seconds) {
+  const limit = formatLimitUptime(seconds);
+  if (!limit) return;
+  const lit = cliEscapeValue(username);
+  if (typeof api?.execCli === 'function') {
+    const out = await api.execCli(
+      `/ip hotspot user set [find name=${lit}] limit-uptime=${cliEscapeValue(limit)}`
+    );
+    assertCliOk(out, 'Hotspot limit-uptime');
+    return;
+  }
+  const row = await findHotspotUserByName(api, username);
+  if (!row?.['.id']) return;
+  await api.write([
+    '/ip/hotspot/user/set',
+    `=.id=${row['.id']}`,
+    `=limit-uptime=${limit}`,
+  ]);
+}
+
 export async function removeHotspotUser(api, internalId) {
   if (internalId == null || String(internalId).trim() === '') {
     return null;

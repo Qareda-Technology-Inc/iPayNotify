@@ -731,7 +731,7 @@ export function PackagesPage() {
                     {durationType === 'elapsed' ? (
                       <DurationPicker
                         label="Elapsed time"
-                        hint="Runs from first activation whether the customer is online or not."
+                        hint="Starts at the first login. The router disconnects the device when this time is up, even if they stay online."
                         days={form.elapsedDays}
                         hours={form.elapsedHours}
                         minutes={form.elapsedMinutes}
@@ -745,7 +745,7 @@ export function PackagesPage() {
                     ) : (
                       <DurationPicker
                         label="Paused time"
-                        hint="Advances only while the customer is connected (online session time)."
+                        hint="Counts only while the device is connected. The router disconnects it when that online time is used up."
                         days={form.pausedDays}
                         hours={form.pausedHours}
                         minutes={form.pausedMinutes}

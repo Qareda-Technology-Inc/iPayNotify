@@ -10,6 +10,7 @@ import {
 import { resolveRouter } from './routerResolver.js';
 import { cliEscapeValue } from '../mikrotik/rosSsh.js';
 import { organizationIdForRouter } from '../db/defaultOrganizationId.js';
+import { syncHotspotExpiryScheduler } from './hotspotExpirySchedulerService.js';
 
 function randomNumericCode(length = 6) {
   const n = Math.min(10, Math.max(4, Math.floor(Number(length) || 6)));
@@ -324,20 +325,7 @@ async function pushVoucherBatchToRouter(vouchers, router, pkg) {
 export async function removeVoucherFromRouter(voucher) {
   const router = await resolveRouter(voucher.routerId);
   await withRouterMikrotik(router, async (api) => {
-    if (typeof api.execCli === 'function') {
-      await api
-        .execCli(`/ip hotspot user remove [find name=${cliEscapeValue(voucher.code)}]`)
-        .catch(() => {});
-      voucher.mikrotikInternalId = undefined;
-      await voucher.save();
-      return;
-    }
-    let id = voucher.mikrotikInternalId;
-    if (!id) {
-      const row = await hs.findHotspotUserByName(api, voucher.code);
-      id = row?.['.id'];
-    }
-    if (id) await hs.removeHotspotUser(api, id);
+    await hs.disconnectHotspotUser(api, voucher.code);
   });
   voucher.mikrotikInternalId = undefined;
   await voucher.save();
@@ -390,6 +378,8 @@ export async function generateVouchers({
 
   const paused = pausedSecondsFromPackage(pkg);
   const elapsed = elapsedSecondsFromPackage(pkg);
+  /* Both clocks are also a MikroTik limit-uptime, so a session cannot run past the plan. */
+  const onlineLimit = paused || elapsed;
   const profileName = hotspotProfileNameForPackage(pkg);
   const orgId = await organizationIdForRouter(router);
 
@@ -441,7 +431,7 @@ export async function generateVouchers({
     hotspotServer: serverName,
     profileName,
     dataLimitBytes: pkg.dataLimitBytes,
-    timeLimitSeconds: paused,
+    timeLimitSeconds: onlineLimit,
     elapsedSeconds: elapsed,
     usersPerTicket: Math.max(1, Number(pkg.usersPerTicket) || 1),
     speedUpMbps: pkg.speedUpMbps,
@@ -452,6 +442,11 @@ export async function generateVouchers({
 
   if (pushToRouter) {
     await pushVoucherBatchToRouter(vouchers, router, pkg);
+    try {
+      await syncHotspotExpiryScheduler(router._id, orgId);
+    } catch (e) {
+      console.error('[hotspot] expiry scheduler sync failed', e?.message || e);
+    }
   }
 
   return vouchers;
@@ -463,6 +458,80 @@ export async function listVouchers(query = {}) {
     .sort({ createdAt: -1 })
     .limit(500)
     .lean();
+}
+
+/** RouterOS `5h2m`, `1d3h`, or `hh:mm:ss` → seconds. */
+export function parseRosDurationSeconds(value) {
+  const str = String(value || '').trim();
+  if (!str || str === '0' || str === '0s') return 0;
+  const hms = /^(\d+):(\d+):(\d+)$/.exec(str);
+  if (hms) return Number(hms[1]) * 3600 + Number(hms[2]) * 60 + Number(hms[3]);
+  let total = 0;
+  let any = false;
+  const re = /(\d+)([wdhms])/gi;
+  let m;
+  while ((m = re.exec(str))) {
+    any = true;
+    const n = Number(m[1]);
+    const u = m[2].toLowerCase();
+    if (u === 'w') total += n * 604800;
+    else if (u === 'd') total += n * 86400;
+    else if (u === 'h') total += n * 3600;
+    else if (u === 'm') total += n * 60;
+    else total += n;
+  }
+  return any ? total : 0;
+}
+
+/**
+ * Decide whether a voucher is past its plan.
+ * Elapsed time is wall-clock from first use. Online time (limit-uptime) caps both modes.
+ */
+export function assessVoucherUsage({
+  now,
+  uptimeSec,
+  elapsedSeconds,
+  timeLimitSeconds,
+  usedAt,
+  validUntil,
+  active = false,
+}) {
+  const nowMs = now.getTime();
+  const online = Math.max(0, Math.floor(Number(uptimeSec) || 0));
+  const elapsed = Number(elapsedSeconds);
+  const paused = Number(timeLimitSeconds);
+  const hasElapsed = Number.isFinite(elapsed) && elapsed > 0;
+  const hasPaused = Number.isFinite(paused) && paused > 0;
+  let nextUsedAt = usedAt ? new Date(usedAt) : null;
+  let nextValid = validUntil ? new Date(validUntil) : null;
+  if (nextUsedAt && Number.isNaN(nextUsedAt.getTime())) nextUsedAt = null;
+  if (nextValid && Number.isNaN(nextValid.getTime())) nextValid = null;
+
+  if (!nextUsedAt && (online > 0 || active)) {
+    nextUsedAt = new Date(nowMs - online * 1000);
+  }
+  if (hasElapsed && nextUsedAt && !nextValid) {
+    nextValid = new Date(nextUsedAt.getTime() + elapsed * 1000);
+  }
+
+  let kick = false;
+  let reason = '';
+  if (nextValid && nextValid.getTime() <= nowMs) {
+    kick = true;
+    reason = 'elapsed';
+  }
+  const cap = hasPaused ? paused : hasElapsed ? elapsed : 0;
+  if (cap > 0 && online >= cap) {
+    kick = true;
+    if (!reason) reason = 'uptime';
+  }
+  return {
+    kick,
+    reason,
+    usedAt: nextUsedAt,
+    validUntil: nextValid,
+    limitUptimeSeconds: cap > 0 ? cap : undefined,
+  };
 }
 
 function rosBytes(row, keys) {
@@ -494,6 +563,8 @@ export async function reconcileHotspotVoucherUsage(organizationId) {
     macLocked: 0,
     updatedBytes: 0,
     exhausted: 0,
+    kicked: 0,
+    limitsSet: 0,
     errors: [],
   };
   const now = new Date();
@@ -509,43 +580,102 @@ export async function reconcileHotspotVoucherUsage(organizationId) {
       });
       if (!vouchers.length) continue;
 
-      const byCode = new Map(vouchers.map((v) => [String(v.code).toUpperCase(), v]));
-
       await withRouterMikrotik(router, async (api) => {
         const [activeRows, userRows] = await Promise.all([
           hs.printHotspotActive(api),
           hs.printHotspotUsers(api),
         ]);
 
+        const activeByUser = new Map();
         for (const row of activeRows) {
           const user = String(row.user || row['user-name'] || row.name || '')
             .trim()
             .toUpperCase();
-          if (!user) continue;
-          const v = byCode.get(user);
-          if (!v) continue;
-          const mac = normalizeMacAddress(
-            row['mac-address'] || row.mac || row['mac-address'] || ''
+          if (user) activeByUser.set(user, row);
+        }
+        const userByName = new Map();
+        for (const row of userRows) {
+          const name = String(row.name || '')
+            .trim()
+            .toUpperCase();
+          if (name) userByName.set(name, row);
+        }
+
+        for (const v of vouchers) {
+          const key = String(v.code).toUpperCase();
+          const active = activeByUser.get(key);
+          const userRow = userByName.get(key);
+          if (!active && !userRow) continue;
+
+          const uptimeSec = Math.max(
+            parseRosDurationSeconds(active?.uptime || active?.['session-time']),
+            parseRosDurationSeconds(userRow?.uptime)
           );
+          const decision = assessVoucherUsage({
+            now,
+            uptimeSec,
+            elapsedSeconds: v.elapsedSeconds,
+            timeLimitSeconds: v.timeLimitSeconds,
+            usedAt: v.usedAt,
+            validUntil: v.validUntil,
+            active: Boolean(active),
+          });
+
           let justActivated = false;
-          if (!v.usedAt) {
-            v.usedAt = now;
+          if (!v.usedAt && decision.usedAt) {
+            v.usedAt = decision.usedAt;
             summary.markedUsed++;
             justActivated = true;
-            const elapsed = Number(v.elapsedSeconds);
-            if (Number.isFinite(elapsed) && elapsed > 0 && !v.validUntil) {
-              v.validUntil = new Date(now.getTime() + elapsed * 1000);
-            }
           }
+          if (!v.validUntil && decision.validUntil) {
+            v.validUntil = decision.validUntil;
+            justActivated = true;
+          }
+          const mac = active
+            ? normalizeMacAddress(active['mac-address'] || active.mac || '')
+            : '';
           if (mac && !v.lockedMac) {
             v.lockedMac = mac;
             summary.macLocked++;
             justActivated = true;
           }
-          v.lastSeenAt = now;
+          if (active) v.lastSeenAt = now;
+
+          let overData = false;
+          if (userRow) {
+            const bi = rosBytes(userRow, ['bytes-in', 'bytes_in']);
+            const bo = rosBytes(userRow, ['bytes-out', 'bytes_out']);
+            if (bi !== (v.bytesIn || 0) || bo !== (v.bytesOut || 0)) {
+              v.bytesIn = bi;
+              v.bytesOut = bo;
+              summary.updatedBytes++;
+            }
+            const dataLimit = Number(v.dataLimitBytes);
+            if (Number.isFinite(dataLimit) && dataLimit > 0 && bi + bo >= dataLimit) {
+              overData = true;
+            }
+          }
+
+          if (decision.kick || overData) {
+            try {
+              await hs.disconnectHotspotUser(api, v.code);
+              v.mikrotikInternalId = undefined;
+              if (!v.validUntil || v.validUntil > now) v.validUntil = now;
+              if (!v.usedAt) {
+                v.usedAt = now;
+                summary.markedUsed++;
+              }
+              if (overData) summary.exhausted++;
+              else summary.kicked++;
+            } catch (e) {
+              summary.errors.push({ id: String(v._id), message: e.message });
+            }
+            await v.save();
+            continue;
+          }
+
           await v.save();
 
-          /* On first activation: stamp da+mc in comment and lock MAC on MikroTik user */
           if (justActivated && (v.lockedMac || v.validUntil)) {
             try {
               const comment = formatMikroTicketComment({
@@ -568,42 +698,21 @@ export async function reconcileHotspotVoucherUsage(organizationId) {
               });
             }
           }
-        }
 
-        for (const row of userRows) {
-          const name = String(row.name || '')
-            .trim()
-            .toUpperCase();
-          if (!name) continue;
-          const v = byCode.get(name);
-          if (!v) continue;
-          const bi = rosBytes(row, ['bytes-in', 'bytes_in']);
-          const bo = rosBytes(row, ['bytes-out', 'bytes_out']);
-          let dirty = false;
-          if (bi !== (v.bytesIn || 0) || bo !== (v.bytesOut || 0)) {
-            v.bytesIn = bi;
-            v.bytesOut = bo;
-            summary.updatedBytes++;
-            dirty = true;
-          }
-          const limit = Number(v.dataLimitBytes);
-          if (Number.isFinite(limit) && limit > 0 && bi + bo >= limit) {
-            if (!v.usedAt) {
-              v.usedAt = now;
-              summary.markedUsed++;
-              dirty = true;
-            }
-            try {
-              const id = row['.id'] || v.mikrotikInternalId;
-              if (id) await hs.removeHotspotUser(api, id);
-              v.mikrotikInternalId = undefined;
-              dirty = true;
-              summary.exhausted++;
-            } catch (e) {
-              summary.errors.push({ id: String(v._id), message: e.message });
+          if (userRow && decision.limitUptimeSeconds) {
+            const have = parseRosDurationSeconds(userRow['limit-uptime']);
+            if (have + 60 < decision.limitUptimeSeconds) {
+              try {
+                await hs.setHotspotUserLimitUptime(api, v.code, decision.limitUptimeSeconds);
+                summary.limitsSet++;
+              } catch (e) {
+                summary.errors.push({
+                  id: String(v._id),
+                  message: `limit-uptime: ${e.message}`,
+                });
+              }
             }
           }
-          if (dirty) await v.save();
         }
       });
     } catch (e) {
@@ -612,6 +721,23 @@ export async function reconcileHotspotVoucherUsage(organizationId) {
   }
 
   return summary;
+}
+
+let hotspotJob = null;
+
+/** Reconcile usage and drop sessions that are past the package. Safe to call on a short interval. */
+export function enforceHotspotPlans(organizationId) {
+  if (hotspotJob) return hotspotJob;
+  hotspotJob = (async () => {
+    try {
+      const usage = await reconcileHotspotVoucherUsage(organizationId);
+      const purge = await purgeExpiredHotspotOnRouter();
+      return { usage, purge };
+    } finally {
+      hotspotJob = null;
+    }
+  })();
+  return hotspotJob;
 }
 
 /** Remove router users for vouchers past validUntil (saves router resources). */
