@@ -3,7 +3,7 @@ import { Router } from '../models/index.js';
 import { withRouterMikrotik } from '../mikrotik/routeros.js';
 import { normalizePrintRows } from '../mikrotik/helpers.js';
 import { rosPairs } from '../utils/rosParams.js';
-import { cliEscapeValue } from '../mikrotik/rosSsh.js';
+import { cliEscapeValue, rosScriptLit } from '../mikrotik/rosSsh.js';
 import { EXPIRY_STAMP_PREFIX } from '../utils/expiryComment.js';
 
 export const HOTSPOT_EXPIRY_SCRIPT_NAME = 'qarefi_hs_expiry';
@@ -92,7 +92,7 @@ export async function syncHotspotExpiryScheduler(routerId, organizationId) {
         `/system scheduler remove [find name=${cliEscapeValue(schedName)}]`
       ).catch(() => {});
       await api.execCli(
-        `/system script add name=${cliEscapeValue(scriptName)} owner=admin policy=read,write,policy,test source=${cliEscapeValue(source)}`
+        `/system script add name=${cliEscapeValue(scriptName)} owner=admin policy=read,write,policy,test source=${rosScriptLit(source)}`
       );
       await api.execCli(
         `/system scheduler add name=${cliEscapeValue(schedName)} interval=1m ` +

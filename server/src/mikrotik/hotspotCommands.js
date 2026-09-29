@@ -1,5 +1,5 @@
 import { rosPairs, formatLimitUptime, formatRateLimit } from '../utils/rosParams.js';
-import { cliEscapeValue, parseDetailPrintOutput, rosFindLit } from './rosSsh.js';
+import { cliEscapeValue, parseDetailPrintOutput, rosFindLit, rosScriptLit } from './rosSsh.js';
 import { normalizePrintRows } from './helpers.js';
 
 function rowName(r) {
@@ -159,6 +159,7 @@ async function readHotspotProfileRateLimit(api, findLit) {
     const out = String(
       await api.execCli(`/ip hotspot user profile print detail without-paging where name=${findLit}`)
     );
+    if (!/name=/.test(out)) return null;
     const m = /rate-limit=("([^"]*)"|(\S+))/.exec(out);
     if (!m) return '';
     return m[2] ?? m[3] ?? '';
@@ -189,11 +190,14 @@ export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
   const findLit = rosFindLit(name);
   const exists = await hotspotProfileExists(api, name);
 
+  const onLogin = String(opts.onLogin || '').trim();
+
   if (typeof api?.execCli === 'function') {
     const props = [];
     if (rateLimit) props.push(`rate-limit=${cliEscapeValue(rateLimit)}`);
     if (shared) props.push(`shared-users=${cliEscapeValue(shared)}`);
     if (comment) props.push(`comment=${cliEscapeValue(comment)}`);
+    if (onLogin) props.push(`on-login=${rosScriptLit(onLogin)}`);
     const propStr = props.join(' ');
 
     let added = false;
@@ -218,8 +222,17 @@ export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
     }
 
     const ok = await hotspotProfileExists(api, name);
+    let applied = null;
     if (ok && rateLimit) {
-      const applied = await readHotspotProfileRateLimit(api, findLit);
+      applied = await readHotspotProfileRateLimit(api, findLit);
+      if (applied != null && !sameRateLimit(applied, rateLimit)) {
+        /* One more set on its own (some builds ignore rate-limit when combined with a long on-login) */
+        const out = await api.execCli(
+          `/ip hotspot user profile set [find where name=${findLit}] rate-limit=${cliEscapeValue(rateLimit)}`
+        );
+        assertCliOk(out, 'Hotspot profile rate-limit');
+        applied = await readHotspotProfileRateLimit(api, findLit);
+      }
       if (applied != null && !sameRateLimit(applied, rateLimit)) {
         const err = new Error(
           `Hotspot profile “${name}” rate-limit is “${applied || 'unlimited'}” on the router, expected “${rateLimit}”.`
@@ -245,37 +258,33 @@ export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
       err.status = 502;
       throw err;
     }
-    return { name, created: !exists, updated: exists };
+    return {
+      name,
+      created: !exists,
+      updated: exists,
+      rateLimit: applied ?? rateLimit ?? '',
+      onLogin: Boolean(onLogin),
+    };
   }
 
   const rows = await printHotspotUserProfiles(api);
+  const props = {
+    ...(rateLimit ? { 'rate-limit': rateLimit } : {}),
+    ...(shared ? { 'shared-users': shared } : {}),
+    ...(comment ? { comment } : {}),
+    ...(onLogin ? { 'on-login': onLogin } : {}),
+  };
   if (exists) {
     const row = rows.find((r) => String(r.name || '').trim() === name);
     const id = row?.['.id'];
     if (id) {
-      await api.write([
-        '/ip/hotspot/user/profile/set',
-        `=.id=${id}`,
-        ...rosPairs({
-          ...(rateLimit ? { 'rate-limit': rateLimit } : {}),
-          ...(shared ? { 'shared-users': shared } : {}),
-          ...(comment ? { comment } : {}),
-        }),
-      ]);
-      return { name, created: false, updated: true };
+      await api.write(['/ip/hotspot/user/profile/set', `=.id=${id}`, ...rosPairs(props)]);
+      return { name, created: false, updated: true, rateLimit: rateLimit || '', onLogin: Boolean(onLogin) };
     }
   }
 
-  await api.write([
-    '/ip/hotspot/user/profile/add',
-    ...rosPairs({
-      name,
-      ...(rateLimit ? { 'rate-limit': rateLimit } : {}),
-      ...(shared ? { 'shared-users': shared } : {}),
-      comment,
-    }),
-  ]);
-  return { name, created: true, updated: false };
+  await api.write(['/ip/hotspot/user/profile/add', ...rosPairs({ name, ...props })]);
+  return { name, created: true, updated: false, rateLimit: rateLimit || '', onLogin: Boolean(onLogin) };
 }
 
 /** @deprecated use upsertHotspotUserProfile */

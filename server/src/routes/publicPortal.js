@@ -17,8 +17,24 @@ import {
 } from '../services/portalContextService.js';
 import { buildCaptiveLoginHtml } from '../services/captivePortalHtml.js';
 import { captiveBuyUrl } from '../services/captivePortalPushService.js';
+import { recordHotspotLoginEvent } from '../services/hotspotService.js';
 
 export const publicPortalRouter = express.Router();
+
+/** Hotspot profile on-login script reports a voucher's first login here. */
+publicPortalRouter.post(
+  '/hotspot/login-event',
+  asyncHandler(async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const result = await recordHotspotLoginEvent({
+      key: body.key || req.get('x-qarefi-key'),
+      code: body.code || body.user,
+      mac: body.mac,
+    });
+    if (!result.ok) return res.status(result.status || 400).json({ ok: false });
+    res.json(result);
+  })
+);
 
 publicPortalRouter.get(
   '/captive/:slug/login.html',

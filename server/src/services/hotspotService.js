@@ -11,6 +11,99 @@ import { resolveRouter } from './routerResolver.js';
 import { rosFindLit } from '../mikrotik/rosSsh.js';
 import { organizationIdForRouter } from '../db/defaultOrganizationId.js';
 import { syncHotspotExpiryScheduler } from './hotspotExpirySchedulerService.js';
+import { config } from '../config.js';
+
+/** Per-router secret the on-login script sends home (created on first profile sync). */
+export async function ensureRouterHookKey(router) {
+  const id = router?._id;
+  if (!id) return '';
+  const current = await Router.findById(id).select('+hotspotHookKey').lean();
+  if (current?.hotspotHookKey) return current.hotspotHookKey;
+  const key = crypto.randomBytes(18).toString('hex');
+  await Router.updateOne({ _id: id }, { $set: { hotspotHookKey: key } });
+  return key;
+}
+
+/**
+ * RouterOS on-login for QareFi package profiles. On the first login of a code it stamps
+ * `-da:<date time>-mc:<mac>` on the user comment and reports the login to the API,
+ * so the plan clock starts at the real first login.
+ */
+export function buildHotspotOnLoginScript({ url, key }) {
+  return [
+    '# QAREFI HOTSPOT LOGIN',
+    ':local qfUser $user',
+    ':local qfMac $"mac-address"',
+    ':local qfId [/ip hotspot user find where name=$qfUser]',
+    ':if ([:len $qfId] > 0) do={',
+    ':local qfComment [/ip hotspot user get $qfId comment]',
+    ':if (([:typeof [:find $qfComment "QareFi-"]] != "nil") and ([:typeof [:find $qfComment "-da:"]] = "nil")) do={',
+    ':local qfDate [/system clock get date]',
+    ':local qfTime [/system clock get time]',
+    '/ip hotspot user set $qfId comment=($qfComment . "-da:" . $qfDate . " " . $qfTime . "-mc:" . $qfMac)',
+    ':do {',
+    `/tool fetch url="${url}" mode=https http-method=post http-header-field="Content-Type: application/json" http-data=("{\\"key\\":\\"${key}\\",\\"code\\":\\"" . $qfUser . "\\",\\"mac\\":\\"" . $qfMac . "\\"}") output=none`,
+    '} on-error={ :log warning ("QareFi login sync failed " . $qfUser) }',
+    '}',
+    '}',
+  ].join('\n');
+}
+
+async function hotspotOnLoginForRouter(router) {
+  const base = String(config.publicApiUrl || '').trim();
+  if (!/^https:\/\//i.test(base)) return '';
+  const key = await ensureRouterHookKey(router);
+  if (!key) return '';
+  return buildHotspotOnLoginScript({ url: `${base}/api/public/hotspot/login-event`, key });
+}
+
+/**
+ * Called by the router's on-login script. Starts the plan clock at the real first login
+ * and locks the code to the device MAC.
+ */
+export async function recordHotspotLoginEvent({ key, code, mac }) {
+  const k = String(key || '').trim();
+  const c = String(code || '').trim();
+  if (!k || !c) return { ok: false, status: 400 };
+  const router = await Router.findOne({ hotspotHookKey: k });
+  if (!router) return { ok: false, status: 403 };
+  const voucher = await HotspotVoucher.findOne({ routerId: router._id, code: c });
+  if (!voucher) return { ok: true, known: false };
+
+  const now = new Date();
+  if (!voucher.usedAt) voucher.usedAt = now;
+  const elapsed = Number(voucher.elapsedSeconds);
+  if (!voucher.validUntil && Number.isFinite(elapsed) && elapsed > 0) {
+    voucher.validUntil = new Date(voucher.usedAt.getTime() + elapsed * 1000);
+  }
+  const m = normalizeMacAddress(mac);
+  if (m && !voucher.lockedMac) voucher.lockedMac = m;
+  voucher.lastSeenAt = now;
+  await voucher.save();
+
+  setImmediate(() => {
+    withRouterMikrotik(router, async (api) => {
+      const comment = formatMikroTicketComment({
+        createdAt: voucher.createdAt,
+        voucherId: voucher._id,
+        usersPerTicket: voucher.usersPerTicket,
+        activatedAt: voucher.usedAt,
+        mac: voucher.lockedMac,
+        validUntil: voucher.validUntil,
+      });
+      if (voucher.lockedMac) {
+        await hs.setHotspotUserMacAndComment(api, voucher.code, voucher.lockedMac, comment);
+      } else {
+        await hs.setHotspotUserComment(api, voucher.code, comment);
+      }
+      if (voucher.timeLimitSeconds) {
+        await hs.setHotspotUserLimitUptime(api, voucher.code, voucher.timeLimitSeconds);
+      }
+    }).catch((e) => console.error('[hotspot] login-event router update failed', e?.message || e));
+  });
+
+  return { ok: true, known: true, validUntil: voucher.validUntil || null };
+}
 
 function randomNumericCode(length = 6) {
   const n = Math.min(10, Math.max(4, Math.floor(Number(length) || 6)));
@@ -71,12 +164,14 @@ export function hotspotProfileNameForPackage(pkg) {
  */
 export async function pushHotspotPackageProfile(pkg, router) {
   const profileName = hotspotProfileNameForPackage(pkg);
+  const onLogin = await hotspotOnLoginForRouter(router);
   return withRouterMikrotik(router, async (api) => {
     const result = await hs.upsertHotspotUserProfile(api, profileName, {
       speedDownMbps: pkg.speedDownMbps,
       speedUpMbps: pkg.speedUpMbps,
       sharedUsers: pkg.usersPerTicket,
       comment: `QareFi:${pkg.name || profileName}`,
+      onLogin,
     });
     return { ...result, profileName };
   });
@@ -120,6 +215,8 @@ export async function syncHotspotPackageToRouter(packageId, routerId, organizati
     profileName: result.profileName,
     created: result.created,
     updated: result.updated,
+    rateLimit: result.rateLimit || '',
+    onLogin: Boolean(result.onLogin),
   };
 }
 
@@ -272,6 +369,7 @@ export async function syncVoucherToRouter(voucher) {
 async function pushVoucherBatchToRouter(vouchers, router, pkg) {
   if (!vouchers.length) return;
   const profileName = hotspotProfileNameForPackage(pkg);
+  const onLogin = await hotspotOnLoginForRouter(router);
 
   await withRouterMikrotik(router, async (api) => {
     await hs.upsertHotspotUserProfile(api, profileName, {
@@ -279,6 +377,7 @@ async function pushVoucherBatchToRouter(vouchers, router, pkg) {
       speedUpMbps: pkg.speedUpMbps,
       sharedUsers: pkg.usersPerTicket,
       comment: `QareFi-${pkg.name || profileName}`,
+      onLogin,
     });
 
     for (const voucher of vouchers) {

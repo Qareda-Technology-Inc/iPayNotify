@@ -361,7 +361,9 @@ export function PackagesPage() {
         setInfo(
           `Package saved. Profile “${saved.sync.profileName}” ${
             saved.sync.created ? 'created' : 'updated'
-          } on ${saved.sync.routerName || 'router'}.`
+          } on ${saved.sync.routerName || 'router'}. Rate limit on router: ${
+            saved.sync.rateLimit || 'unlimited'
+          }.${saved.sync.onLogin ? ' Login script installed.' : ''}`
         );
       }
       const keepRouter = form.syncRouterId;
@@ -393,7 +395,9 @@ export function PackagesPage() {
         body: JSON.stringify({ routerId: rid }),
       });
       setInfo(
-        `Synced “${sync.packageName}” → profile “${sync.profileName}” on ${sync.routerName}.`
+        `Synced “${sync.packageName}” → profile “${sync.profileName}” on ${sync.routerName}. Rate limit on router: ${
+          sync.rateLimit || 'unlimited'
+        }.${sync.onLogin ? ' Login script installed.' : ''}`
       );
       await load();
     } catch (e) {

@@ -623,6 +623,20 @@ export function rosFindLit(v) {
   return `"${String(v ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+/**
+ * Quoted CLI value for script bodies (`source=`, `on-login=`). `$` must be escaped or the
+ * terminal expands `$user` while adding the script, leaving an empty variable on the router.
+ */
+export function rosScriptLit(src) {
+  const body = String(src ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, '\\$')
+    .replace(/\?/g, '\\?')
+    .replace(/\r?\n/g, '\\n');
+  return `"${body}"`;
+}
+
 /** API-style `=key=value` words → CLI args */
 export function rosApiWordsToCli(pairWords) {
   const parts = [];
