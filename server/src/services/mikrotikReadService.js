@@ -230,6 +230,8 @@ function mapPppActiveRow(r) {
   let secret = rosFirstStr(r, ['user', 'login', 'account']);
   if (looksLikeMac(secret) || /^</.test(secret)) secret = '';
   if (!secret) secret = pppoeLoginFromName(iface);
+  /* `/ppp active` name is usually the plain login (`john`), not `<pppoe-john>` */
+  if (!secret && iface && !/^</.test(iface) && !looksLikeMac(iface)) secret = iface;
   const id = r['.id'] ?? r.id ?? r.numbers ?? null;
   if (!secret) {
     if (id != null && String(id).trim() !== '') {

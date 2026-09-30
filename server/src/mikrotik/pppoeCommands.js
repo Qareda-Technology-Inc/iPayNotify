@@ -41,7 +41,47 @@ export async function printPppSecrets(api) {
   return normalizePrintRows(raw);
 }
 
+const PPPOE_ACTIVE_SCRIPT =
+  ':foreach i in=[/ppp active find where service=pppoe] do={' +
+  ':put ("QF|" . [/ppp active get $i name] . "|" . [/ppp active get $i address] . "|" . ' +
+  '[/ppp active get $i uptime] . "|" . [/ppp active get $i caller-id] . "|" . $i)}';
+
+/** `QF|name|address|uptime|caller-id|*id` lines; a wrapped line is glued back to its record. */
+export function parsePppoeActiveScript(stdout) {
+  const records = [];
+  for (const raw of String(stdout || '').split(/\r?\n/)) {
+    const line = raw.replace(/\r$/, '');
+    if (!line.trim()) continue;
+    if (line.trimStart().startsWith('QF|')) records.push(line.trimStart());
+    else if (records.length) records[records.length - 1] += line.trim();
+  }
+  return records
+    .map((rec) => {
+      const [, name = '', address = '', uptime = '', callerId = '', id = ''] = rec.split('|');
+      const login = name.trim().replace(/^<pppoe-(.+)>$/i, '$1');
+      if (!login) return null;
+      return {
+        '.id': id.trim() || undefined,
+        name: login,
+        user: login,
+        service: 'pppoe',
+        address: address.trim(),
+        uptime: uptime.trim(),
+        'caller-id': callerId.trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
 export async function printPppActive(api) {
+  if (typeof api.execCli === 'function') {
+    try {
+      const rows = parsePppoeActiveScript(await api.execCli(PPPOE_ACTIVE_SCRIPT));
+      if (rows.length > 0) return rows;
+    } catch {
+      /* older builds: fall back to print */
+    }
+  }
   /* API query words are ignored by the SSH adapter; SSH adds `where service=pppoe` itself. */
   if (typeof api.execCli !== 'function') {
     try {
