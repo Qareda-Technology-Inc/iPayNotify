@@ -23,7 +23,10 @@ function routerHost(router) {
 
 /** SSH handshake hang / dead port — worth trying the other transport once. */
 function isTransportConnectFailure(err) {
+  if (err?.rosCommandError) return false;
   const m = String(err?.message ?? err);
+  /* Router output (e.g. `idle-timeout=none`) must not read as a connection timeout */
+  if (/Hotspot (user )?profile|Router said:|Existing profiles:|Flags:/i.test(m)) return false;
   /* RouterOS command/config errors mean we already reached the device */
   if (
     /already have|entry already exists|no such item|invalid value|input does not match|failure:|expected end of command/i.test(
@@ -32,7 +35,7 @@ function isTransportConnectFailure(err) {
   ) {
     return false;
   }
-  return /handshake|Timed out while waiting|not speaking SSH|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENOTFOUND|Cannot connect|connect ECONN|socket hang up|timeout|Cannot reach|WireGuard jump:/i.test(
+  return /handshake|Timed out while waiting|not speaking SSH|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENOTFOUND|Cannot connect|connect ECONN|socket hang up|(?<![-\w])timeout|Cannot reach|WireGuard jump:/i.test(
     m
   );
 }

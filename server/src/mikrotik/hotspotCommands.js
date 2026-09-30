@@ -141,6 +141,14 @@ function assertCliOk(stdout, context) {
   }
 }
 
+/** The router answered; this is a config/command problem, not an unreachable host. */
+function markRosCommandError(e) {
+  const err = e instanceof Error ? e : new Error(String(e));
+  err.rosCommandError = true;
+  if (!err.status) err.status = 502;
+  return err;
+}
+
 function normalizeRate(v) {
   return String(v || '')
     .replace(/^"|"$/g, '')
@@ -193,77 +201,113 @@ export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
   const onLogin = String(opts.onLogin || '').trim();
 
   if (typeof api?.execCli === 'function') {
+    /* Profile first (quoted name — `10MIN` unquoted can be read as a number/time), then speed,
+     * then the login script on its own so a script problem never blocks the profile. */
     const props = [];
     if (rateLimit) props.push(`rate-limit=${cliEscapeValue(rateLimit)}`);
     if (shared) props.push(`shared-users=${cliEscapeValue(shared)}`);
     if (comment) props.push(`comment=${cliEscapeValue(comment)}`);
-    if (onLogin) props.push(`on-login=${rosScriptLit(onLogin)}`);
     const propStr = props.join(' ');
+    const outputs = [];
+    const run = async (line, context) => {
+      const out = await api.execCli(line);
+      if (String(out || '').trim()) outputs.push(`${context}: ${String(out).trim().slice(0, 160)}`);
+      assertCliOk(out, context);
+      return out;
+    };
 
-    let added = false;
-    if (!exists) {
+    let present = exists;
+    let propsApplied = false;
+    if (!present) {
       try {
-        const out = await api.execCli(
-          `/ip hotspot user profile add name=${nameLit}${propStr ? ` ${propStr}` : ''}`
+        await run(
+          `/ip hotspot user profile add name=${findLit}${propStr ? ` ${propStr}` : ''}`,
+          'Hotspot profile add'
         );
-        assertCliOk(out, 'Hotspot profile add');
-        added = true;
+        propsApplied = true;
       } catch (e) {
-        const msg = String(e?.message || e);
-        if (!/already have/i.test(msg)) throw e;
+        if (!/already have/i.test(String(e?.message || e))) throw markRosCommandError(e);
+      }
+      present = await hotspotProfileExists(api, name);
+      if (!present) {
+        try {
+          await run(`/ip hotspot user profile add name=${findLit}`, 'Hotspot profile add (name only)');
+        } catch (e) {
+          if (!/already have/i.test(String(e?.message || e))) throw markRosCommandError(e);
+        }
+        propsApplied = false;
+        present = await hotspotProfileExists(api, name);
       }
     }
 
-    if (!added && propStr) {
-      const out = await api.execCli(
-        `/ip hotspot user profile set [find where name=${findLit}] ${propStr}`
-      );
-      assertCliOk(out, 'Hotspot profile set');
+    if (present && propStr && !propsApplied) {
+      try {
+        await run(`/ip hotspot user profile set [find where name=${findLit}] ${propStr}`, 'Hotspot profile set');
+      } catch (e) {
+        throw markRosCommandError(e);
+      }
     }
 
-    const ok = await hotspotProfileExists(api, name);
+    let onLoginOk = false;
+    if (present && onLogin) {
+      try {
+        await run(
+          `/ip hotspot user profile set [find where name=${findLit}] on-login=${rosScriptLit(onLogin)}`,
+          'Hotspot profile on-login'
+        );
+        onLoginOk = true;
+      } catch (e) {
+        console.error('[hotspot] on-login script not installed', name, e?.message || e);
+      }
+    }
+
+    const ok = present;
     let applied = null;
     if (ok && rateLimit) {
       applied = await readHotspotProfileRateLimit(api, findLit);
       if (applied != null && !sameRateLimit(applied, rateLimit)) {
         /* One more set on its own (some builds ignore rate-limit when combined with a long on-login) */
-        const out = await api.execCli(
-          `/ip hotspot user profile set [find where name=${findLit}] rate-limit=${cliEscapeValue(rateLimit)}`
-        );
-        assertCliOk(out, 'Hotspot profile rate-limit');
+        try {
+          await run(
+            `/ip hotspot user profile set [find where name=${findLit}] rate-limit=${cliEscapeValue(rateLimit)}`,
+            'Hotspot profile rate-limit'
+          );
+        } catch (e) {
+          throw markRosCommandError(e);
+        }
         applied = await readHotspotProfileRateLimit(api, findLit);
       }
       if (applied != null && !sameRateLimit(applied, rateLimit)) {
-        const err = new Error(
-          `Hotspot profile “${name}” rate-limit is “${applied || 'unlimited'}” on the router, expected “${rateLimit}”.`
+        throw markRosCommandError(
+          new Error(
+            `Hotspot profile “${name}” rate-limit is “${applied || 'unlimited'}” on the router, expected “${rateLimit}”.`
+          )
         );
-        err.status = 502;
-        throw err;
       }
     }
     if (!ok) {
       let sample = '';
       try {
         sample = String(
-          await api.execCli('/ip hotspot user profile print without-paging')
-        ).slice(0, 240);
+          await api.execCli('/ip hotspot user profile print terse without-paging')
+        ).slice(0, 300);
       } catch {
         /* ignore */
       }
-      const err = new Error(
-        `Hotspot user profile “${name}” was not found after sync. ` +
-          `Tried: /ip hotspot user profile add name=${nameLit}. ` +
-          (sample ? `Router profiles sample: ${sample.replace(/\s+/g, ' ')}` : '')
+      throw markRosCommandError(
+        new Error(
+          `Hotspot user profile “${name}” could not be created on the router. ` +
+            (outputs.length ? `Router said: ${outputs.join(' | ')}. ` : 'Router returned no message. ') +
+            (sample ? `Existing profiles: ${sample.replace(/\s+/g, ' ')}` : '')
+        )
       );
-      err.status = 502;
-      throw err;
     }
     return {
       name,
       created: !exists,
       updated: exists,
       rateLimit: applied ?? rateLimit ?? '',
-      onLogin: Boolean(onLogin),
+      onLogin: onLoginOk,
     };
   }
 
