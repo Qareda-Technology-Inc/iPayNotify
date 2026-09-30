@@ -14,39 +14,84 @@ const EMPTY_COPY = {
 
 function VoucherMock({ designId, title }) {
   const heading = title || 'Wi‑Fi Access';
+  const frame = 'rounded-md border border-dashed border-slate-300 bg-white text-slate-900';
+  let card;
   if (designId === 'ticket') {
-    return (
-      <div className="flex h-28 overflow-hidden rounded-lg border border-slate-700 bg-white text-slate-900">
-        <div className="flex w-8 items-center justify-center bg-orange-600 text-[10px] font-bold uppercase tracking-widest text-white [writing-mode:vertical-rl]">
+    card = (
+      <div className={`flex h-[90px] w-[192px] overflow-hidden ${frame}`}>
+        <div className="flex w-7 items-center justify-center bg-orange-600 text-[8px] font-bold uppercase tracking-widest text-white [writing-mode:vertical-rl] rotate-180">
           {heading}
         </div>
-        <div className="flex flex-1 flex-col justify-center px-3">
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Access code</p>
-          <p className="font-mono text-xl font-bold tracking-[0.2em] text-orange-600">482 193</p>
-          <p className="text-[11px] text-slate-500">1 day · 1 GB</p>
+        <div className="ml-1 border-l border-dashed border-orange-200 pl-2 pt-2">
+          <p className="text-[7px] font-bold uppercase tracking-wide text-slate-400">Access code</p>
+          <p className="font-mono text-lg font-bold tracking-[0.15em] text-orange-600">482 193</p>
+          <p className="text-[9px] font-semibold text-slate-800">Daily pass</p>
+          <p className="text-[8px] text-slate-500">1d · 1 GB</p>
         </div>
       </div>
     );
-  }
-  if (designId === 'strip') {
-    return (
-      <div className="flex h-20 overflow-hidden rounded-lg border border-slate-700 bg-white text-slate-900">
-        <div className="flex w-24 items-center bg-slate-900 px-3 text-xs font-semibold text-white">{heading}</div>
-        <div className="flex flex-1 items-center justify-between px-3">
-          <p className="font-mono text-lg font-bold tracking-[0.15em] text-emerald-600">482 193</p>
-          <p className="text-[11px] text-slate-500">1 day · 1 GB</p>
+  } else if (designId === 'strip') {
+    card = (
+      <div className={`flex h-[54px] w-[240px] overflow-hidden ${frame}`}>
+        <div className="flex w-16 items-center bg-slate-900 px-2 text-[9px] font-semibold leading-tight text-white">
+          {heading}
         </div>
+        <div className="flex flex-1 items-center justify-between px-2">
+          <div>
+            <p className="text-[7px] font-bold uppercase text-slate-400">Code</p>
+            <p className="font-mono text-base font-bold tracking-[0.12em] text-emerald-600">482 193</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[8px] font-semibold text-slate-800">Daily pass</p>
+            <p className="text-[8px] text-slate-500">1d · 1 GB</p>
+          </div>
+        </div>
+      </div>
+    );
+  } else if (designId === 'mini') {
+    card = (
+      <div className={`flex h-[48px] w-[90px] flex-col items-center justify-center ${frame}`}>
+        <p className="text-[6px] font-bold uppercase text-slate-500">{heading}</p>
+        <p className="font-mono text-sm font-bold text-slate-900">482 193</p>
+        <p className="text-[6px] text-slate-500">1d · 1 GB</p>
+      </div>
+    );
+  } else if (designId === 'classic') {
+    card = (
+      <div className={`h-[84px] w-[138px] p-1 ${frame}`}>
+        <div className="flex h-full flex-col items-center rounded border-[1.5px] border-slate-900 px-2 pt-1">
+          <p className="text-[9px] font-bold text-slate-900">{heading}</p>
+          <div className="mt-1 w-full border-t border-slate-200" />
+          <p className="mt-1 w-full rounded bg-slate-100 py-0.5 text-center font-mono text-sm font-bold text-slate-900">
+            482 193
+          </p>
+          <p className="mt-1 text-[7px] text-slate-500">Daily pass · 1d · 1 GB</p>
+        </div>
+      </div>
+    );
+  } else if (designId === 'badge') {
+    card = (
+      <div className="h-[81px] w-[138px] rounded-lg bg-indigo-600 p-2 text-white">
+        <p className="text-[7px] font-bold uppercase tracking-wide text-indigo-200">{heading}</p>
+        <p className="mt-1 rounded bg-white py-0.5 text-center font-mono text-sm font-bold text-indigo-600">
+          482 193
+        </p>
+        <p className="mt-1 text-[8px] font-semibold">Daily pass</p>
+        <p className="text-[7px] text-indigo-100">1d · 1 GB</p>
+      </div>
+    );
+  } else {
+    card = (
+      <div className={`h-[60px] w-[114px] overflow-hidden ${frame}`}>
+        <div className="bg-slate-900 px-1.5 py-0.5 text-[7px] font-semibold text-white">{heading}</div>
+        <p className="mt-1 text-center font-mono text-sm font-bold text-emerald-600">482 193</p>
+        <p className="text-center text-[7px] text-slate-500">Daily pass · 1d · 1 GB</p>
       </div>
     );
   }
   return (
-    <div className="h-28 overflow-hidden rounded-lg border border-slate-700 bg-white text-slate-900">
-      <div className="bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white">{heading}</div>
-      <div className="px-2 py-2">
-        <p className="text-[9px] uppercase text-slate-400">Code</p>
-        <p className="font-mono text-lg font-bold text-emerald-600">482 193</p>
-        <p className="text-[10px] text-slate-500">1 day · 1 GB</p>
-      </div>
+    <div className="flex h-28 items-center justify-center rounded-lg border border-slate-800 bg-slate-100/95">
+      {card}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 export const PORTAL_DESIGN_IDS = ['midnight', 'sunrise', 'signal'];
-export const VOUCHER_DESIGN_IDS = ['grid', 'ticket', 'strip'];
+export const VOUCHER_DESIGN_IDS = ['grid', 'ticket', 'strip', 'mini', 'classic', 'badge'];
 
 export function normalizePortalDesign(value) {
   const id = String(value || '').trim();

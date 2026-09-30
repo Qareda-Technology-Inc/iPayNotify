@@ -20,17 +20,32 @@ export const VOUCHER_DESIGNS = [
   {
     id: 'grid',
     name: 'Grid',
-    blurb: '35 compact cards on one A4 sheet. Best for large batches.',
+    blurb: 'Dark header card, 38 × 20 mm. 65 per A4 sheet.',
   },
   {
     id: 'ticket',
     name: 'Ticket',
-    blurb: 'Larger tear-off tickets, 10 per sheet.',
+    blurb: 'Tear-off stub with an orange edge, 64 × 30 mm. 27 per sheet.',
   },
   {
     id: 'strip',
     name: 'Strip',
-    blurb: 'One wide voucher per row, 7 per sheet. Easiest to read.',
+    blurb: 'Wide, easy to read, 92 × 18 mm. 28 per sheet.',
+  },
+  {
+    id: 'mini',
+    name: 'Mini',
+    blurb: 'Code only, smallest cut, 30 × 16 mm. 96 per sheet.',
+  },
+  {
+    id: 'classic',
+    name: 'Classic',
+    blurb: 'Framed card with a shaded code box, 46 × 28 mm. 36 per sheet.',
+  },
+  {
+    id: 'badge',
+    name: 'Badge',
+    blurb: 'Full-colour card with a white code panel, 46 × 27 mm. 40 per sheet.',
   },
 ];
 

@@ -328,7 +328,7 @@ export function RoutersPanel() {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] lg:items-start">
-            <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/30">
+            <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/30 lg:max-h-[calc(100dvh-15rem)] lg:min-h-[18rem] lg:overflow-y-auto lg:overscroll-contain">
               {filtered.length === 0 ? (
                 <p className="px-4 py-10 text-center text-sm text-slate-500">No sites match “{query}”.</p>
               ) : (
@@ -390,7 +390,7 @@ export function RoutersPanel() {
               )}
             </div>
 
-            <aside className="hidden min-w-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/50 lg:sticky lg:top-20 lg:block lg:max-h-[calc(100dvh-6.5rem)] lg:overflow-y-auto">
+            <aside className="hidden min-w-0 rounded-2xl border border-slate-800 bg-slate-900/50 lg:block lg:max-h-[calc(100dvh-15rem)] lg:min-h-[18rem] lg:overflow-y-auto lg:overscroll-contain">
               <div className="p-5">
                 <RouterDetail {...detailProps} />
               </div>
