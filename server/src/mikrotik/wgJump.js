@@ -30,7 +30,7 @@ export function wgMikrotikJumpMode() {
 
 function forwardTimeoutMs() {
   const n = Number(process.env.WG_JUMP_FORWARD_TIMEOUT_MS);
-  return Number.isFinite(n) && n >= 1000 ? n : 8000;
+  return Number.isFinite(n) && n >= 1000 ? n : 15000;
 }
 
 export async function canUseWgJump() {

@@ -2,7 +2,7 @@
  * Turn low-level router connection failures (SSH, API, WireGuard jump) into a short reason
  * an operator can act on. The raw text is kept as `detail` for troubleshooting.
  *
- * code: offline | vpn_server | refused | login | setup | error
+ * code: offline | slow | vpn_server | refused | login | setup | error
  */
 export function describeRouterError(err) {
   const raw = String(err?.message ?? err ?? '').trim();
@@ -39,21 +39,33 @@ export function describeRouterError(err) {
       detail: raw,
     };
   }
-  if (
-    code === 'WG_ROUTER_UNREACHABLE' ||
-    code === 'ROUTER_TIMEOUT' ||
-    /cannot reach|Channel open failure|timed out|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|No route to host|socket hang up|not speaking SSH|Cannot connect/i.test(
-      raw
-    )
-  ) {
+  if (code === 'WG_ROUTER_UNREACHABLE') return offline(raw);
+  /* The router accepted the connection but answered too slowly — it is online, not down. */
+  if (/Timed out while waiting for handshake|handshake failed|not speaking SSH|socket hang up/i.test(raw)) {
     return {
-      code: 'offline',
-      message: 'Router offline',
-      hint: 'No answer from the router. Check that it has power and internet, and that its VPN tunnel is up.',
+      code: 'slow',
+      message: 'Router is slow to respond',
+      hint: 'It is reachable but did not finish answering. Press Refresh; if it keeps happening, check the router CPU load.',
       detail: raw,
     };
   }
+  if (
+    /cannot reach|Channel open failure|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|No route to host|Cannot connect|connect timed out/i.test(
+      raw
+    )
+  ) {
+    return offline(raw);
+  }
   return { code: 'error', message: firstSentence(raw) || 'Router error', hint: '', detail: raw };
+}
+
+function offline(raw) {
+  return {
+    code: 'offline',
+    message: 'Router offline',
+    hint: 'No answer from the router. Check that it has power and internet, and that its VPN tunnel is up.',
+    detail: raw,
+  };
 }
 
 function firstSentence(text) {

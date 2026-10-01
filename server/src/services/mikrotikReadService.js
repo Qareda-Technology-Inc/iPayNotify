@@ -474,28 +474,14 @@ export async function getRouterLiveSnapshot(routerId, organizationId) {
  * Hotspot + PPP active sessions for every router (best-effort; errors per router).
  * Routers are queried in parallel for faster dashboard refresh.
  */
-const ACTIVE_SESSIONS_BUDGET_MS = 15000;
 /** routerId → first failure time, so the UI can say "offline for 20 min". In-process only. */
 const offlineSince = new Map();
-
-function withBudget(promise, ms) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      const e = new Error('Router did not answer in time');
-      e.code = 'ROUTER_TIMEOUT';
-      reject(e);
-    }, ms);
-  });
-  promise.catch(() => {});
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
 
 async function activeSessionsRow(r) {
   const id = String(r._id);
   const base = { routerId: id, routerName: routerDisplayName(r) || r.name || r.host || id, host: r.host };
   try {
-    const session = await withBudget(readActiveSessionsOnRouter(r), ACTIVE_SESSIONS_BUDGET_MS);
+    const session = await readActiveSessionsOnRouter(r);
     offlineSince.delete(id);
     return {
       ...base,
@@ -508,7 +494,11 @@ async function activeSessionsRow(r) {
     };
   } catch (e) {
     const d = describeRouterError(e);
-    if (!offlineSince.has(id)) offlineSince.set(id, new Date().toISOString());
+    if (d.code === 'offline') {
+      if (!offlineSince.has(id)) offlineSince.set(id, new Date().toISOString());
+    } else {
+      offlineSince.delete(id);
+    }
     return {
       ...base,
       status: d.code === 'offline' ? 'offline' : 'error',

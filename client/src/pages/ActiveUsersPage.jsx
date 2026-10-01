@@ -101,23 +101,42 @@ export function ActiveUsersPage() {
             !r.checkedAt ||
             Date.now() - new Date(r.checkedAt).getTime() > OFFLINE_RECHECK_MS
         );
-        await Promise.all(
-          due.map(async (r) => {
-            patchRow(r.routerId, { refreshing: true });
-            try {
-              const d = await apiFetch(`/api/routers/active-sessions/${r.routerId}`);
-              patchRow(r.routerId, { ...d, refreshing: false, checkedAt: d.at });
-            } catch (e) {
+        /* A few at a time: each router opens its own SSH session through the VPS, which throttles bursts. */
+        const queue = [...due];
+        const worker = async () => {
+          while (queue.length) {
+            const r = queue.shift();
+            await loadOne(r);
+          }
+        };
+        const loadOne = async (r) => {
+          patchRow(r.routerId, { refreshing: true });
+          const prevRow = rowsRef.current.find((x) => x.routerId === r.routerId);
+          try {
+            const d = await apiFetch(`/api/routers/active-sessions/${r.routerId}`);
+            if (d.status !== 'online' && d.errorCode !== 'offline' && prevRow?.status === 'online') {
               patchRow(r.routerId, {
-                status: 'error',
-                error: e.message || 'Could not load this router',
-                errorDetail: e.detail || '',
                 refreshing: false,
-                checkedAt: new Date().toISOString(),
+                staleNote: `${d.error || 'Refresh failed'} — showing the last snapshot.`,
               });
+              return;
             }
-          })
-        );
+            patchRow(r.routerId, { ...d, staleNote: '', refreshing: false, checkedAt: d.at });
+          } catch (e) {
+            if (prevRow?.status === 'online') {
+              patchRow(r.routerId, { refreshing: false, staleNote: `${e.message || 'Refresh failed'} — showing the last snapshot.` });
+              return;
+            }
+            patchRow(r.routerId, {
+              status: 'error',
+              error: e.message || 'Could not load this router',
+              errorDetail: e.detail || '',
+              refreshing: false,
+              checkedAt: new Date().toISOString(),
+            });
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker));
         setLastAt(new Date().toISOString());
       } catch (e) {
         setErr(e.message || 'Could not load routers');
@@ -392,6 +411,9 @@ export function ActiveUsersPage() {
                 </div>
                 {r.status === 'loading' ? (
                   <p className="mt-2 text-xs text-slate-500">Connecting to router…</p>
+                ) : null}
+                {r.status === 'online' && r.staleNote ? (
+                  <p className="mt-2 text-xs text-amber-300/90">{r.staleNote}</p>
                 ) : null}
                 {(r.status === 'offline' || r.status === 'error') && r.error ? <RouterProblem r={r} /> : null}
                 {r.status === 'online' && r.error ? (
