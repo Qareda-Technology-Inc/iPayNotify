@@ -101,10 +101,25 @@ function displayRowName(a) {
   return a.displayName || '—';
 }
 
+function routerLabel(r) {
+  if (!r) return '';
+  const name = String(r.comment || r.name || '').trim() || 'Router';
+  return r.host ? `${name} · ${r.host}` : name;
+}
+
+const ROUTER_ACCESS_BADGE = {
+  open: { label: 'Open', className: 'bg-emerald-500/15 text-emerald-300' },
+  blocked: { label: 'Blocked', className: 'bg-red-500/15 text-red-300' },
+  no_tunnel: { label: 'No tunnel', className: 'bg-slate-700/50 text-slate-400' },
+};
+
 export function RemoteAccessPanel() {
   const [rows, setRows] = useState([]);
   const [users, setUsers] = useState([]);
   const [packages, setPackages] = useState([]);
+  const [routers, setRouters] = useState([]);
+  const [routerId, setRouterId] = useState('');
+  const [linkingId, setLinkingId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -135,13 +150,15 @@ export function RemoteAccessPanel() {
   const [newUserPhone, setNewUserPhone] = useState('');
 
   async function loadAll() {
-    const [u, pkgs, list] = await Promise.all([
+    const [u, pkgs, list, rts] = await Promise.all([
       apiFetch('/api/users'),
       apiFetch('/api/packages?all=1'),
       apiFetch('/api/remote-access'),
+      apiFetch('/api/routers').catch(() => []),
     ]);
     const ra = (Array.isArray(pkgs) ? pkgs : []).filter((x) => x.kind === 'remote_access');
     setUsers(Array.isArray(u) ? u : []);
+    setRouters(Array.isArray(rts) ? rts : []);
     setPackages(ra);
     setRows(Array.isArray(list) ? list : []);
     setPackageId((pid) => {
@@ -181,6 +198,22 @@ export function RemoteAccessPanel() {
       setError(err.message || 'Renew failed');
     } finally {
       setRenewBusy(false);
+    }
+  }
+
+  async function linkRouter(row, nextRouterId) {
+    setLinkingId(row._id);
+    setError('');
+    try {
+      const updated = await apiFetch(`/api/remote-access/${row._id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ routerId: nextRouterId || null }),
+      });
+      setRows((prev) => prev.map((r) => (r._id === row._id ? { ...r, ...updated } : r)));
+    } catch (err) {
+      setError(err.message || 'Could not link router');
+    } finally {
+      setLinkingId('');
     }
   }
 
@@ -280,6 +313,7 @@ export function RemoteAccessPanel() {
         ...(linkCustomer && userId ? { userId } : {}),
         ...(!linkCustomer ? { displayName: displayName.trim() } : {}),
         packageId: packageId || undefined,
+        routerId: routerId || undefined,
       };
       if (validityMode === 'until') {
         if (!paidUntilInput) {
@@ -307,6 +341,7 @@ export function RemoteAccessPanel() {
       setEmail('');
       setDisplayName('');
       setNotes('');
+      setRouterId('');
       setShowNewModal(false);
       await loadAll();
     } catch (err) {
@@ -335,7 +370,9 @@ export function RemoteAccessPanel() {
           <p className="mt-1 max-w-2xl text-sm text-slate-400">
             Subscriptions outside PPPoE (VPN, panel access, etc.).{' '}
             <strong className="text-slate-300">Phone numbers</strong> are used for payment and renewal SMS.
-            Track <strong className="text-slate-300">paid until</strong> here — no MikroTik sync.
+            Link a subscription to the customer&apos;s <strong className="text-slate-300">router</strong> and its
+            VPN tunnel is cut automatically once <strong className="text-slate-300">paid until</strong> passes (or the
+            subscription is suspended), then reopened on renewal.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -418,12 +455,13 @@ export function RemoteAccessPanel() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[800px] text-left text-sm">
+          <table className="w-full min-w-[960px] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-800/80 text-xs font-semibold uppercase tracking-wider text-slate-500">
                 <th className="px-5 py-3.5">Name</th>
                 <th className="px-5 py-3.5">Phone</th>
                 <th className="px-5 py-3.5">Email</th>
+                <th className="px-5 py-3.5">Router</th>
                 <th className="px-5 py-3.5">Package</th>
                 <th className="px-5 py-3.5">Paid until</th>
                 <th className="px-5 py-3.5">Remaining</th>
@@ -434,7 +472,7 @@ export function RemoteAccessPanel() {
             <tbody className="divide-y divide-slate-800/60">
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-16 text-center">
+                  <td colSpan={9} className="px-5 py-16 text-center">
                     <div className="mx-auto flex max-w-sm flex-col items-center">
                       <IconEmpty className="text-slate-600" />
                       <p className="mt-4 text-base font-medium text-slate-300">
@@ -472,6 +510,38 @@ export function RemoteAccessPanel() {
                       <td className="px-5 py-3.5 font-mono text-sm text-violet-300/90">{a.phone}</td>
                       <td className="px-5 py-3.5 text-slate-400">
                         {a.email || a.userId?.email || <span className="text-slate-600">—</span>}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <select
+                          value={a.routerId?._id ? String(a.routerId._id) : ''}
+                          disabled={linkingId === a._id}
+                          onChange={(e) => linkRouter(a, e.target.value)}
+                          className="max-w-[14rem] rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 disabled:opacity-50"
+                          title="Router whose VPN tunnel follows this subscription"
+                        >
+                          <option value="">Not linked</option>
+                          {routers.map((r) => (
+                            <option key={r._id} value={String(r._id)}>
+                              {routerLabel(r)}
+                            </option>
+                          ))}
+                        </select>
+                        {a.routerId?._id && ROUTER_ACCESS_BADGE[a.routerAccess] ? (
+                          <span
+                            className={`ml-2 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${ROUTER_ACCESS_BADGE[a.routerAccess].className}`}
+                            title={
+                              a.routerAccess === 'blocked'
+                                ? a.routerBlockReason === 'subscription_expired'
+                                  ? 'Tunnel cut because the subscription expired'
+                                  : 'Tunnel disabled manually in WireGuard admin'
+                                : a.routerAccess === 'no_tunnel'
+                                  ? 'No WireGuard tunnel found for this router'
+                                  : 'Tunnel open'
+                            }
+                          >
+                            {ROUTER_ACCESS_BADGE[a.routerAccess].label}
+                          </span>
+                        ) : null}
                       </td>
                       <td className="px-5 py-3.5 text-slate-400">
                         {a.packageId?.name || '—'}
@@ -718,6 +788,24 @@ export function RemoteAccessPanel() {
                     onChange={(e) => setEmail(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
                   />
+                </label>
+                <label className="block text-sm text-slate-300">
+                  Customer router (optional)
+                  <select
+                    value={routerId}
+                    onChange={(e) => setRouterId(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+                  >
+                    <option value="">Not linked</option>
+                    {routers.map((r) => (
+                      <option key={r._id} value={String(r._id)}>
+                        {routerLabel(r)}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Its VPN tunnel IP is blocked while this subscription is expired or suspended.
+                  </p>
                 </label>
                 <label className="block text-sm text-slate-300">
                   Package (optional — Remote access kind only)

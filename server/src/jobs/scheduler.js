@@ -6,9 +6,11 @@ import {
 import { enforceHotspotPlans } from '../services/hotspotService.js';
 import { runExpiryReminderSmsJob } from '../services/expiryReminderSmsService.js';
 import { expireStalePendingPayments } from '../services/paymentService.js';
+import { enforceRemoteAccessRouters } from '../services/remoteAccessService.js';
 import { config } from '../config.js';
 
 let task;
+let remoteAccessRouterTask;
 let pppoeExpiryTask;
 let hotspotPlanTask;
 let expiryReminderSmsTask;
@@ -74,6 +76,24 @@ export function startBillingScheduler() {
     console.log(`[billing] hotspot plan check every 2 minutes (${config.cronTz})`);
   }
 
+  if (!remoteAccessRouterTask) {
+    remoteAccessRouterTask = cron.schedule(
+      '*/5 * * * *',
+      async () => {
+        try {
+          const summary = await enforceRemoteAccessRouters();
+          if (summary.blocked > 0 || summary.unblocked > 0 || summary.failed > 0) {
+            console.log('[billing] remote access router tick', new Date().toISOString(), summary);
+          }
+        } catch (e) {
+          console.error('[billing] remote access router tick failed', e);
+        }
+      },
+      { timezone: config.cronTz }
+    );
+    console.log(`[billing] remote access router check every 5 minutes (${config.cronTz})`);
+  }
+
   if (config.expiryReminderSms.enabled && !expiryReminderSmsTask) {
     const expr = config.expiryReminderSms.cron || '0 9 * * *';
     expiryReminderSmsTask = cron.schedule(
@@ -130,6 +150,10 @@ export function stopBillingScheduler() {
   if (hotspotPlanTask) {
     hotspotPlanTask.stop();
     hotspotPlanTask = null;
+  }
+  if (remoteAccessRouterTask) {
+    remoteAccessRouterTask.stop();
+    remoteAccessRouterTask = null;
   }
   if (expiryReminderSmsTask) {
     expiryReminderSmsTask.stop();

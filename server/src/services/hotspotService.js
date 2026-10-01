@@ -520,10 +520,12 @@ export async function generateVouchers({
     await pkg.save().catch(() => {});
   }
 
+  const batchId = new mongoose.Types.ObjectId().toString();
   const docs = codes.map((code) => ({
     organizationId: orgId,
     packageId: pkg._id,
     routerId: router._id,
+    batchId,
     code,
     password: '',
     codeType: 'pin',
@@ -557,6 +559,191 @@ export async function listVouchers(query = {}) {
     .sort({ createdAt: -1 })
     .limit(500)
     .lean();
+}
+
+/**
+ * Ticket lifecycle, mutually exclusive: unused (never logged in, not expired),
+ * active (logged in, still valid), expired (validUntil passed — includes exhausted data).
+ */
+export function ticketStatusClause(status, now = new Date()) {
+  const notExpired = { $or: [{ validUntil: null }, { validUntil: { $gte: now } }] };
+  if (status === 'unused') return { $and: [{ usedAt: null }, notExpired] };
+  if (status === 'active' || status === 'used') return { $and: [{ usedAt: { $ne: null } }, notExpired] };
+  if (status === 'expired') return { validUntil: { $lt: now } };
+  return {};
+}
+
+const LEGACY_BATCH_RE = /^legacy:([a-f\d]{24}):([a-f\d]{24}|none):(\d+)$/i;
+
+/** Tickets made before batch ids existed are grouped by router + package + creation second. */
+function batchClause(batch) {
+  const key = String(batch || '').trim();
+  if (!key) return {};
+  const legacy = LEGACY_BATCH_RE.exec(key);
+  if (legacy) {
+    const startMs = Number(legacy[3]) * 1000;
+    return {
+      batchId: null,
+      routerId: legacy[1],
+      packageId: legacy[2] === 'none' ? null : legacy[2],
+      createdAt: { $gte: new Date(startMs), $lt: new Date(startMs + 1000) },
+    };
+  }
+  return { batchId: key };
+}
+
+/**
+ * @param {{ base?: object, status?: string, routerId?: string, packageId?: string, batch?: string, q?: string, now?: Date }} f
+ */
+export function buildTicketFilter({ base = {}, status, routerId, packageId, batch, q, now = new Date() } = {}) {
+  const and = [base];
+  if (routerId && mongoose.isValidObjectId(String(routerId))) and.push({ routerId: String(routerId) });
+  if (packageId && mongoose.isValidObjectId(String(packageId))) and.push({ packageId: String(packageId) });
+  if (batch) and.push(batchClause(batch));
+  const code = String(q || '').replace(/\D/g, '');
+  if (code) and.push({ code: { $regex: `^${code}` } });
+  if (status) and.push(ticketStatusClause(status, now));
+  const parts = and.filter((c) => Object.keys(c).length);
+  return parts.length ? { $and: parts } : {};
+}
+
+export async function listTickets(filter, { page = 1, limit = 50 } = {}) {
+  const lim = Math.min(200, Math.max(1, Number(limit) || 50));
+  const pg = Math.max(1, Number(page) || 1);
+  const [items, total] = await Promise.all([
+    HotspotVoucher.find(filter)
+      .populate('packageId', 'name priceCents currency')
+      .populate('routerId', 'name comment host')
+      .sort({ createdAt: -1, code: 1 })
+      .skip((pg - 1) * lim)
+      .limit(lim)
+      .lean(),
+    HotspotVoucher.countDocuments(filter),
+  ]);
+  return { items, total, page: pg, limit: lim };
+}
+
+export async function ticketStats(filterWithoutStatus, now = new Date()) {
+  const withStatus = (s) => ({ $and: [filterWithoutStatus, ticketStatusClause(s, now)] });
+  const [total, unused, active, expired] = await Promise.all([
+    HotspotVoucher.countDocuments(filterWithoutStatus),
+    HotspotVoucher.countDocuments(withStatus('unused')),
+    HotspotVoucher.countDocuments(withStatus('active')),
+    HotspotVoucher.countDocuments(withStatus('expired')),
+  ]);
+  return { total, unused, active, used: active, expired };
+}
+
+/** One row per generate run (newest first) with unused/active/expired counts. */
+export async function listTicketBatches(base = {}, { limit = 100 } = {}) {
+  const now = new Date();
+  const isNull = (f) => ({ $eq: [{ $ifNull: [f, null] }, null] });
+  const notExpired = { $or: [isNull('$validUntil'), { $gte: ['$validUntil', now] }] };
+  const match = { ...base };
+  if (typeof match.organizationId === 'string') {
+    match.organizationId = new mongoose.Types.ObjectId(match.organizationId);
+  }
+  const rows = await HotspotVoucher.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: {
+          $ifNull: [
+            '$batchId',
+            {
+              $concat: [
+                'legacy:',
+                { $toString: '$routerId' },
+                ':',
+                { $ifNull: [{ $toString: '$packageId' }, 'none'] },
+                ':',
+                { $toString: { $floor: { $divide: [{ $toLong: '$createdAt' }, 1000] } } },
+              ],
+            },
+          ],
+        },
+        createdAt: { $min: '$createdAt' },
+        routerId: { $first: '$routerId' },
+        packageId: { $first: '$packageId' },
+        profileName: { $first: '$profileName' },
+        hotspotServer: { $first: '$hotspotServer' },
+        total: { $sum: 1 },
+        unused: { $sum: { $cond: [{ $and: [isNull('$usedAt'), notExpired] }, 1, 0] } },
+        active: { $sum: { $cond: [{ $and: [{ $not: [isNull('$usedAt')] }, notExpired] }, 1, 0] } },
+        expired: {
+          $sum: {
+            $cond: [{ $and: [{ $not: [isNull('$validUntil')] }, { $lt: ['$validUntil', now] }] }, 1, 0],
+          },
+        },
+      },
+    },
+    { $sort: { createdAt: -1 } },
+    { $limit: Math.min(300, Math.max(1, Number(limit) || 100)) },
+  ]);
+
+  const routerIds = [...new Set(rows.map((r) => String(r.routerId)).filter(Boolean))];
+  const pkgIds = [...new Set(rows.map((r) => (r.packageId ? String(r.packageId) : '')).filter(Boolean))];
+  const [routers, pkgs] = await Promise.all([
+    Router.find({ _id: { $in: routerIds } }).select('name comment host').lean(),
+    PlanPackage.find({ _id: { $in: pkgIds } }).select('name').lean(),
+  ]);
+  const routerById = new Map(routers.map((r) => [String(r._id), r]));
+  const pkgById = new Map(pkgs.map((p) => [String(p._id), p]));
+  return rows.map((r) => {
+    const router = routerById.get(String(r.routerId));
+    const pkg = r.packageId ? pkgById.get(String(r.packageId)) : null;
+    return {
+      id: r._id,
+      createdAt: r.createdAt,
+      routerId: r.routerId ? String(r.routerId) : null,
+      routerName: router ? String(router.comment || router.name || '').trim() : '',
+      packageId: r.packageId ? String(r.packageId) : null,
+      packageName: pkg?.name || r.profileName || '',
+      hotspotServer: r.hotspotServer || '',
+      total: r.total,
+      unused: r.unused,
+      active: r.active,
+      expired: r.expired,
+    };
+  });
+}
+
+/**
+ * Delete tickets: remove each still-live code from its router (one connection per router), then the DB rows.
+ * Router failures are reported but do not keep the DB rows.
+ */
+export async function deleteTickets(vouchers) {
+  const summary = { deleted: 0, routerErrors: [] };
+  if (!vouchers.length) return summary;
+  const now = Date.now();
+  const byRouter = new Map();
+  for (const v of vouchers) {
+    const live = v.mikrotikInternalId || !v.validUntil || new Date(v.validUntil).getTime() >= now;
+    if (!live) continue;
+    const key = String(v.routerId);
+    if (!byRouter.has(key)) byRouter.set(key, []);
+    byRouter.get(key).push(v);
+  }
+  for (const [rid, list] of byRouter) {
+    try {
+      const router = await Router.findById(rid);
+      if (!router) continue;
+      await withRouterMikrotik(router, async (api) => {
+        for (const v of list) {
+          try {
+            await hs.disconnectHotspotUser(api, v.code);
+          } catch (e) {
+            summary.routerErrors.push({ code: v.code, message: e.message });
+          }
+        }
+      });
+    } catch (e) {
+      summary.routerErrors.push({ routerId: rid, message: e.message });
+    }
+  }
+  const r = await HotspotVoucher.deleteMany({ _id: { $in: vouchers.map((v) => v._id) } });
+  summary.deleted = r.deletedCount || 0;
+  return summary;
 }
 
 /** RouterOS `5h2m`, `1d3h`, or `hh:mm:ss` → seconds. */

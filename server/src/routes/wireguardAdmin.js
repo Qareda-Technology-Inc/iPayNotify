@@ -12,6 +12,7 @@ import {
   isWireGuardFullyConfigured,
 } from '../services/wireguard/wgVpsSshKey.js';
 import { createPhoneClientPeer } from '../services/wireguard/createPhoneClient.js';
+import { setPeerAccess } from '../services/wireguard/peerAccess.js';
 
 export const wireguardAdminRouter = express.Router();
 
@@ -30,6 +31,7 @@ function mapPeer(p) {
     lanSubnet: p.lanSubnet || '',
     kind: p.kind === 'client' ? 'client' : 'router',
     status: p.status,
+    disabledReason: p.disabledReason || '',
     lastSeen: p.lastSeen,
     lastSyncError: p.lastSyncError || '',
     createdAt: p.createdAt,
@@ -256,13 +258,27 @@ wireguardAdminRouter.patch(
       }
       peer.lanSubnet = lan;
     }
+    let nextStatus = null;
     if (status != null) {
       const st = String(status).trim();
       if (!['active', 'disabled', 'error'].includes(st)) {
         return res.status(400).json({ error: 'Invalid status' });
       }
-      peer.status = st;
+      nextStatus = st;
     }
+
+    if (nextStatus === 'disabled' || (nextStatus === 'active' && peer.status === 'disabled')) {
+      try {
+        await setPeerAccess(peer, { enabled: nextStatus === 'active', reason: 'manual' });
+      } catch (e) {
+        return res.status(502).json({
+          error: e?.message || 'VPS WireGuard update failed',
+          peer: mapPeer(peer),
+        });
+      }
+      return res.json({ peer: mapPeer(peer) });
+    }
+    if (nextStatus) peer.status = nextStatus;
 
     await peer.save();
     res.json({ peer: mapPeer(peer) });
@@ -275,6 +291,15 @@ wireguardAdminRouter.post(
   asyncHandler(async (req, res) => {
     const peer = await WireGuardPeer.findById(req.params.id);
     if (!peer) return res.status(404).json({ error: 'Peer not found' });
+    if (peer.status === 'disabled') {
+      return res.status(409).json({
+        error:
+          peer.disabledReason === 'subscription_expired'
+            ? 'Peer is blocked because its remote access subscription expired. Renew the subscription or Enable it.'
+            : 'Peer is disabled. Enable it instead of resyncing.',
+        peer: mapPeer(peer),
+      });
+    }
     try {
       await syncWireGuardPeerToVps({
         publicKey: peer.publicKey,

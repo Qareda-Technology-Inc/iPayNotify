@@ -13,6 +13,8 @@ import {
 import { routerDisplayName } from '../utils/routerLabel.js';
 import { requireRoles } from '../middleware/requireRoles.js';
 import { PORTAL_DESIGN_IDS, VOUCHER_DESIGN_IDS, clipPortalCopy } from '../utils/portalDesigns.js';
+import { LOGIN_THEMES, SAMPLE_PLANS, renderLoginPage } from '../services/captiveTemplates.js';
+import { loadPortalPlans } from '../services/portalContextService.js';
 import {
   listOrgTeam,
   inviteOrgTeamMember,
@@ -124,11 +126,16 @@ function applyBillingPatch(doc, billingBody, { isSuperAdmin = false } = {}) {
     'portalSubtitle',
     'portalButtonLabel',
     'portalBuyLabel',
+    'portalFooter',
+    'portalSupportPhone',
     'voucherTitle',
   ]) {
     if (b[field] !== undefined) {
       doc.billing[field] = clipPortalCopy(field, b[field]);
     }
+  }
+  if (b.portalShowPlans !== undefined) {
+    doc.billing.portalShowPlans = Boolean(b.portalShowPlans);
   }
   if (b.payoutMomoNumber !== undefined) {
     doc.billing.payoutMomoNumber = String(b.payoutMomoNumber || '').trim();
@@ -211,6 +218,58 @@ organizationRouter.get(
     const doc = await Organization.findById(oid).lean();
     if (!doc) return res.status(404).json({ error: 'Organisation not found' });
     res.json(await jsonWithPortal(doc));
+  })
+);
+
+/**
+ * Every login template rendered with this organisation's branding, wording and plans.
+ * Body overrides unsaved wording so the picker previews edits live.
+ * POST /api/organization/portal-previews
+ */
+organizationRouter.post(
+  '/portal-previews',
+  asyncHandler(async (req, res) => {
+    const oid = req.organizationId;
+    const org =
+      oid && mongoose.isValidObjectId(String(oid))
+        ? await Organization.findById(oid).select('name billing').lean()
+        : null;
+    const saved = org?.billing || {};
+    const b = { ...saved, ...(req.body && typeof req.body === 'object' ? req.body : {}) };
+    const showPlans = b.portalShowPlans !== false;
+    let plans = [];
+    let samplePlans = false;
+    if (showPlans) {
+      plans = org ? await loadPortalPlans(org._id) : [];
+      if (!plans.length) {
+        plans = SAMPLE_PLANS;
+        samplePlans = true;
+      }
+    }
+    const brandName =
+      String(saved.merchantDisplayName || '').trim() || String(org?.name || '').trim() || 'Wi-Fi';
+    const designs = LOGIN_THEMES.map((t) => ({
+      id: t.id,
+      name: t.name,
+      blurb: t.blurb,
+      html: renderLoginPage({
+        designId: t.id,
+        mode: 'preview',
+        brandName,
+        logoUrl: String(saved.logoUrl || '').trim(),
+        siteName: 'Main hall',
+        headline: clipPortalCopy('portalHeadline', b.portalHeadline),
+        subtitle: clipPortalCopy('portalSubtitle', b.portalSubtitle),
+        buttonLabel: clipPortalCopy('portalButtonLabel', b.portalButtonLabel),
+        buyLabel: clipPortalCopy('portalBuyLabel', b.portalBuyLabel),
+        footerText: clipPortalCopy('portalFooter', b.portalFooter),
+        supportPhone: clipPortalCopy('portalSupportPhone', b.portalSupportPhone),
+        showPlans,
+        plans,
+        buyUrl: '#',
+      }),
+    }));
+    res.json({ designs, samplePlans });
   })
 );
 

@@ -770,6 +770,9 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
                       >
                         {p.status}
                       </span>
+                      {p.status === 'disabled' && p.disabledReason === 'subscription_expired' ? (
+                        <p className="mt-1 text-[10px] text-amber-300/90">Remote access expired</p>
+                      ) : null}
                       {p.lastSyncError ? (
                         <p
                           className="mt-1 max-w-[10rem] text-[10px] text-red-300/90"

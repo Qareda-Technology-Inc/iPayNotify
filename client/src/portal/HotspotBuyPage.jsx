@@ -59,8 +59,12 @@ export function HotspotBuyPage() {
     const qs = slug ? `?r=${encodeURIComponent(slug)}` : '';
     publicFetch(`/api/public/packages/hotspot${qs}`)
       .then((p) => {
-        setPackages(Array.isArray(p) ? p : []);
-        if (p?.[0]) setPackageId(p[0]._id);
+        const list = Array.isArray(p) ? p : [];
+        setPackages(list);
+        const wanted = new URLSearchParams(window.location.search).get('package');
+        const match = wanted && list.find((x) => String(x._id) === wanted);
+        if (match) setPackageId(match._id);
+        else if (list[0]) setPackageId(list[0]._id);
       })
       .catch((e) => setError(e.message));
   }, [siteReady, slug]);
@@ -250,7 +254,7 @@ export function HotspotBuyPage() {
               {loading ? 'Please wait…' : 'Proceed to checkout'}
             </button>
             <p className="text-center text-xs text-slate-500">
-              After payment, enter the voucher code on the Wi‑Fi login screen (username and password).
+              After payment, enter the ticket code on the Wi‑Fi login screen (username and password).
             </p>
           </form>
         )}

@@ -1,10 +1,15 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { HotspotVoucher } from '../models/index.js';
 import {
+  buildTicketFilter,
+  deleteTickets,
   generateVouchers,
   listHotspotServersForRouter,
-  listVouchers,
+  listTicketBatches,
+  listTickets,
   previewVouchers,
+  ticketStats,
   reconcileHotspotVoucherUsage,
   removeVoucherFromRouter,
   syncVoucherToRouter,
@@ -63,41 +68,83 @@ hotspotRouter.post(
     res.json(preview);
   })
 );
+function ticketFilterFromQuery(req, { withStatus = true, defaultStatus = '' } = {}) {
+  const src = { ...req.query, ...(req.method === 'POST' ? req.body : {}) };
+  return buildTicketFilter({
+    base: orgQuery(req.organizationId),
+    status: withStatus ? String(src.status || defaultStatus || '') : '',
+    routerId: src.routerId,
+    packageId: src.packageId,
+    batch: src.batch,
+    q: src.q,
+  });
+}
+
+/** GET /vouchers?status=unused|active|expired&routerId=&packageId=&batch=&q=&page=&limit= */
 hotspotRouter.get(
   '/vouchers',
   asyncHandler(async (req, res) => {
-    const { routerId, status } = req.query;
-    const q = { ...orgQuery(req.organizationId) };
-    if (routerId) q.routerId = routerId;
-    const now = new Date();
-    if (status === 'unused') {
-      q.usedAt = null;
-      q.$or = [{ validUntil: null }, { validUntil: { $gte: now } }];
-    } else if (status === 'used') {
-      q.usedAt = { $ne: null };
-    } else if (status === 'expired') {
-      q.validUntil = { $lt: now };
-    }
-    res.json(await listVouchers(q));
+    res.json(
+      await listTickets(ticketFilterFromQuery(req), {
+        page: req.query.page,
+        limit: req.query.limit,
+      })
+    );
   })
 );
 
 hotspotRouter.get(
   '/vouchers/stats',
   asyncHandler(async (req, res) => {
-    const base = { ...orgQuery(req.organizationId) };
-    const now = new Date();
-    const [total, unused, used, expired] = await Promise.all([
-      HotspotVoucher.countDocuments(base),
-      HotspotVoucher.countDocuments({
-        ...base,
-        usedAt: null,
-        $or: [{ validUntil: null }, { validUntil: { $gte: now } }],
-      }),
-      HotspotVoucher.countDocuments({ ...base, usedAt: { $ne: null } }),
-      HotspotVoucher.countDocuments({ ...base, validUntil: { $lt: now } }),
-    ]);
-    res.json({ total, unused, used, expired });
+    res.json(await ticketStats(ticketFilterFromQuery(req, { withStatus: false })));
+  })
+);
+
+hotspotRouter.get(
+  '/vouchers/batches',
+  asyncHandler(async (req, res) => {
+    res.json(await listTicketBatches(orgQuery(req.organizationId), { limit: req.query.limit }));
+  })
+);
+
+/** Tickets for printing. Unused only unless `status` is given explicitly. */
+hotspotRouter.get(
+  '/vouchers/export',
+  asyncHandler(async (req, res) => {
+    const filter = ticketFilterFromQuery(req, { defaultStatus: 'unused' });
+    const max = 3000;
+    const items = await HotspotVoucher.find(filter)
+      .populate('packageId', 'name priceCents currency')
+      .populate('routerId', 'name comment host')
+      .sort({ createdAt: -1, code: 1 })
+      .limit(max + 1)
+      .lean();
+    res.json({ items: items.slice(0, max), truncated: items.length > max });
+  })
+);
+
+/**
+ * POST /vouchers/bulk-delete
+ * Body: { ids: string[] } or { status: 'expired', routerId?, packageId?, batch? }.
+ * Filter deletes are limited to expired tickets so live stock is never wiped by accident.
+ */
+hotspotRouter.post(
+  '/vouchers/bulk-delete',
+  requireRoles('super_admin', 'org_admin', 'org_staff'),
+  asyncHandler(async (req, res) => {
+    const ids = Array.isArray(req.body?.ids)
+      ? req.body.ids.map(String).filter((id) => mongoose.isValidObjectId(id))
+      : [];
+    let filter;
+    if (ids.length) {
+      filter = { $and: [orgQuery(req.organizationId), { _id: { $in: ids.slice(0, 2000) } }] };
+    } else if (req.body?.status === 'expired') {
+      filter = ticketFilterFromQuery(req);
+    } else {
+      return res.status(400).json({ error: 'Pass ticket ids, or status "expired" to clear expired tickets.' });
+    }
+    const vouchers = await HotspotVoucher.find(filter).limit(5000);
+    res.json(await deleteTickets(vouchers));
   })
 );
 
@@ -125,6 +172,7 @@ hotspotRouter.post(
     res.status(201).json(
       vouchers.map((v) => ({
         id: v._id,
+        batchId: v.batchId,
         code: v.code,
         password: v.password && v.password !== v.code ? v.password : undefined,
         codeType: v.codeType,

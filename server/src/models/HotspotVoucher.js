@@ -9,6 +9,8 @@ const hotspotVoucherSchema = new mongoose.Schema(
     },
     packageId: { type: mongoose.Schema.Types.ObjectId, ref: 'PlanPackage' },
     routerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Router', required: true },
+    /** Shared by every ticket created in one generate run. */
+    batchId: { type: String, index: true },
     /** Login name (PIN or username). */
     code: { type: String, required: true },
     /** Password when codeType is user_pass; otherwise usually same as code. */

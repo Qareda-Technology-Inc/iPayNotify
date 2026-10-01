@@ -58,8 +58,8 @@ function headerTitleForPath(pathname) {
     '/finance/pppoe': 'PPPoE',
     '/users/remote-access': 'Remote access',
     '/finance/packages': 'Packages',
-    '/hotspot': 'Hotspot & vouchers',
-    '/hotspot/portal': 'Captive portal',
+    '/hotspot': 'Tickets',
+    '/hotspot/portal': 'Templates & designs',
     '/finance/payments': 'Payments',
     '/finance/wallet': 'Wallet',
     '/finance/messages': 'Messages & SMS',
@@ -239,9 +239,9 @@ export function AdminShell({ onSignOut }) {
               Packages
             </SideLink>
             <SideLink to="/hotspot" end badge={counts?.vouchers}>
-              Hotspot & vouchers
+              Tickets
             </SideLink>
-            <SideLink to="/hotspot/portal">Captive portal</SideLink>
+            <SideLink to="/hotspot/portal">Templates &amp; designs</SideLink>
             <SideLink to="/finance/payments" badge={counts?.paymentsPending}>
               Payments
             </SideLink>

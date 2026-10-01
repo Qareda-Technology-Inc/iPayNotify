@@ -17,6 +17,8 @@ const remoteAccessSubscriptionSchema = new mongoose.Schema(
     phone: { type: String, required: true, trim: true },
     email: { type: String, trim: true },
     packageId: { type: mongoose.Schema.Types.ObjectId, ref: 'PlanPackage' },
+    /** Customer's MikroTik; its WireGuard tunnel is cut while no linked subscription is paid. */
+    routerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Router', default: null },
     paidUntil: { type: Date, required: true },
     notes: { type: String, trim: true },
     disabled: { type: Boolean, default: false },
@@ -27,6 +29,7 @@ const remoteAccessSubscriptionSchema = new mongoose.Schema(
 remoteAccessSubscriptionSchema.index({ paidUntil: 1 });
 remoteAccessSubscriptionSchema.index({ phone: 1 });
 remoteAccessSubscriptionSchema.index({ userId: 1 });
+remoteAccessSubscriptionSchema.index({ routerId: 1 });
 
 export const RemoteAccessSubscription =
   mongoose.models.RemoteAccessSubscription ||

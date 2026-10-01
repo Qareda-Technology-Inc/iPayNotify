@@ -1,95 +1,49 @@
-import { useMemo, useState } from 'react';
-import { CaptiveLoginView } from './CaptiveLoginView.jsx';
-import { PORTAL_DESIGNS, portalCopy } from './designs.js';
-import { getPortalSlugFromLocation, usePortalContext } from './usePortalContext.js';
+import { useEffect, useState } from 'react';
+import { resolveApiUrl } from '../api.js';
+import { getPortalSlugFromLocation } from './usePortalContext.js';
 
-function routerLoginUrl() {
-  const q = new URLSearchParams(window.location.search);
-  return (q.get('link-login') || q.get('link-login-only') || '').trim();
-}
-
-function postCodeToRouter(link, code) {
-  const q = new URLSearchParams(window.location.search);
-  const form = document.createElement('form');
-  form.method = 'POST';
-  form.action = link;
-  const add = (name, value) => {
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = name;
-    input.value = value;
-    form.appendChild(input);
-  };
-  add('username', code);
-  add('password', '');
-  const dst = q.get('dst') || q.get('link-orig') || '';
-  if (dst) add('dst', dst);
-  document.body.appendChild(form);
-  form.submit();
-}
-
+/**
+ * Hosted Wi-Fi login. The API renders the organisation's chosen template (same as the router's
+ * login.html); the form posts straight to the router login URL passed by the hotspot.
+ */
 export function CaptiveLoginPage() {
-  const { ctx } = usePortalContext();
-  const slug = getPortalSlugFromLocation();
-  const [code, setCode] = useState('');
-  const [localError, setLocalError] = useState('');
+  const [html, setHtml] = useState('');
+  const [error, setError] = useState('');
 
-  const query = useMemo(() => new URLSearchParams(window.location.search), []);
-  const requested = query.get('design') || '';
-  const designId = PORTAL_DESIGNS.some((d) => d.id === requested)
-    ? requested
-    : ctx?.branding?.portalDesign || 'midnight';
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams();
+    const slug = getPortalSlugFromLocation();
+    if (slug) params.set('r', slug);
+    for (const key of ['link-login-only', 'link-login', 'dst', 'link-orig', 'error']) {
+      const v = q.get(key);
+      if (v) params.set(key, v);
+    }
+    fetch(resolveApiUrl(`/api/public/captive/page.html?${params}`), { cache: 'no-store' })
+      .then(async (res) => {
+        const text = await res.text();
+        if (!res.ok) throw new Error(text || 'Could not load the login page');
+        setHtml(text);
+      })
+      .catch((e) => setError(e.message || 'Could not load the login page'));
+  }, []);
 
-  const brandName = String(ctx?.branding?.displayName || '').trim() || 'Wi‑Fi';
-  const logoUrl = String(ctx?.branding?.logoUrl || '').trim();
-  const siteName = String(ctx?.router?.name || '').trim();
-  const routerError = String(query.get('error') || '').trim();
-  const buyTo = slug ? `/portal/hotspot?r=${encodeURIComponent(slug)}` : '/portal/hotspot';
-  const copy = portalCopy(designId, {
-    headline: ctx?.branding?.portalHeadline,
-    subtitle: ctx?.branding?.portalSubtitle,
-    buttonLabel: ctx?.branding?.portalButtonLabel,
-    buyLabel: ctx?.branding?.portalBuyLabel,
-  });
-
-  function onSubmit(e) {
-    e.preventDefault();
-    setLocalError('');
-    const next = code.trim();
-    if (!next) {
-      setLocalError('Enter the code on your voucher.');
-      return;
-    }
-    const link = routerLoginUrl();
-    let allowed = false;
-    try {
-      const url = new URL(link);
-      allowed = url.protocol === 'http:' || url.protocol === 'https:';
-    } catch {
-      allowed = false;
-    }
-    if (!allowed) {
-      setLocalError('Open this page from the venue Wi‑Fi login so the router can accept the code.');
-      return;
-    }
-    postCodeToRouter(link, next);
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-center text-sm text-slate-300">
+        {error}
+      </div>
+    );
   }
-
+  if (!html) {
+    return <div className="min-h-screen bg-slate-950" />;
+  }
   return (
-    <CaptiveLoginView
-      designId={designId}
-      brandName={brandName}
-      logoUrl={logoUrl}
-      siteName={siteName}
-      error={localError || routerError}
-      code={code}
-      onCode={setCode}
-      onSubmit={onSubmit}
-      buyTo={buyTo}
-      headline={copy.headline}
-      subtitle={copy.subtitle}
-      buttonLabel={copy.buttonLabel}
-      buyLabel={copy.buyLabel}
+    <iframe
+      title="Wi-Fi login"
+      srcDoc={html}
+      sandbox="allow-forms allow-top-navigation allow-scripts allow-same-origin"
+      className="fixed inset-0 h-full w-full border-0"
     />
   );
 }

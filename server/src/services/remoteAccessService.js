@@ -1,5 +1,13 @@
 import mongoose from 'mongoose';
-import { RemoteAccessSubscription, PlanPackage, User, Transaction } from '../models/index.js';
+import {
+  RemoteAccessSubscription,
+  PlanPackage,
+  User,
+  Transaction,
+  Router as MikrotikRouter,
+} from '../models/index.js';
+import { WireGuardPeer } from '../models/WireGuardPeer.js';
+import { findPeerForRouter, setPeerAccess } from './wireguard/peerAccess.js';
 import { resolveDefaultOrganizationId } from '../db/defaultOrganizationId.js';
 import {
   addPaidDuration,
@@ -20,19 +28,116 @@ function orgClause(organizationId) {
   return { organizationId: String(organizationId).trim() };
 }
 
+function subscriptionIsPaid(sub, now = new Date()) {
+  return !sub.disabled && sub.paidUntil instanceof Date && sub.paidUntil > now;
+}
+
+/** Adds `routerAccess` ('open' | 'blocked' | 'no_tunnel') to rows with a populated router. */
+async function withRouterAccess(rows) {
+  const list = Array.isArray(rows) ? rows : [rows];
+  const routers = list.map((r) => r?.routerId).filter((r) => r && r._id);
+  if (!routers.length) return rows;
+  const hosts = routers.map((r) => String(r.host || '').trim()).filter(Boolean);
+  const peers = await WireGuardPeer.find({
+    kind: { $ne: 'client' },
+    $or: [{ claimedRouterId: { $in: routers.map((r) => r._id) } }, { tunnelIp: { $in: hosts } }],
+  })
+    .select('claimedRouterId tunnelIp status disabledReason')
+    .lean();
+  for (const row of list) {
+    const r = row?.routerId;
+    if (!r || !r._id) continue;
+    const peer =
+      peers.find((p) => p.claimedRouterId && String(p.claimedRouterId) === String(r._id)) ||
+      peers.find((p) => p.tunnelIp === String(r.host || '').trim());
+    row.routerAccess = !peer ? 'no_tunnel' : peer.status === 'disabled' ? 'blocked' : 'open';
+    row.routerBlockReason = peer?.status === 'disabled' ? peer.disabledReason || 'manual' : '';
+  }
+  return rows;
+}
+
+async function assertRouterInOrg(routerId, organizationId) {
+  if (!mongoose.isValidObjectId(String(routerId))) {
+    const e = new Error('Invalid router id.');
+    e.status = 400;
+    throw e;
+  }
+  const router = await MikrotikRouter.findOne({ _id: routerId, ...orgClause(organizationId) })
+    .select('_id')
+    .lean();
+  if (!router) {
+    const e = new Error('Router not found.');
+    e.status = 400;
+    throw e;
+  }
+  return router._id;
+}
+
+/**
+ * Open or cut a router's WireGuard tunnel from its linked subscriptions:
+ * open while any linked subscription is paid and not suspended, cut otherwise.
+ * Peers disabled manually by an admin are never re-opened here.
+ * @returns {Promise<{ routerId: string, action: string, error?: string }>}
+ */
+export async function enforceRemoteAccessRouter(routerId) {
+  const out = { routerId: String(routerId), action: 'none' };
+  const router = await MikrotikRouter.findById(routerId).select('_id host').lean();
+  if (!router) return { ...out, action: 'router_missing' };
+  const peer = await findPeerForRouter(router);
+  if (!peer) return { ...out, action: 'no_tunnel' };
+
+  const subs = await RemoteAccessSubscription.find({ routerId: router._id })
+    .select('paidUntil disabled')
+    .lean();
+  const now = new Date();
+  const allow = subs.length === 0 || subs.some((s) => subscriptionIsPaid(s, now));
+
+  try {
+    if (!allow && peer.status !== 'disabled') {
+      await setPeerAccess(peer, { enabled: false, reason: 'subscription_expired' });
+      return { ...out, action: 'blocked' };
+    }
+    if (allow && peer.status === 'disabled' && peer.disabledReason === 'subscription_expired') {
+      await setPeerAccess(peer, { enabled: true });
+      return { ...out, action: 'unblocked' };
+    }
+  } catch (e) {
+    console.error('[remote-access] router tunnel update failed', out.routerId, e?.message || e);
+    return { ...out, action: 'failed', error: e?.message || String(e) };
+  }
+  return out;
+}
+
+/** Cron: apply subscription state to every linked router's tunnel. */
+export async function enforceRemoteAccessRouters() {
+  const ids = await RemoteAccessSubscription.distinct('routerId', { routerId: { $ne: null } });
+  const summary = { checked: ids.length, blocked: 0, unblocked: 0, failed: 0 };
+  for (const id of ids) {
+    const r = await enforceRemoteAccessRouter(id);
+    if (r.action === 'blocked') summary.blocked += 1;
+    else if (r.action === 'unblocked') summary.unblocked += 1;
+    else if (r.action === 'failed') summary.failed += 1;
+  }
+  return summary;
+}
+
 export async function listRemoteAccessSubscriptions(filter = {}, organizationId) {
-  return RemoteAccessSubscription.find({ ...filter, ...orgClause(organizationId) })
+  const rows = await RemoteAccessSubscription.find({ ...filter, ...orgClause(organizationId) })
     .populate('userId', 'email phone fullName')
     .populate('packageId', 'name kind')
+    .populate('routerId', 'name comment host')
     .sort({ updatedAt: -1 })
     .lean();
+  return withRouterAccess(rows);
 }
 
 export async function getRemoteAccessSubscription(id, { organizationId } = {}) {
-  return RemoteAccessSubscription.findOne({ _id: id, ...orgClause(organizationId) })
+  const doc = await RemoteAccessSubscription.findOne({ _id: id, ...orgClause(organizationId) })
     .populate('userId')
     .populate('packageId')
+    .populate('routerId', 'name comment host')
     .lean();
+  return doc ? withRouterAccess(doc) : doc;
 }
 
 export async function createRemoteAccessSubscription({
@@ -45,6 +150,7 @@ export async function createRemoteAccessSubscription({
   validityAmount,
   validityUnit,
   notes,
+  routerId,
   organizationId: tenantOrganizationId,
 }) {
   const p = String(phone ?? '').trim();
@@ -129,17 +235,22 @@ export async function createRemoteAccessSubscription({
     organizationId = await resolveDefaultOrganizationId();
   }
 
-  return RemoteAccessSubscription.create({
+  const linkedRouterId = routerId ? await assertRouterInOrg(routerId, organizationId) : null;
+
+  const doc = await RemoteAccessSubscription.create({
     organizationId,
     ...(userId ? { userId } : {}),
     displayName: displayName ? String(displayName).trim() : undefined,
     phone: p,
     email: email != null && String(email).trim() !== '' ? String(email).trim() : undefined,
     ...(pkg ? { packageId: pkg._id } : {}),
+    ...(linkedRouterId ? { routerId: linkedRouterId } : {}),
     paidUntil: until,
     notes: notes != null && String(notes).trim() !== '' ? String(notes).trim() : undefined,
     disabled: false,
   });
+  if (linkedRouterId) await enforceRemoteAccessRouter(linkedRouterId);
+  return doc;
 }
 
 const PATCHABLE = new Set([
@@ -151,15 +262,21 @@ const PATCHABLE = new Set([
   'packageId',
   'notes',
   'userId',
+  'routerId',
 ]);
 
 export async function updateRemoteAccessSubscription(id, patch, { organizationId } = {}) {
   const doc = await RemoteAccessSubscription.findOne({ _id: id, ...orgClause(organizationId) });
   if (!doc) return null;
+  const previousRouterId = doc.routerId ? String(doc.routerId) : null;
 
   for (const k of PATCHABLE) {
     if (patch[k] === undefined) continue;
-    if (k === 'paidUntil') {
+    if (k === 'routerId') {
+      doc.routerId = patch[k]
+        ? await assertRouterInOrg(patch[k], doc.organizationId || organizationId)
+        : null;
+    } else if (k === 'paidUntil') {
       doc[k] = new Date(patch[k]);
     } else if (k === 'packageId') {
       if (!patch[k]) {
@@ -192,10 +309,18 @@ export async function updateRemoteAccessSubscription(id, patch, { organizationId
   }
 
   await doc.save();
-  return RemoteAccessSubscription.findOne({ _id: id, ...orgClause(organizationId) })
+  const currentRouterId = doc.routerId ? String(doc.routerId) : null;
+  if (previousRouterId && previousRouterId !== currentRouterId) {
+    await enforceRemoteAccessRouter(previousRouterId);
+  }
+  if (currentRouterId) await enforceRemoteAccessRouter(currentRouterId);
+
+  const updated = await RemoteAccessSubscription.findOne({ _id: id, ...orgClause(organizationId) })
     .populate('userId', 'email phone fullName')
     .populate('packageId', 'name kind')
+    .populate('routerId', 'name comment host')
     .lean();
+  return updated ? withRouterAccess(updated) : updated;
 }
 
 export async function deleteRemoteAccessSubscription(id, { organizationId } = {}) {
@@ -203,6 +328,7 @@ export async function deleteRemoteAccessSubscription(id, { organizationId } = {}
     _id: id,
     ...orgClause(organizationId),
   });
+  if (r?.routerId) await enforceRemoteAccessRouter(r.routerId);
   return Boolean(r);
 }
 
@@ -338,5 +464,6 @@ export async function adminRenewRemoteAccessSubscription(id, opts = {}) {
     throw err;
   }
 
+  if (doc.routerId) await enforceRemoteAccessRouter(doc.routerId);
   return getRemoteAccessSubscription(id, { organizationId });
 }

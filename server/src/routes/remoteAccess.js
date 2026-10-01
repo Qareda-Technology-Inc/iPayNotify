@@ -39,6 +39,7 @@ remoteAccessRouter.post(
       validityAmount,
       validityUnit,
       notes,
+      routerId,
     } = req.body;
     const doc = await createRemoteAccessSubscription({
       userId: userId || undefined,
@@ -50,6 +51,7 @@ remoteAccessRouter.post(
       validityAmount,
       validityUnit,
       notes,
+      routerId: routerId || undefined,
       organizationId: req.organizationId,
     });
     const populated = await getRemoteAccessSubscription(doc._id, {

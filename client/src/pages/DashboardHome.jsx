@@ -142,7 +142,7 @@ export function DashboardHome() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <StatCard label="Packages" value={String(counts.packages)} />
-        <StatCard label="Vouchers issued" value={String(counts.vouchers)} />
+        <StatCard label="Tickets issued" value={String(counts.vouchers)} />
         <StatCard label="PPPoE accounts" value={String(counts.pppoeAccounts)} />
         {showRemoteAccess ? (
           <StatCard

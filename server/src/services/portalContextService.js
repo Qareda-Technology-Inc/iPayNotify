@@ -1,4 +1,4 @@
-import { Organization, Router as MikrotikRouter } from '../models/index.js';
+import { Organization, PlanPackage, Router as MikrotikRouter } from '../models/index.js';
 import { routerDisplayName } from '../utils/routerLabel.js';
 import {
   clipPortalCopy,
@@ -88,6 +88,9 @@ async function withOrgGate(routerDoc, match) {
       portalSubtitle: clipPortalCopy('portalSubtitle', org.billing?.portalSubtitle),
       portalButtonLabel: clipPortalCopy('portalButtonLabel', org.billing?.portalButtonLabel),
       portalBuyLabel: clipPortalCopy('portalBuyLabel', org.billing?.portalBuyLabel),
+      portalFooter: clipPortalCopy('portalFooter', org.billing?.portalFooter),
+      portalSupportPhone: clipPortalCopy('portalSupportPhone', org.billing?.portalSupportPhone),
+      portalShowPlans: org.billing?.portalShowPlans !== false,
       voucherTitle: clipPortalCopy('voucherTitle', org.billing?.voucherTitle),
     },
   };
@@ -123,6 +126,18 @@ export async function resolvePortalRouter(req, slugQuery) {
   if (byIp) return withOrgGate(byIp, 'ip');
 
   return { resolved: false, reason: 'no_match' };
+}
+
+/** Active hotspot plans shown on the login page, cheapest first. */
+export async function loadPortalPlans(organizationId) {
+  if (!organizationId) return [];
+  return PlanPackage.find({ organizationId, kind: 'hotspot', isActive: true })
+    .select(
+      'name priceCents currency dataLimitBytes timeLimitSeconds elapsedSeconds pausedSeconds ticketDurationType usersPerTicket speedDownMbps'
+    )
+    .sort({ priceCents: 1, name: 1 })
+    .limit(12)
+    .lean();
 }
 
 /** Shared portal-site resolution for public POST bodies (`portalSlug` or query `r`). */

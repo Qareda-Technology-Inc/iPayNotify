@@ -12,6 +12,7 @@ import {
   recordHubtelClientCheckoutEvent,
 } from '../services/paymentService.js';
 import {
+  loadPortalPlans,
   resolvePortalRouter,
   resolvePortalSiteFromRequest,
 } from '../services/portalContextService.js';
@@ -36,6 +37,27 @@ publicPortalRouter.post(
   })
 );
 
+async function loginPageOptions(ctx, slug) {
+  const b = ctx.branding || {};
+  const plans = b.portalShowPlans === false ? [] : await loadPortalPlans(ctx.router.organizationId);
+  return {
+    designId: b.portalDesign,
+    brandName: b.displayName,
+    logoUrl: b.logoUrl,
+    siteName: ctx.router?.name,
+    headline: b.portalHeadline,
+    subtitle: b.portalSubtitle,
+    buttonLabel: b.portalButtonLabel,
+    buyLabel: b.portalBuyLabel,
+    footerText: b.portalFooter,
+    supportPhone: b.portalSupportPhone,
+    showPlans: b.portalShowPlans !== false,
+    plans,
+    buyUrl: slug ? captiveBuyUrl(slug) : '',
+  };
+}
+
+/** Router downloads this as its hotspot login.html (plans are baked in at push time). */
 publicPortalRouter.get(
   '/captive/:slug/login.html',
   asyncHandler(async (req, res) => {
@@ -43,20 +65,43 @@ publicPortalRouter.get(
     if (!ctx.resolved) {
       return res.status(404).type('text/plain').send('Unknown hotspot site');
     }
-    const html = buildCaptiveLoginHtml({
-      designId: ctx.branding?.portalDesign,
-      brandName: ctx.branding?.displayName,
-      headline: ctx.branding?.portalHeadline,
-      subtitle: ctx.branding?.portalSubtitle,
-      buttonLabel: ctx.branding?.portalButtonLabel,
-      buyLabel: ctx.branding?.portalBuyLabel,
-      buyUrl: captiveBuyUrl(req.params.slug),
-    });
+    const html = buildCaptiveLoginHtml(await loginPageOptions(ctx, req.params.slug));
     res.set('Cache-Control', 'no-store');
     res.type('html').send(html);
   })
 );
 
+/**
+ * Hosted login page (web app /portal/login). The form posts to the router login URL
+ * the hotspot passed in (`link-login-only`), so it only works from the venue Wi-Fi.
+ * GET /captive/page.html?r=slug&link-login-only=&dst=&error=
+ */
+publicPortalRouter.get(
+  '/captive/page.html',
+  asyncHandler(async (req, res) => {
+    const slug = req.query.r ?? req.query.router ?? req.query.site;
+    const ctx = await resolvePortalRouter(req, slug);
+    if (!ctx.resolved) {
+      return res.status(404).type('text/plain').send('Unknown hotspot site');
+    }
+    const link = String(req.query['link-login-only'] || req.query['link-login'] || '').trim();
+    const action = /^https?:\/\//i.test(link) ? link : '';
+    const opts = await loginPageOptions(ctx, slug ? String(slug) : '');
+    const html = buildCaptiveLoginHtml({
+      ...opts,
+      mode: 'web',
+      web: {
+        action,
+        dst: String(req.query.dst || req.query['link-orig'] || ''),
+        error: action
+          ? String(req.query.error || '')
+          : 'Open this page from the venue Wi-Fi login so the router can accept your code.',
+      },
+    });
+    res.set('Cache-Control', 'no-store');
+    res.type('html').send(html);
+  })
+);
 function portalUnresolvedError(ctx) {
   if (ctx?.reason === 'org_suspended') {
     return {

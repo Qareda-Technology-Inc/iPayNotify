@@ -163,6 +163,67 @@ export async function testWgVpsSshConnection() {
 }
 
 /**
+ * Drop a peer from the VPS interface (tunnel IP stops routing), then persist with wg-quick save.
+ * @param {{ publicKey: string }} peer
+ */
+export async function removeWireGuardPeerFromVps(peer) {
+  const wg = config.wireguard;
+  if (!(await isWireGuardFullyConfigured())) {
+    const err = new Error('WireGuard VPS sync is not configured.');
+    err.status = 503;
+    throw err;
+  }
+  const publicKey = String(peer?.publicKey || '').trim();
+  if (!publicKey) {
+    const err = new Error('publicKey is required to remove a WireGuard peer');
+    err.status = 400;
+    throw err;
+  }
+  const iface = String(wg.interfaceName || 'wg0').trim();
+  if (!/^[a-zA-Z0-9_.-]+$/.test(iface)) {
+    const err = new Error('Invalid WG_INTERFACE name');
+    err.status = 500;
+    throw err;
+  }
+  const auth = await resolveWgVpsSshAuth();
+  if (!auth) {
+    const err = new Error('No VPS SSH key. Generate one in WireGuard admin.');
+    err.status = 503;
+    throw err;
+  }
+
+  const commands = [
+    `sudo -n wg set ${iface} peer ${shellQuote(publicKey)} remove`,
+    `sudo -n wg-quick save ${iface}`,
+  ];
+  const ssh = new NodeSSH();
+  try {
+    await ssh.connect(vpsSshConnectOptions(auth));
+    for (const cmd of commands) {
+      const result = await ssh.execCommand(cmd);
+      if (result.code !== 0 && result.code != null) {
+        const detail = (result.stderr || result.stdout || `exit ${result.code}`).trim().slice(0, 500);
+        const err = new Error(`VPS WireGuard command failed: ${detail}`);
+        err.status = 502;
+        throw err;
+      }
+    }
+    console.log('[wireguard] peer removed from VPS', {
+      publicKeyPrefix: `${publicKey.slice(0, 12)}…`,
+    });
+    return { ok: true };
+  } catch (e) {
+    throw mapVpsSshError(e);
+  } finally {
+    try {
+      ssh.dispose();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
  * Push (or update) a WireGuard peer on the VPS via SSH, then persist with wg-quick save.
  * @param {{ publicKey: string, tunnelIp: string, lanSubnet?: string }} peer
  */

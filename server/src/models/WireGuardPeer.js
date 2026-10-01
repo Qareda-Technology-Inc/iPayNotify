@@ -40,6 +40,12 @@ const wireGuardPeerSchema = new mongoose.Schema(
       default: 'active',
       index: true,
     },
+    /** Why the peer is disabled. Only `subscription_expired` is lifted automatically on renewal. */
+    disabledReason: {
+      type: String,
+      enum: ['', 'manual', 'subscription_expired'],
+      default: '',
+    },
     lastSeen: { type: Date, default: Date.now },
     /** Last sync error from `wg set` on the VPS (if any) */
     lastSyncError: { type: String, default: '' },
