@@ -28,6 +28,11 @@ export function wgMikrotikJumpMode() {
   return 'auto';
 }
 
+function forwardTimeoutMs() {
+  const n = Number(process.env.WG_JUMP_FORWARD_TIMEOUT_MS);
+  return Number.isFinite(n) && n >= 1000 ? n : 8000;
+}
+
 export async function canUseWgJump() {
   if (!(await isWireGuardFullyConfigured())) return false;
   const auth = await resolveWgVpsSshAuth();
@@ -54,7 +59,7 @@ export async function openWgJumpStream(mikrotikHost, mikrotikPort) {
     host: wg.vpsHost,
     port: wg.vpsSshPort || 22,
     username: wg.vpsSshUser || 'root',
-    readyTimeout: 45000,
+    readyTimeout: 20000,
     keepaliveInterval: 15000,
   };
   if (auth.privateKeyPath) connectOpts.privateKey = require('fs').readFileSync(auth.privateKeyPath);
@@ -68,13 +73,13 @@ export async function openWgJumpStream(mikrotikHost, mikrotikPort) {
       } catch {
         /* ignore */
       }
-      reject(
-        new Error(
-          `WireGuard jump: SSH to VPS ${wg.vpsHost}:${wg.vpsSshPort || 22} timed out. ` +
-            `Confirm WG_VPS_* and that the API can reach the VPS.`
-        )
+      const e = new Error(
+        `WireGuard jump: SSH to VPS ${wg.vpsHost}:${wg.vpsSshPort || 22} timed out. ` +
+          `Confirm WG_VPS_* and that the API can reach the VPS.`
       );
-    }, 45000);
+      e.code = 'WG_VPS_UNREACHABLE';
+      reject(e);
+    }, 20000);
     bastion
       .on('ready', () => {
         clearTimeout(t);
@@ -82,33 +87,42 @@ export async function openWgJumpStream(mikrotikHost, mikrotikPort) {
       })
       .on('error', (e) => {
         clearTimeout(t);
-        reject(
-          new Error(
-            `WireGuard jump: cannot SSH to VPS ${wg.vpsHost}: ${e.message}. ` +
-              `Paste the current WireGuard admin public key into the VPS authorized_keys.`
-          )
+        const err = new Error(
+          `WireGuard jump: cannot SSH to VPS ${wg.vpsHost}: ${e.message}. ` +
+            `Paste the current WireGuard admin public key into the VPS authorized_keys.`
         );
+        err.code = 'WG_VPS_UNREACHABLE';
+        reject(err);
       })
       .connect(connectOpts);
   });
 
   const stream = await new Promise((resolve, reject) => {
+    let settled = false;
+    const unreachable = (reason) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        bastion.end();
+      } catch {
+        /* ignore */
+      }
+      const e = new Error(`WireGuard jump: VPS cannot reach ${mikrotikHost}:${mikrotikPort} (${reason}).`);
+      e.code = 'WG_ROUTER_UNREACHABLE';
+      e.status = 502;
+      reject(e);
+    };
+    /* A live tunnel peer answers in well under a second; the VPS kernel would otherwise wait ~2 minutes. */
+    const timer = setTimeout(() => unreachable('no answer through the tunnel'), forwardTimeoutMs());
     bastion.forwardOut('127.0.0.1', 0, String(mikrotikHost), Number(mikrotikPort) || 22, (err, s) => {
-      if (err) {
-        try {
-          bastion.end();
-        } catch {
-          /* ignore */
-        }
-        reject(
-          new Error(
-            `WireGuard jump: VPS cannot reach ${mikrotikHost}:${mikrotikPort} (${err.message}). ` +
-              `On the VPS run: ping ${mikrotikHost}; sudo wg show. ` +
-              `On the router: WireGuard peer handshake must be recent; IP → Services enable ssh/api.`
-          )
-        );
+      if (err) return unreachable(err.message);
+      if (settled) {
+        s.destroy?.();
         return;
       }
+      settled = true;
+      clearTimeout(timer);
       resolve(s);
     });
   });

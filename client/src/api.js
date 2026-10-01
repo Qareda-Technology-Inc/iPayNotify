@@ -61,7 +61,11 @@ export async function apiFetch(path, options = {}) {
     if (res.status === 401 && token && isSessionAuthFailure) {
       setToken(null);
     }
-    throw new Error(errText || res.statusText);
+    const err = new Error(errText || res.statusText);
+    err.status = res.status;
+    if (data.code) err.code = data.code;
+    if (data.detail) err.detail = data.detail;
+    throw err;
   }
   return data;
 }

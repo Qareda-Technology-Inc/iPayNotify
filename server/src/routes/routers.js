@@ -6,6 +6,7 @@ import {
   getRouterPppProfiles,
   getRouterPppSecrets,
   getRouterLiveSnapshot,
+  getActiveSessionsForRouter,
   listActiveSessionsAllRouters,
   pingRouterApi,
 } from '../services/mikrotikReadService.js';
@@ -348,6 +349,13 @@ routersApi.get(
   '/active-sessions',
   asyncHandler(async (req, res) => {
     res.json(await listActiveSessionsAllRouters(req.organizationId));
+  })
+);
+
+routersApi.get(
+  '/active-sessions/:routerId',
+  asyncHandler(async (req, res) => {
+    res.json(await getActiveSessionsForRouter(req.params.routerId, req.organizationId));
   })
 );
 

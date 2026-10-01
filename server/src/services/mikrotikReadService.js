@@ -5,6 +5,7 @@ import { normalizePrintRows } from '../mikrotik/helpers.js';
 import mongoose from 'mongoose';
 import { Router } from '../models/index.js';
 import { routerDisplayName } from '../utils/routerLabel.js';
+import { describeRouterError } from '../utils/routerErrors.js';
 
 async function loadRouter(routerId, organizationId) {
   const q = { _id: routerId };
@@ -473,45 +474,85 @@ export async function getRouterLiveSnapshot(routerId, organizationId) {
  * Hotspot + PPP active sessions for every router (best-effort; errors per router).
  * Routers are queried in parallel for faster dashboard refresh.
  */
-export async function listActiveSessionsAllRouters(organizationId) {
-  const q =
-    organizationId != null &&
+const ACTIVE_SESSIONS_BUDGET_MS = 15000;
+/** routerId → first failure time, so the UI can say "offline for 20 min". In-process only. */
+const offlineSince = new Map();
+
+function withBudget(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const e = new Error('Router did not answer in time');
+      e.code = 'ROUTER_TIMEOUT';
+      reject(e);
+    }, ms);
+  });
+  promise.catch(() => {});
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function activeSessionsRow(r) {
+  const id = String(r._id);
+  const base = { routerId: id, routerName: routerDisplayName(r) || r.name || r.host || id, host: r.host };
+  try {
+    const session = await withBudget(readActiveSessionsOnRouter(r), ACTIVE_SESSIONS_BUDGET_MS);
+    offlineSince.delete(id);
+    return {
+      ...base,
+      status: 'online',
+      reachable: true,
+      details: session.details,
+      hotspotActive: session.hotspotActive,
+      pppActive: session.pppActive,
+      error: session.error,
+    };
+  } catch (e) {
+    const d = describeRouterError(e);
+    if (!offlineSince.has(id)) offlineSince.set(id, new Date().toISOString());
+    return {
+      ...base,
+      status: d.code === 'offline' ? 'offline' : 'error',
+      reachable: false,
+      hotspotActive: [],
+      pppActive: [],
+      error: d.message,
+      errorCode: d.code,
+      errorHint: d.hint,
+      errorDetail: d.detail,
+      offlineSince: offlineSince.get(id),
+    };
+  }
+}
+
+function routerScope(organizationId) {
+  return organizationId != null &&
     String(organizationId).trim() &&
     mongoose.isValidObjectId(String(organizationId).trim())
-      ? { organizationId: String(organizationId).trim() }
-      : {};
-  const routers = await Router.find(q).sort({ createdAt: 1 });
+    ? { organizationId: String(organizationId).trim() }
+    : {};
+}
+
+/** One router's live sessions; connection failures come back as a row with `status`, never as an HTTP error. */
+export async function getActiveSessionsForRouter(routerId, organizationId) {
+  if (!mongoose.isValidObjectId(String(routerId))) {
+    const e = new Error('Invalid router id');
+    e.status = 400;
+    throw e;
+  }
+  const r = await Router.findOne({ _id: routerId, ...routerScope(organizationId) });
+  if (!r) {
+    const e = new Error('Router not found');
+    e.status = 404;
+    throw e;
+  }
+  return { at: new Date().toISOString(), ...(await activeSessionsRow(r)) };
+}
+
+export async function listActiveSessionsAllRouters(organizationId) {
+  const routers = await Router.find(routerScope(organizationId)).sort({ createdAt: 1 });
   const at = new Date().toISOString();
 
-  const rows = await Promise.all(
-    routers.map(async (r) => {
-      const id = String(r._id);
-      const label = routerDisplayName(r) || r.name || r.host || id;
-      try {
-        const session = await readActiveSessionsOnRouter(r);
-        return {
-          routerId: id,
-          routerName: label,
-          host: r.host,
-          reachable: !session.error || session.hotspotActive.length > 0 || session.pppActive.length > 0,
-          details: session.details,
-          hotspotActive: session.hotspotActive,
-          pppActive: session.pppActive,
-          error: session.error,
-        };
-      } catch (e) {
-        return {
-          routerId: id,
-          routerName: label,
-          host: r.host,
-          reachable: false,
-          hotspotActive: [],
-          pppActive: [],
-          error: String(e.message || e),
-        };
-      }
-    })
-  );
+  const rows = await Promise.all(routers.map(activeSessionsRow));
 
   let totalHotspot = 0;
   let totalPpp = 0;

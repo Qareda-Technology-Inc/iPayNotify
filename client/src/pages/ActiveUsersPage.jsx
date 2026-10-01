@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../api.js';
+import { routerDisplayName } from '../utils/routerDisplayName.js';
 
 function IconRefresh({ className }) {
   return (
@@ -15,31 +16,118 @@ function IconRefresh({ className }) {
   );
 }
 
+const OFFLINE_RECHECK_MS = 2 * 60 * 1000;
+
+function sinceLabel(iso) {
+  if (!iso) return '';
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `for ${mins} min`;
+  const h = Math.floor(mins / 60);
+  return `for ${h} h ${mins % 60} min`;
+}
+
+function RouterProblem({ r }) {
+  const [open, setOpen] = useState(false);
+  const offline = r.status === 'offline';
+  return (
+    <div
+      className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+        offline ? 'border-red-500/30 bg-red-950/20 text-red-100' : 'border-amber-500/35 bg-amber-950/25 text-amber-100'
+      }`}
+    >
+      <p>
+        <span className="font-medium">{r.error}</span>
+        {offline && r.offlineSince ? <span className="text-red-200/70"> · {sinceLabel(r.offlineSince)}</span> : null}
+      </p>
+      {r.errorHint ? <p className="mt-0.5 text-xs opacity-80">{r.errorHint}</p> : null}
+      {r.errorDetail ? (
+        <button type="button" onClick={() => setOpen((v) => !v)} className="mt-1 text-xs underline opacity-70 hover:opacity-100">
+          {open ? 'Hide technical details' : 'Technical details'}
+        </button>
+      ) : null}
+      {open ? <p className="mt-1 break-words font-mono text-[11px] opacity-70">{r.errorDetail}</p> : null}
+    </div>
+  );
+}
+
 export function ActiveUsersPage() {
-  const [data, setData] = useState(null);
+  const [rows, setRows] = useState(/** @type {any[] | null} */ (null));
   const [err, setErr] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [routerFilter, setRouterFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('all'); // all | hotspot | ppp
   const [search, setSearch] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [lastAt, setLastAt] = useState('');
+  const rowsRef = useRef([]);
+  const busyRef = useRef(false);
 
-  const load = useCallback(async ({ soft = false } = {}) => {
-    setErr('');
-    if (soft) setRefreshing(true);
-    else setLoading(true);
-    try {
-      const d = await apiFetch('/api/routers/active-sessions');
-      setData(d);
-    } catch (e) {
-      setErr(e.message || 'Could not load sessions');
-      if (!soft) setData(null);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+  const patchRow = useCallback((id, patch) => {
+    setRows((list) => {
+      const next = (list || []).map((r) => (r.routerId === id ? { ...r, ...patch } : r));
+      rowsRef.current = next;
+      return next;
+    });
   }, []);
+
+  const load = useCallback(
+    async ({ auto = false } = {}) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setErr('');
+      try {
+        const list = await apiFetch('/api/routers');
+        const prev = new Map(rowsRef.current.map((r) => [r.routerId, r]));
+        const next = (Array.isArray(list) ? list : []).map((r) => {
+          const id = String(r._id);
+          return (
+            prev.get(id) || {
+              routerId: id,
+              routerName: routerDisplayName(r) || r.name || r.host,
+              host: r.host,
+              status: 'loading',
+              hotspotActive: [],
+              pppActive: [],
+            }
+          );
+        });
+        rowsRef.current = next;
+        setRows(next);
+
+        const due = next.filter(
+          (r) =>
+            !auto ||
+            r.status !== 'offline' ||
+            !r.checkedAt ||
+            Date.now() - new Date(r.checkedAt).getTime() > OFFLINE_RECHECK_MS
+        );
+        await Promise.all(
+          due.map(async (r) => {
+            patchRow(r.routerId, { refreshing: true });
+            try {
+              const d = await apiFetch(`/api/routers/active-sessions/${r.routerId}`);
+              patchRow(r.routerId, { ...d, refreshing: false, checkedAt: d.at });
+            } catch (e) {
+              patchRow(r.routerId, {
+                status: 'error',
+                error: e.message || 'Could not load this router',
+                errorDetail: e.detail || '',
+                refreshing: false,
+                checkedAt: new Date().toISOString(),
+              });
+            }
+          })
+        );
+        setLastAt(new Date().toISOString());
+      } catch (e) {
+        setErr(e.message || 'Could not load routers');
+        if (!rowsRef.current.length) setRows([]);
+      } finally {
+        busyRef.current = false;
+      }
+    },
+    [patchRow]
+  );
 
   useEffect(() => {
     load();
@@ -47,15 +135,22 @@ export function ActiveUsersPage() {
 
   useEffect(() => {
     if (!autoRefresh) return undefined;
-    const id = setInterval(() => {
-      load({ soft: true });
-    }, 45000);
+    const id = setInterval(() => load({ auto: true }), 45000);
     return () => clearInterval(id);
   }, [autoRefresh, load]);
 
-  const allRouters = data?.routers || [];
-  const allErrored =
-    allRouters.length > 0 && allRouters.every((r) => Boolean(r.error));
+  const allRouters = useMemo(() => {
+    const rank = { online: 0, loading: 1, error: 2, offline: 3 };
+    return [...(rows || [])].sort((a, b) => (rank[a.status] ?? 1) - (rank[b.status] ?? 1));
+  }, [rows]);
+  const loading = rows === null;
+  const refreshing = allRouters.some((r) => r.refreshing || r.status === 'loading');
+  const counts = useMemo(() => {
+    const c = { online: 0, offline: 0, error: 0 };
+    for (const r of allRouters) if (c[r.status] != null) c[r.status] += 1;
+    return c;
+  }, [allRouters]);
+  const data = rows && rows.length ? { at: lastAt } : null;
 
   const routers = useMemo(() => {
     let list = allRouters;
@@ -92,7 +187,15 @@ export function ActiveUsersPage() {
     return { hotspot, ppp, all: hotspot + ppp };
   }, [routers]);
 
-  const totals = data?.totals;
+  const totals = useMemo(() => {
+    let hotspot = 0;
+    let ppp = 0;
+    for (const r of allRouters) {
+      hotspot += r.hotspotActive?.length || 0;
+      ppp += r.pppActive?.length || 0;
+    }
+    return { hotspot, ppp, all: hotspot + ppp };
+  }, [allRouters]);
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -115,7 +218,7 @@ export function ActiveUsersPage() {
           <button
             type="button"
             disabled={loading || refreshing}
-            onClick={() => load({ soft: Boolean(data) })}
+            onClick={() => load()}
             className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-600/80 bg-slate-800/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800 disabled:opacity-50"
           >
             <IconRefresh
@@ -135,10 +238,25 @@ export function ActiveUsersPage() {
         </p>
       )}
 
-      {allErrored && !err ? (
-        <p className="mt-6 rounded-xl border border-amber-500/35 bg-amber-950/25 px-4 py-3 text-sm text-amber-100">
-          Every site returned an error — check router credentials or VPN, then refresh.
-        </p>
+      {allRouters.length > 0 ? (
+        <div className="mt-6 flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full border border-emerald-500/30 bg-emerald-950/30 px-2.5 py-1 text-emerald-200">
+            {counts.online} online
+          </span>
+          {counts.offline ? (
+            <span className="rounded-full border border-red-500/30 bg-red-950/30 px-2.5 py-1 text-red-200">
+              {counts.offline} offline
+            </span>
+          ) : null}
+          {counts.error ? (
+            <span className="rounded-full border border-amber-500/30 bg-amber-950/30 px-2.5 py-1 text-amber-200">
+              {counts.error} need attention
+            </span>
+          ) : null}
+          {counts.offline && autoRefresh ? (
+            <span className="px-1 py-1 text-slate-500">Offline sites are re-checked every 2 min.</span>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
@@ -272,12 +390,14 @@ export function ActiveUsersPage() {
                     ))}
                   </div>
                 </div>
-                {r.error && (
-                  <p className="mt-2 rounded-lg border border-amber-500/35 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
-                    {r.error}
-                  </p>
-                )}
-                {!r.error &&
+                {r.status === 'loading' ? (
+                  <p className="mt-2 text-xs text-slate-500">Connecting to router…</p>
+                ) : null}
+                {(r.status === 'offline' || r.status === 'error') && r.error ? <RouterProblem r={r} /> : null}
+                {r.status === 'online' && r.error ? (
+                  <p className="mt-2 text-xs text-amber-300/90">Partly loaded: {r.error}</p>
+                ) : null}
+                {r.status === 'online' && !r.error &&
                   (r.hotspotActive?.length ?? 0) === 0 &&
                   (r.pppActive?.length ?? 0) === 0 && (
                     <p className="mt-2 text-xs text-slate-500">
@@ -286,6 +406,7 @@ export function ActiveUsersPage() {
                   )}
               </div>
 
+              {r.status === 'online' ? (
               <div
                 className={`grid items-stretch gap-4 p-4 sm:p-5 ${
                   typeFilter === 'all' ? 'lg:grid-cols-2' : 'grid-cols-1'
@@ -392,6 +513,7 @@ export function ActiveUsersPage() {
                   </div>
                 ) : null}
               </div>
+              ) : null}
             </section>
           ))
         )}

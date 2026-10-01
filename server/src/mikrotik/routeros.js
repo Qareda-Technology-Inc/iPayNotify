@@ -2,6 +2,7 @@ import { createRequire } from 'module';
 import { parseRouterConnectString } from '../utils/routerConnect.js';
 import { withRouterSsh } from './rosSshAdapter.js';
 import { canUseWgJump, isWgTunnelHost, wgMikrotikJumpMode } from './wgJump.js';
+import { tagRouterError } from '../utils/routerErrors.js';
 
 const require = createRequire(import.meta.url);
 const { RouterOSAPI } = require('node-routeros');
@@ -97,6 +98,21 @@ async function runWithTransportFallback(router, fn, { useWgJump = false } = {}) 
  * that are not on the WireGuard VPS can still manage routers.
  */
 export async function withRouterMikrotik(router, fn) {
+  try {
+    return await connectAndRun(router, fn);
+  } catch (e) {
+    const connectFailure =
+      e?.code === 'WG_ROUTER_UNREACHABLE' ||
+      e?.code === 'WG_VPS_UNREACHABLE' ||
+      isTransportConnectFailure(e) ||
+      isLoginFailure(e) ||
+      /rejected (API|SSH)? ?login/i.test(String(e?.message));
+    if (connectFailure) tagRouterError(e);
+    throw e;
+  }
+}
+
+async function connectAndRun(router, fn) {
   const host = routerHost(router);
   const jumpMode = wgMikrotikJumpMode();
   const jumpOk = isWgTunnelHost(host) && jumpMode !== 'never' && (await canUseWgJump());
@@ -107,6 +123,8 @@ export async function withRouterMikrotik(router, fn) {
       return await runPreferred(router, fn, { useWgJump: true });
     } catch (jumpErr) {
       if (jumpMode === 'always') throw jumpErr;
+      /* The VPS itself could not open the tunnel address: the router is down, a direct retry cannot help. */
+      if (jumpErr?.code === 'WG_ROUTER_UNREACHABLE') throw jumpErr;
       /* Command ran on the router — do not mask as unreachable / retry direct */
       if (!isTransportConnectFailure(jumpErr)) throw jumpErr;
       /* auto: fall back to direct (API co-located on VPS, or jump misconfigured) */
@@ -119,6 +137,7 @@ export async function withRouterMikrotik(router, fn) {
             `On the VPS: ping ${host}; sudo wg show; ensure ssh/api are enabled on the router.`
         );
         err.status = 502;
+        if (jumpErr?.code) err.code = jumpErr.code;
         throw err;
       }
     }
