@@ -16,6 +16,7 @@ import {
 } from '../services/walledGardenSyncService.js';
 import { config } from '../config.js';
 import {
+  ensurePortalSlug,
   isValidPortalSlug,
   isValidSitePublicIp,
 } from '../services/portalContextService.js';
@@ -457,6 +458,7 @@ routersApi.post(
       }
       throw e;
     }
+    if (!doc.portalSlug) await ensurePortalSlug(doc).catch(() => {});
     void logOrgAudit({
       organizationId: req.organizationId,
       actorEmail: req.admin?.email,

@@ -3,7 +3,7 @@ import { config } from '../../config.js';
 import { withRouterMikrotik } from '../../mikrotik/routeros.js';
 import { parseRouterConnectString } from '../../utils/routerConnect.js';
 import { cliEscapeValue } from '../../mikrotik/rosSsh.js';
-import { isValidSitePublicIp } from '../portalContextService.js';
+import { ensurePortalSlug, isValidSitePublicIp } from '../portalContextService.js';
 import { assertOrgLimit } from '../orgLimitsService.js';
 import { registerWireGuardPeer } from './registerPeer.js';
 import { isWireGuardFullyConfigured } from './wgVpsSshKey.js';
@@ -666,6 +666,7 @@ export async function provisionMikrotikRouter({
       ...(siteIp ? { sitePublicIp: siteIp } : {}),
     });
   }
+  if (!doc.portalSlug) await ensurePortalSlug(doc).catch(() => {});
 
   return {
     ok: true,

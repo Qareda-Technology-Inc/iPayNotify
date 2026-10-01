@@ -4,6 +4,7 @@ import { withRouterMikrotik } from '../../mikrotik/routeros.js';
 import { assertOrgLimit } from '../orgLimitsService.js';
 import { config } from '../../config.js';
 import { syncWireGuardPeerToVps } from './wgPeerSync.js';
+import { ensurePortalSlug } from '../portalContextService.js';
 
 const VPN_MGMT_COMMENT = 'QareFi: VPN management';
 
@@ -179,6 +180,7 @@ export async function claimWireGuardPeerAsRouter({
       expiredPppProfile: 'nonpayment',
     });
   }
+  if (!doc.portalSlug) await ensurePortalSlug(doc).catch(() => {});
 
   peer.claimedRouterId = doc._id;
   if (organizationId && !peer.organizationId) peer.organizationId = organizationId;

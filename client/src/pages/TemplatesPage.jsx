@@ -258,7 +258,7 @@ export function TemplatesPage() {
     setOrg(o);
     const list = Array.isArray(routersRes) ? routersRes : [];
     setRouters(list);
-    setRouterId((id) => id || list.find((r) => r.portalSlug)?._id || list[0]?._id || '');
+    setRouterId((id) => id || list[0]?._id || '');
     setPortalDesign(o?.billing?.portalDesign || 'midnight');
     setVoucherDesign(o?.billing?.voucherDesign || 'grid');
     setSettings(settingsFromBilling(o?.billing));
@@ -571,7 +571,6 @@ export function TemplatesPage() {
                   {routers.map((r) => (
                     <option key={r._id} value={r._id}>
                       {routerDisplayName(r) || r.host}
-                      {r.portalSlug ? '' : ' (no portal slug)'}
                     </option>
                   ))}
                 </select>

@@ -678,14 +678,18 @@ function RouterDetail({
               </label>
             </div>
             <label className="block text-xs font-medium text-slate-400">
-              Portal slug
+              Portal link name
               <input
                 value={editPortalSlug}
                 onChange={(e) =>
                   setEditPortalSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
                 }
+                placeholder="Created automatically"
                 className={`${fieldClass()} font-mono`}
               />
+              <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                Used in this site&apos;s login and buy links. Set automatically from the router name.
+              </span>
             </label>
             <label className="block text-xs font-medium text-slate-400">
               Site public IP

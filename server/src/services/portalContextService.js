@@ -38,6 +38,44 @@ export function isValidPortalSlug(s) {
   return SLUG_RE.test(s.trim().toLowerCase());
 }
 
+function slugBase(router) {
+  const raw = String(router.comment || router.name || '').toLowerCase();
+  const s = raw
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+    .replace(/-+$/g, '');
+  return s && !/^\d+(-\d+)*$/.test(s) ? s : 'site';
+}
+
+/**
+ * Give a router a portal slug (used in login/buy links) if it has none, derived from its name.
+ * Returns the slug. Saves the router.
+ */
+export async function ensurePortalSlug(router) {
+  const current = String(router.portalSlug || '').trim().toLowerCase();
+  if (current) return current;
+  const base = slugBase(router);
+  for (let i = 0; i < 20; i += 1) {
+    const candidate =
+      i === 0 ? base : `${base}-${i < 10 ? i + 1 : Math.random().toString(36).slice(2, 6)}`;
+    if (!isValidPortalSlug(candidate)) continue;
+    if (await MikrotikRouter.exists({ portalSlug: candidate })) continue;
+    try {
+      router.portalSlug = candidate;
+      await router.save();
+      return candidate;
+    } catch (e) {
+      if (e?.code !== 11000) throw e;
+      router.portalSlug = undefined;
+    }
+  }
+  const e = new Error('Could not create a portal link name for this router. Try again.');
+  e.status = 500;
+  throw e;
+}
+
 export function isValidSitePublicIp(s) {
   if (!s || typeof s !== 'string') return false;
   const t = s.trim();

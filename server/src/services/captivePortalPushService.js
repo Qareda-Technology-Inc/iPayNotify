@@ -5,6 +5,7 @@ import { withRouterMikrotik } from '../mikrotik/routeros.js';
 import { normalizePrintRows } from '../mikrotik/helpers.js';
 import { cliEscapeValue } from '../mikrotik/rosSsh.js';
 import { syncPaymentWalledGarden } from './walledGardenSyncService.js';
+import { ensurePortalSlug } from './portalContextService.js';
 
 function fail(message, status = 400) {
   const err = new Error(message);
@@ -95,10 +96,7 @@ export async function pushCaptivePortalToRouter(routerId, organizationId, { hots
   }
   const router = await Router.findOne(q);
   if (!router) throw fail('Router not found', 404);
-  const slug = String(router.portalSlug || '').trim().toLowerCase();
-  if (!slug) {
-    throw fail('This router has no portal slug. Set one under Network → Routers, then push again.');
-  }
+  const slug = await ensurePortalSlug(router);
 
   const url = captiveLoginFetchUrl(slug);
 
