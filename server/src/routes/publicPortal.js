@@ -19,6 +19,7 @@ import {
 import { buildCaptiveLoginHtml } from '../services/captivePortalHtml.js';
 import { captiveBuyUrl } from '../services/captivePortalPushService.js';
 import { recordHotspotLoginEvent } from '../services/hotspotService.js';
+import { normalizeGhanaMsisdn } from '../utils/phoneGhana.js';
 
 export const publicPortalRouter = express.Router();
 
@@ -254,6 +255,9 @@ publicPortalRouter.post(
     const { packageId, customerMsisdn, customerName, portalSlug } = req.body;
     if (!packageId) {
       return res.status(400).json({ error: 'packageId is required' });
+    }
+    if (!normalizeGhanaMsisdn(customerMsisdn)) {
+      return res.status(400).json({ error: 'Enter a valid mobile money number (e.g. 024 123 4567).' });
     }
 
     const ctx = await resolvePortalSiteFromRequest(req, portalSlug);

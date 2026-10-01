@@ -288,7 +288,7 @@ export async function createPppoeRenewalCheckout({
     mergeTxMeta(tx, { hubtelError: session.error });
     await tx.save();
     const err = new Error(session.error || 'Could not start payment');
-    err.status = 502;
+    err.status = session.status || 502;
     throw err;
   }
   mergeTxMeta(tx, {
@@ -393,7 +393,7 @@ export async function createHotspotPurchaseCheckout({
 
   const session = buildHubtelCheckoutSession({
     amountGhs,
-    description: `${billing.merchantDisplayName}: Hotspot — ${pkg.name}`,
+    description: `${billing.merchantDisplayName} - Wi-Fi ticket - ${pkg.name}`,
     customerMsisdn: resolvedPhone,
     clientReference,
     hubtel: billing.hubtel,
@@ -404,7 +404,7 @@ export async function createHotspotPurchaseCheckout({
     mergeTxMeta(tx, { hubtelError: session.error });
     await tx.save();
     const err = new Error(session.error || 'Could not start payment');
-    err.status = 502;
+    err.status = session.status || 502;
     throw err;
   }
   mergeTxMeta(tx, {

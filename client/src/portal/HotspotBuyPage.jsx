@@ -41,6 +41,13 @@ export function HotspotBuyPage() {
   const { ctx, loading: ctxLoading, error: ctxError } = usePortalContext();
   const [packages, setPackages] = useState([]);
   const [packageId, setPackageId] = useState('');
+  const [msisdn, setMsisdn] = useState(() => {
+    try {
+      return localStorage.getItem('wifiMomoNumber') || '';
+    } catch {
+      return '';
+    }
+  });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [draftCheckout, setDraftCheckout] = useState(null);
@@ -84,6 +91,16 @@ export function HotspotBuyPage() {
       setError('Select a package.');
       return;
     }
+    const digits = msisdn.replace(/\D/g, '');
+    if (!(/^0\d{9}$/.test(digits) || /^233\d{9}$/.test(digits) || /^\d{9}$/.test(digits))) {
+      setError('Enter your mobile money number, e.g. 024 123 4567.');
+      return;
+    }
+    try {
+      localStorage.setItem('wifiMomoNumber', msisdn.trim());
+    } catch {
+      /* private mode */
+    }
     setLoading(true);
     try {
       const data = await publicFetch('/api/public/hotspot/checkout', {
@@ -91,6 +108,7 @@ export function HotspotBuyPage() {
         body: JSON.stringify({
           packageId,
           portalSlug: getPortalSlugFromLocation() || undefined,
+          customerMsisdn: digits,
           customerName: undefined,
         }),
       });
@@ -245,6 +263,21 @@ export function HotspotBuyPage() {
                 })
               )}
             </fieldset>
+            <label className="block text-sm font-medium text-slate-300">
+              Mobile money number
+              <input
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                value={msisdn}
+                onChange={(e) => setMsisdn(e.target.value)}
+                placeholder="024 123 4567"
+                className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 font-mono text-white outline-none focus:border-emerald-500"
+              />
+              <span className="mt-1 block text-xs font-normal text-slate-500">
+                The number you will pay with. Hubtel sends the payment prompt to it.
+              </span>
+            </label>
             {error && (
               <p className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                 {error}

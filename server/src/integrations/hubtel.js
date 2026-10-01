@@ -160,6 +160,22 @@ export function hubtelLiveReady(hubtel = config.hubtel) {
  * Build SDK purchase + config for the portal (modal / iframe).
  * basicAuth is required by Hubtel's External checkout SDK on the client.
  */
+/** Hubtel rejects descriptions with symbols such as & * ! % @ (error 4000 "Validation errors"). */
+export function hubtelSafeDescription(text) {
+  const s = String(text || '')
+    .normalize('NFKD')
+    .replace(/[\u2013\u2014:|/]+/g, ' - ')
+    .replace(/[^A-Za-z0-9 .,()\-]+/g, ' ')
+    .replace(/\s*-\s*(-\s*)+/g, ' - ')
+    .replace(/\s+/g, ' ')
+    .replace(/\(\s+/g, '(')
+    .replace(/\s+\)/g, ')')
+    .replace(/\(\)/g, '')
+    .slice(0, 100)
+    .replace(/^[\s\-.,]+|[\s\-.,]+$/g, '');
+  return s || 'Payment';
+}
+
 export function buildHubtelCheckoutSession({
   amountGhs,
   description,
@@ -213,7 +229,15 @@ export function buildHubtelCheckoutSession({
   }
   console.log('[hubtel.checkout] clientReference=', clientReference, 'callbackUrl=', callbackUrl);
 
-  const purchaseDescription = String(description || 'Payment').slice(0, 160);
+  if (!normalizeGhanaMsisdn(customerMsisdn)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Enter a valid mobile money number (e.g. 024 123 4567).',
+    };
+  }
+
+  const purchaseDescription = hubtelSafeDescription(description);
 
   return {
     ok: true,
