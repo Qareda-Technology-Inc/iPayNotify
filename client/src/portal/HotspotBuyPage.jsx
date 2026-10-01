@@ -49,6 +49,10 @@ export function HotspotBuyPage() {
   const siteReady = Boolean(ctx?.resolved && ctx.router?.id);
   const slug = getPortalSlugFromLocation();
   const brandName = String(ctx?.branding?.displayName || '').trim() || 'Wi‑Fi';
+  const footerText = String(ctx?.branding?.portalFooter || '').trim();
+  const supportPhone = String(ctx?.branding?.portalSupportPhone || '').trim();
+  const returnPath = (ref) =>
+    `/portal/pay/return?ref=${encodeURIComponent(ref)}&flow=hotspot${slug ? `&r=${encodeURIComponent(slug)}` : ''}`;
 
   useEffect(() => {
     if (!siteReady) {
@@ -122,7 +126,7 @@ export function HotspotBuyPage() {
           payload={draftCheckout}
           onClose={() => setDraftCheckout(null)}
           onComplete={(ref) =>
-            navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`)
+            navigate(returnPath(ref))
           }
         />
         <HubtelCheckout
@@ -158,7 +162,7 @@ export function HotspotBuyPage() {
                 method: 'POST',
                 body: JSON.stringify({ clientReference: ref, event: 'success', payload }),
               }).catch(() => {});
-              navigate(`/portal/pay/return?ref=${encodeURIComponent(ref)}`);
+              navigate(returnPath(ref));
             }
           }}
         />
@@ -258,6 +262,21 @@ export function HotspotBuyPage() {
             </p>
           </form>
         )}
+
+        <footer className="mt-10 space-y-1 border-t border-slate-800/80 pt-4 text-center text-xs text-slate-500">
+          {footerText ? <p>{footerText}</p> : null}
+          {supportPhone ? (
+            <p>
+              Need help?{' '}
+              <a href={`tel:${supportPhone.replace(/[^\d+]/g, '')}`} className="text-emerald-400 hover:text-emerald-300">
+                {supportPhone}
+              </a>
+            </p>
+          ) : null}
+          <p>
+            © {new Date().getFullYear()} {brandName}
+          </p>
+        </footer>
       </div>
     </div>
   );

@@ -35,6 +35,14 @@ const routerSchema = new mongoose.Schema(
     smsSenderId: { type: String, trim: true, default: '' },
     /** Shared secret the hotspot on-login script sends back to /api/public/hotspot/login-event. */
     hotspotHookKey: { type: String, select: false, sparse: true, unique: true },
+    /** Last successful login-page push (Templates & designs). */
+    captivePortal: {
+      hotspotServer: { type: String, default: '' },
+      profile: { type: String, default: '' },
+      htmlDirectory: { type: String, default: '' },
+      file: { type: String, default: '' },
+      pushedAt: { type: Date, default: null },
+    },
   },
   { timestamps: true }
 );

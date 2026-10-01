@@ -35,11 +35,42 @@ export function captiveBuyUrl(portalSlug) {
   return `${base}/portal/hotspot?r=${encodeURIComponent(slug)}`;
 }
 
-function htmlDirectory(profile) {
-  const raw = String(profile['html-directory'] || profile.htmlDirectory || 'hotspot').trim();
-  const dir = raw.replace(/^\/+|\/+$/g, '') || 'hotspot';
-  if (!/^[A-Za-z0-9_./-]+$/.test(dir)) return 'hotspot';
-  return dir;
+/** The profile's html-directory as set on the router, or '' when unset/unusable. */
+export function configuredHtmlDirectory(profile) {
+  const dir = String(profile['html-directory'] || profile.htmlDirectory || '')
+    .trim()
+    .replace(/^\/+|\/+$/g, '');
+  return dir && /^[A-Za-z0-9_./-]+$/.test(dir) && !dir.includes('..') ? dir : '';
+}
+
+/** Does a file/folder exist on the router? Returns { exists, size }. */
+async function statFile(api, name) {
+  if (typeof api.execCli === 'function') {
+    const out = String(
+      await api.execCli(
+        `:local f [/file find name=${cliEscapeValue(name)}]; :if ([:len $f] = 0) do={ :put "missing" } else={ :put ("size=" . [/file get $f size]) }`
+      )
+    ).trim();
+    if (/missing/.test(out) || !/size=/.test(out)) return { exists: false, size: null };
+    const n = Number(out.match(/size=([\d.]+)/)?.[1]);
+    return { exists: true, size: Number.isFinite(n) ? n : null };
+  }
+  const rows = normalizePrintRows(await api.write(['/file/print', `?name=${name}`]));
+  const row = rows.find((r) => String(r.name || '') === name);
+  return row ? { exists: true, size: Number(row.size) || null } : { exists: false, size: null };
+}
+
+async function setProfileValue(api, profile, key, value, context) {
+  const name = String(profile.name || '').trim() || 'default';
+  if (typeof api.execCli === 'function') {
+    await runCli(
+      api,
+      `/ip hotspot profile set [find name=${cliEscapeValue(name)}] ${key}=${cliEscapeValue(value)}`,
+      context
+    );
+  } else {
+    await api.write(['/ip/hotspot/profile/set', `=.id=${profile['.id']}`, `=${key}=${value}`]);
+  }
 }
 
 function withPap(loginBy) {
@@ -113,12 +144,17 @@ export async function pushCaptivePortalToRouter(routerId, organizationId, { hots
       throw fail(`Hotspot profile "${profileName}" used by server "${serverName}" was not found.`, 502);
     }
     const profiles = [profile];
-    const dir = htmlDirectory(profile);
+    const configuredDir = configuredHtmlDirectory(profile);
+    const dir =
+      configuredDir || ((await statFile(api, 'flash/hotspot')).exists ? 'flash/hotspot' : 'hotspot');
+    if (!configuredDir) {
+      await setProfileValue(api, profile, 'html-directory', dir, 'Set hotspot html directory');
+    }
     const sharedWith = servers
       .filter((s) => String(s.name || '').trim() !== serverName)
       .filter((s) => {
         const p = allProfiles.find((x) => String(x.name || '').trim() === (String(s.profile || '').trim() || 'default'));
-        return p && htmlDirectory(p) === dir;
+        return p && p !== profile && (configuredHtmlDirectory(p) || '') === configuredDir && configuredDir;
       })
       .map((s) => String(s.name || '').trim());
 
@@ -142,28 +178,43 @@ export async function pushCaptivePortalToRouter(routerId, organizationId, { hots
       }
       await api.write(['/tool/fetch', `=url=${url}`, `=dst-path=${dst}`, '=mode=https']);
     }
+    const written = await statFile(api, dst);
+    if (!written.exists) {
+      throw fail(
+        `The router did not save ${dst}. Check that it can open ${new URL(url).host} over HTTPS (DNS and internet on the router).`,
+        502
+      );
+    }
     const files = [dst];
 
     const updated = [];
-    for (const profile of profiles) {
-      const id = profile['.id'];
-      const name = String(profile.name || '').trim() || 'default';
-      const next = withPap(profile['login-by'] || profile.loginBy);
-      if (id && next !== String(profile['login-by'] || profile.loginBy || '')) {
-        if (typeof api.execCli === 'function') {
-          await runCli(
-            api,
-            `/ip hotspot profile set [find name=${cliEscapeValue(name)}] login-by=${cliEscapeValue(next)}`,
-            'Enable voucher login'
-          );
-        } else {
-          await api.write(['/ip/hotspot/profile/set', `=.id=${id}`, `=login-by=${next}`]);
-        }
+    for (const p of profiles) {
+      const name = String(p.name || '').trim() || 'default';
+      const next = withPap(p['login-by'] || p.loginBy);
+      if (next !== String(p['login-by'] || p.loginBy || '')) {
+        await setProfileValue(api, p, 'login-by', next, 'Enable ticket login');
       }
-      updated.push({ name, htmlDirectory: htmlDirectory(profile), loginBy: next });
+      updated.push({ name, htmlDirectory: dir, loginBy: next });
     }
-    return { files, profiles: updated, sharedWith };
+    return {
+      files,
+      profiles: updated,
+      sharedWith,
+      htmlDirectory: dir,
+      htmlDirectorySet: !configuredDir,
+      profileName,
+      fileSize: written.size,
+    };
   });
+
+  router.captivePortal = {
+    hotspotServer: serverName,
+    profile: pushed.profileName,
+    htmlDirectory: pushed.htmlDirectory,
+    file: pushed.files[0],
+    pushedAt: new Date(),
+  };
+  await router.save();
 
   let walledGarden = { ok: true };
   try {
@@ -178,6 +229,11 @@ export async function pushCaptivePortalToRouter(routerId, organizationId, { hots
     routerName: router.name || router.host,
     portalSlug: slug,
     hotspotServer: serverName,
+    htmlDirectory: pushed.htmlDirectory,
+    htmlDirectorySet: pushed.htmlDirectorySet,
+    profile: pushed.profileName,
+    fileSize: pushed.fileSize,
+    pushedAt: router.captivePortal.pushedAt,
     sharedWith: pushed.sharedWith,
     files: pushed.files,
     profiles: pushed.profiles,

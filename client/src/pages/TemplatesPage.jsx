@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../api.js';
 import { routerDisplayName } from '../utils/routerDisplayName.js';
@@ -243,6 +243,8 @@ export function TemplatesPage() {
   const [plansVersion, setPlansVersion] = useState(0);
   const [routers, setRouters] = useState([]);
   const [routerId, setRouterId] = useState('');
+  const routersRef = useRef([]);
+  routersRef.current = routers;
   const [servers, setServers] = useState([]);
   const [serverName, setServerName] = useState('');
   const [serversState, setServersState] = useState(/** @type {'idle' | 'loading' | 'error'} */ ('idle'));
@@ -286,7 +288,9 @@ export function TemplatesPage() {
         const list = Array.isArray(r?.servers) ? r.servers : [];
         setServers(list);
         const enabled = list.filter((s) => !s.disabled);
-        if (enabled.length === 1) setServerName(enabled[0].name);
+        const lastServer = routersRef.current.find((x) => x._id === routerId)?.captivePortal?.hotspotServer;
+        if (lastServer && list.some((s) => s.name === lastServer)) setServerName(lastServer);
+        else if (enabled.length === 1) setServerName(enabled[0].name);
         setServersState('idle');
       })
       .catch((e) => {
@@ -383,7 +387,11 @@ export function TemplatesPage() {
         method: 'POST',
         body: JSON.stringify({ hotspotServer: serverName }),
       });
-      const files = (result.files || []).join(', ') || 'the hotspot login page';
+      const file = result.files?.[0] || `${result.htmlDirectory}/login.html`;
+      const size = result.fileSize ? ` (${(result.fileSize / 1024).toFixed(1)} KB)` : '';
+      const dirNote = result.htmlDirectorySet
+        ? ` Profile "${result.profile}" had no html directory, so it now uses ${result.htmlDirectory}.`
+        : ` Profile "${result.profile}" uses ${result.htmlDirectory}.`;
       const shared = result.sharedWith?.length
         ? ` Servers ${result.sharedWith.join(', ')} use the same folder, so they show this page too.`
         : '';
@@ -391,7 +399,23 @@ export function TemplatesPage() {
         ? ''
         : ` Buy links may not open until the walled garden is updated (${result.walledGarden?.error || 'sync failed'}).`;
       setInfo(
-        `Pushed ${files} for hotspot server "${result.hotspotServer || serverName}" on ${result.routerName || 'the router'}.${shared}${garden}`
+        `Uploaded ${file}${size} for hotspot server "${result.hotspotServer || serverName}" on ${result.routerName || 'the router'}.${dirNote}${shared}${garden}`
+      );
+      setRouters((list) =>
+        list.map((r) =>
+          r._id === routerId
+            ? {
+                ...r,
+                captivePortal: {
+                  hotspotServer: result.hotspotServer,
+                  profile: result.profile,
+                  htmlDirectory: result.htmlDirectory,
+                  file,
+                  pushedAt: result.pushedAt,
+                },
+              }
+            : r
+        )
       );
     } catch (e2) {
       setErr(e2.message || 'Could not push the login page');
@@ -595,12 +619,24 @@ export function TemplatesPage() {
                       {s.name}
                       {s.interface ? ` · ${s.interface}` : ''}
                       {s.profile ? ` · profile ${s.profile}` : ''}
+                      {` · folder ${s.htmlDirectory || '(not set)'}`}
                       {s.disabled ? ' (disabled)' : ''}
                     </option>
                   ))}
                 </select>
               </label>
               {serversState === 'error' ? <p className="text-xs text-red-300">{serversError}</p> : null}
+              {(() => {
+                const last = routers.find((r) => r._id === routerId)?.captivePortal;
+                if (!last?.pushedAt) return null;
+                return (
+                  <p className="text-xs text-slate-400">
+                    Last pushed {new Date(last.pushedAt).toLocaleString()} to{' '}
+                    <span className="font-mono text-slate-300">{last.file || `${last.htmlDirectory}/login.html`}</span>
+                    {last.hotspotServer ? ` (server ${last.hotspotServer})` : ''}.
+                  </p>
+                );
+              })()}
               <button
                 type="button"
                 disabled={pushing || saving || !routerId || !serverName}

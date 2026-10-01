@@ -12,6 +12,8 @@ import { rosFindLit } from '../mikrotik/rosSsh.js';
 import { organizationIdForRouter } from '../db/defaultOrganizationId.js';
 import { syncHotspotExpiryScheduler } from './hotspotExpirySchedulerService.js';
 import { config } from '../config.js';
+import { normalizePrintRows } from '../mikrotik/helpers.js';
+import { configuredHtmlDirectory } from './captivePortalPushService.js';
 
 /** Per-router secret the on-login script sends home (created on first profile sync). */
 export async function ensureRouterHookKey(router) {
@@ -229,13 +231,19 @@ export async function listHotspotServersForRouter(routerId, organizationId) {
   });
   const servers = await withRouterMikrotik(router, async (api) => {
     const rows = await hs.printHotspotServers(api);
+    const profiles = normalizePrintRows(await api.write('/ip/hotspot/profile/print').catch(() => []));
     return rows
-      .map((r) => ({
-        name: String(r.name || '').trim(),
-        interface: String(r.interface || '').trim(),
-        profile: String(r.profile || '').trim(),
-        disabled: r.disabled === 'true' || r.disabled === true,
-      }))
+      .map((r) => {
+        const profile = String(r.profile || '').trim();
+        const p = profiles.find((x) => String(x.name || '').trim() === (profile || 'default'));
+        return {
+          name: String(r.name || '').trim(),
+          interface: String(r.interface || '').trim(),
+          profile,
+          htmlDirectory: p ? configuredHtmlDirectory(p) : '',
+          disabled: r.disabled === 'true' || r.disabled === true,
+        };
+      })
       .filter((s) => s.name);
   });
   return {

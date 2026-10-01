@@ -18,6 +18,9 @@ export function PayReturnPage() {
   const [error, setError] = useState('');
   const [timedOut, setTimedOut] = useState(false);
   const [checking, setChecking] = useState(false);
+  const isHotspot = params.get('flow') === 'hotspot' || status?.kind === 'voucher';
+  const homeHref = isHotspot ? hotspotHref : renewHref;
+  const [copied, setCopied] = useState(false);
 
   const pollOnce = useCallback(async () => {
     const data = await publicFetch(`/api/public/payment/${encodeURIComponent(ref)}/status`);
@@ -111,8 +114,8 @@ export function PayReturnPage() {
             >
               {checking ? 'Checking…' : 'Check again'}
             </button>
-            <Link to={renewHref} className="mt-4 block text-sm text-slate-400 hover:text-emerald-400">
-              Back to renew
+            <Link to={homeHref} className="mt-4 block text-sm text-slate-400 hover:text-emerald-400">
+              {isHotspot ? 'Back to Wi‑Fi plans' : 'Back to renew'}
             </Link>
           </>
         ) : null}
@@ -124,7 +127,7 @@ export function PayReturnPage() {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center text-red-300">
         Payment was not completed.
-        <Link to={renewHref} className="mt-6 block text-emerald-400">
+        <Link to={homeHref} className="mt-6 block text-emerald-400">
           Try again
         </Link>
       </div>
@@ -135,11 +138,22 @@ export function PayReturnPage() {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center">
         <h1 className="text-lg font-semibold text-white">Payment successful</h1>
-        <p className="mt-4 text-slate-400">Your hotspot code</p>
-        <p className="mt-2 font-mono text-2xl font-bold tracking-wider text-emerald-400">
+        <p className="mt-4 text-slate-400">Your Wi‑Fi ticket code</p>
+        <p className="mt-2 select-all font-mono text-3xl font-bold tracking-wider text-emerald-400">
           {status.voucherCode}
         </p>
-        <p className="mt-6 text-sm text-slate-500">Use this as username and password on the hotspot login.</p>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard?.writeText(status.voucherCode).then(() => setCopied(true)).catch(() => {});
+          }}
+          className="mt-3 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500"
+        >
+          {copied ? 'Copied' : 'Copy code'}
+        </button>
+        <p className="mt-6 text-sm text-slate-500">
+          Go back to the Wi‑Fi login page and enter this code to connect. Keep it until your plan runs out.
+        </p>
         <Link to={hotspotHref} className="mt-8 inline-block text-emerald-400">
           Buy another
         </Link>
@@ -167,7 +181,7 @@ export function PayReturnPage() {
   return (
     <div className="mx-auto max-w-md px-4 py-16 text-center text-slate-400">
       Status: {status.status}
-      <Link to={renewHref} className="mt-6 block text-emerald-400">
+      <Link to={homeHref} className="mt-6 block text-emerald-400">
         Home
       </Link>
     </div>

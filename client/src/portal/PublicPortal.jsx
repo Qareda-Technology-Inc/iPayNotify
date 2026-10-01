@@ -5,32 +5,49 @@ import { PayReturnPage } from './PayReturnPage.jsx';
 import { PayMockPage } from './PayMockPage.jsx';
 import { CaptiveLoginPage } from './CaptiveLoginPage.jsx';
 
+/**
+ * Two separate customer journeys:
+ * - Wi‑Fi tickets (/portal/hotspot, /portal/wifi): opened from the hotspot login page, venue-branded, no PPPoE links.
+ * - PPPoE renewal (/portal/renew): home internet customers.
+ * The payment result page serves both and picks its links from the payment kind.
+ */
 export function PublicPortal() {
   const { pathname } = useLocation();
   if (/\/login\/?$/.test(pathname)) {
     return <CaptiveLoginPage />;
   }
 
+  if (/\/portal\/(hotspot|wifi)\/?$/.test(pathname)) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+        <HotspotBuyPage />
+      </div>
+    );
+  }
+
+  if (/\/portal\/pay\//.test(pathname)) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+        <Routes>
+          <Route path="pay/return" element={<PayReturnPage />} />
+          <Route path="pay/mock" element={<PayMockPage />} />
+        </Routes>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="border-b border-slate-800 bg-slate-900/90">
-        <div className="mx-auto flex max-w-lg flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <span className="shrink-0 font-semibold text-white">QareFi</span>
-          <nav className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-400 sm:justify-end">
-            <Link to="/portal/renew" className="whitespace-nowrap hover:text-emerald-400">
-              Renew PPPoE
-            </Link>
-            <Link to="/portal/hotspot" className="whitespace-nowrap hover:text-emerald-400">
-              Buy hotspot
-            </Link>
-          </nav>
+        <div className="mx-auto flex max-w-lg items-center justify-between gap-3 px-4 py-3">
+          <span className="shrink-0 font-semibold text-white">Internet renewal</span>
+          <Link to="/portal/renew" className="whitespace-nowrap text-sm text-slate-400 hover:text-emerald-400">
+            Renew PPPoE
+          </Link>
         </div>
       </header>
       <Routes>
         <Route path="renew" element={<RenewPage />} />
-        <Route path="hotspot" element={<HotspotBuyPage />} />
-        <Route path="pay/return" element={<PayReturnPage />} />
-        <Route path="pay/mock" element={<PayMockPage />} />
         <Route
           path="*"
           element={
