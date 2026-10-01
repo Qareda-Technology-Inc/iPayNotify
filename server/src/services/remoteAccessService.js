@@ -60,9 +60,20 @@ export async function createRemoteAccessSubscription({
     throw e;
   }
 
+  for (const [label, id] of [
+    ['customer', userId],
+    ['package', packageId],
+  ]) {
+    if (id && !mongoose.isValidObjectId(String(id))) {
+      const e = new Error(`Invalid ${label} id.`);
+      e.status = 400;
+      throw e;
+    }
+  }
+
   let linkedUser = null;
   if (userId) {
-    linkedUser = await User.findOne({ _id: userId, ...orgClause(organizationId) });
+    linkedUser = await User.findOne({ _id: userId, ...orgClause(tenantOrganizationId) });
     if (!linkedUser) {
       const e = new Error('Customer not found.');
       e.status = 400;
@@ -72,7 +83,7 @@ export async function createRemoteAccessSubscription({
 
   let pkg = null;
   if (packageId) {
-    pkg = await PlanPackage.findOne({ _id: packageId, ...orgClause(organizationId) });
+    pkg = await PlanPackage.findOne({ _id: packageId, ...orgClause(tenantOrganizationId) });
     if (!pkg) {
       const e = new Error('Package not found.');
       e.status = 400;
