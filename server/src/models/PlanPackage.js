@@ -65,6 +65,8 @@ const planPackageSchema = new mongoose.Schema(
     expiredProfile: { type: String },
     description: { type: String },
     isActive: { type: Boolean, default: true },
+    /** Listed under "Plans & prices" on the hotspot login page (hotspot plans only). */
+    showOnPortal: { type: Boolean, default: true },
     /** SMS body for renewal (MoMo, admin renew, auto-renew). Placeholders: {{brand}}, {{name}}, {{package}}, {{paidUntil}}, {{secret}}, {{phone}} */
     renewalSmsBody: { type: String, trim: true, default: '' },
   },

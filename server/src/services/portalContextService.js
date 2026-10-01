@@ -131,7 +131,7 @@ export async function resolvePortalRouter(req, slugQuery) {
 /** Active hotspot plans shown on the login page, cheapest first. */
 export async function loadPortalPlans(organizationId) {
   if (!organizationId) return [];
-  return PlanPackage.find({ organizationId, kind: 'hotspot', isActive: true })
+  return PlanPackage.find({ organizationId, kind: 'hotspot', isActive: true, showOnPortal: { $ne: false } })
     .select(
       'name priceCents currency dataLimitBytes timeLimitSeconds elapsedSeconds pausedSeconds ticketDurationType usersPerTicket speedDownMbps'
     )

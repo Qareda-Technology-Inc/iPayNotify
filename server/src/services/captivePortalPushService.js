@@ -77,10 +77,13 @@ async function runCli(api, line, context) {
 }
 
 /**
- * Download the saved login page onto each hotspot profile's html directory
- * and allow HTTP PAP so a voucher code can log in.
+ * Download the saved login page into the html directory of the chosen hotspot server's profile
+ * and allow HTTP PAP on that profile so a ticket code can log in.
+ * Other servers sharing the same html directory see the same page (listed in `sharedWith`).
  */
-export async function pushCaptivePortalToRouter(routerId, organizationId) {
+export async function pushCaptivePortalToRouter(routerId, organizationId, { hotspotServer } = {}) {
+  const serverName = String(hotspotServer || '').trim();
+  if (!serverName) throw fail('Choose the hotspot server to push the login page to.');
   if (!mongoose.isValidObjectId(String(routerId))) throw fail('Invalid router id');
   const q = { _id: routerId };
   if (
@@ -100,36 +103,48 @@ export async function pushCaptivePortalToRouter(routerId, organizationId) {
   const url = captiveLoginFetchUrl(slug);
 
   const pushed = await withRouterMikrotik(router, async (api) => {
-    const profiles = normalizePrintRows(await api.write('/ip/hotspot/profile/print'));
-    if (!profiles.length) {
-      throw fail('This router has no hotspot profile. Enable the hotspot package first.', 502);
+    const servers = normalizePrintRows(await api.write('/ip/hotspot/print'));
+    const server = servers.find((s) => String(s.name || '').trim() === serverName);
+    if (!server) {
+      throw fail(`Hotspot server "${serverName}" was not found on this router.`, 404);
     }
+    const allProfiles = normalizePrintRows(await api.write('/ip/hotspot/profile/print'));
+    const profileName = String(server.profile || '').trim() || 'default';
+    const profile = allProfiles.find((p) => String(p.name || '').trim() === profileName);
+    if (!profile) {
+      throw fail(`Hotspot profile "${profileName}" used by server "${serverName}" was not found.`, 502);
+    }
+    const profiles = [profile];
+    const dir = htmlDirectory(profile);
+    const sharedWith = servers
+      .filter((s) => String(s.name || '').trim() !== serverName)
+      .filter((s) => {
+        const p = allProfiles.find((x) => String(x.name || '').trim() === (String(s.profile || '').trim() || 'default'));
+        return p && htmlDirectory(p) === dir;
+      })
+      .map((s) => String(s.name || '').trim());
 
-    const dirs = [...new Set(profiles.map(htmlDirectory))];
-    const files = [];
-    for (const dir of dirs) {
-      const dst = `${dir}/login.html`;
-      if (typeof api.execCli === 'function') {
-        await runCli(
-          api,
-          `:do { /file remove [find name=${cliEscapeValue(dst)}] } on-error={}`,
-          'Remove old login page'
-        );
-        await runCli(
-          api,
-          `/tool fetch url=${cliEscapeValue(url)} dst-path=${cliEscapeValue(dst)} mode=https`,
-          'Download login page'
-        );
-      } else {
-        const existing = normalizePrintRows(await api.write('/file/print'));
-        for (const file of existing) {
-          if (String(file.name || '') !== dst || !file['.id']) continue;
-          await api.write(['/file/remove', `=.id=${file['.id']}`]);
-        }
-        await api.write(['/tool/fetch', `=url=${url}`, `=dst-path=${dst}`, '=mode=https']);
+    const dst = `${dir}/login.html`;
+    if (typeof api.execCli === 'function') {
+      await runCli(
+        api,
+        `:do { /file remove [find name=${cliEscapeValue(dst)}] } on-error={}`,
+        'Remove old login page'
+      );
+      await runCli(
+        api,
+        `/tool fetch url=${cliEscapeValue(url)} dst-path=${cliEscapeValue(dst)} mode=https`,
+        'Download login page'
+      );
+    } else {
+      const existing = normalizePrintRows(await api.write('/file/print'));
+      for (const file of existing) {
+        if (String(file.name || '') !== dst || !file['.id']) continue;
+        await api.write(['/file/remove', `=.id=${file['.id']}`]);
       }
-      files.push(dst);
+      await api.write(['/tool/fetch', `=url=${url}`, `=dst-path=${dst}`, '=mode=https']);
     }
+    const files = [dst];
 
     const updated = [];
     for (const profile of profiles) {
@@ -149,7 +164,7 @@ export async function pushCaptivePortalToRouter(routerId, organizationId) {
       }
       updated.push({ name, htmlDirectory: htmlDirectory(profile), loginBy: next });
     }
-    return { files, profiles: updated };
+    return { files, profiles: updated, sharedWith };
   });
 
   let walledGarden = { ok: true };
@@ -164,6 +179,8 @@ export async function pushCaptivePortalToRouter(routerId, organizationId) {
     routerId: String(router._id),
     routerName: router.name || router.host,
     portalSlug: slug,
+    hotspotServer: serverName,
+    sharedWith: pushed.sharedWith,
     files: pushed.files,
     profiles: pushed.profiles,
     walledGarden,

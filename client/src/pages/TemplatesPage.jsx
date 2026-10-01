@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { apiFetch } from '../api.js';
 import { routerDisplayName } from '../utils/routerDisplayName.js';
 import { renderTicketSvg } from '../utils/exportVouchersPdf.js';
@@ -92,6 +93,144 @@ function TicketPreviewCard({ design, svg, selected, onSelect }) {
   );
 }
 
+function planDraft(p) {
+  return {
+    name: p.name || '',
+    price: p.priceCents != null ? String(Number(p.priceCents) / 100) : '0',
+    showOnPortal: p.showOnPortal !== false,
+  };
+}
+
+function PlansEditor({ onChanged }) {
+  const [plans, setPlans] = useState([]);
+  const [drafts, setDrafts] = useState({});
+  const [state, setState] = useState(/** @type {'loading' | 'idle' | 'error'} */ ('loading'));
+  const [savingId, setSavingId] = useState('');
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    apiFetch('/api/packages?kind=hotspot')
+      .then((list) => {
+        const rows = (Array.isArray(list) ? list : []).sort(
+          (a, b) => Number(a.priceCents || 0) - Number(b.priceCents || 0) || String(a.name).localeCompare(String(b.name))
+        );
+        setPlans(rows);
+        setDrafts(Object.fromEntries(rows.map((p) => [p._id, planDraft(p)])));
+        setState('idle');
+      })
+      .catch((e) => {
+        setMsg(e.message || 'Could not load plans');
+        setState('error');
+      });
+  }, []);
+
+  function setDraft(id, key, value) {
+    setDrafts((d) => ({ ...d, [id]: { ...d[id], [key]: value } }));
+  }
+
+  function isDirty(p) {
+    const d = drafts[p._id];
+    const base = planDraft(p);
+    return d && (d.name.trim() !== base.name || Number(d.price) !== Number(base.price) || d.showOnPortal !== base.showOnPortal);
+  }
+
+  async function save(p, overrides = {}) {
+    const d = { ...drafts[p._id], ...overrides };
+    const name = d.name.trim();
+    const price = Number(d.price);
+    if (!name) return setMsg('Plan name cannot be empty.');
+    if (!Number.isFinite(price) || price < 0) return setMsg('Enter a valid price.');
+    setSavingId(p._id);
+    setMsg('');
+    try {
+      const updated = await apiFetch(`/api/packages/${p._id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name, priceCents: Math.round(price * 100), showOnPortal: d.showOnPortal }),
+      });
+      setPlans((list) => list.map((x) => (x._id === p._id ? { ...x, ...updated } : x)));
+      setDrafts((all) => ({ ...all, [p._id]: planDraft(updated) }));
+      onChanged();
+    } catch (e) {
+      setMsg(e.message || 'Could not save plan');
+    } finally {
+      setSavingId('');
+    }
+  }
+
+  return (
+    <section className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-white">Plans &amp; prices</h3>
+        <Link to="/finance/packages" className="text-xs text-indigo-300 hover:text-indigo-200">
+          All plan settings
+        </Link>
+      </div>
+      <p className="text-xs text-slate-500">
+        These are your real plans — a new price is what customers pay when buying. Untick to hide a plan from the login
+        page only.
+      </p>
+      {state === 'loading' ? <p className="text-xs text-slate-500">Loading plans…</p> : null}
+      {state === 'idle' && plans.length === 0 ? (
+        <p className="text-xs text-slate-400">
+          No hotspot plans yet.{' '}
+          <Link to="/finance/packages" className="text-indigo-300 hover:text-indigo-200">
+            Create one
+          </Link>
+          .
+        </p>
+      ) : null}
+      <ul className="space-y-2">
+        {plans.map((p) => {
+          const d = drafts[p._id] || planDraft(p);
+          const dirty = isDirty(p);
+          return (
+            <li key={p._id} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                title="Show on login page"
+                checked={d.showOnPortal}
+                disabled={savingId === p._id}
+                onChange={(e) => {
+                  setDraft(p._id, 'showOnPortal', e.target.checked);
+                  if (!dirty) save(p, { showOnPortal: e.target.checked });
+                }}
+                className="rounded border-slate-600"
+              />
+              <input
+                value={d.name}
+                onChange={(e) => setDraft(p._id, 'name', e.target.value)}
+                className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-white outline-none focus:ring-2 focus:ring-emerald-500/40"
+                aria-label="Plan name"
+              />
+              <div className="flex w-24 items-center rounded-lg border border-slate-700 bg-slate-950 focus-within:ring-2 focus-within:ring-emerald-500/40">
+                <span className="pl-2 text-[11px] text-slate-500">{p.currency || 'GHS'}</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={d.price}
+                  onChange={(e) => setDraft(p._id, 'price', e.target.value)}
+                  className="w-full min-w-0 bg-transparent px-1.5 py-1.5 text-sm text-white outline-none"
+                  aria-label="Price"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={!dirty || savingId === p._id}
+                onClick={() => save(p)}
+                className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-30"
+              >
+                {savingId === p._id ? '…' : 'Save'}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {msg ? <p className="text-xs text-red-300">{msg}</p> : null}
+    </section>
+  );
+}
+
 export function TemplatesPage() {
   const [org, setOrg] = useState(null);
   const [tab, setTab] = useState(/** @type {'login' | 'tickets'} */ ('login'));
@@ -101,8 +240,13 @@ export function TemplatesPage() {
   const [previews, setPreviews] = useState([]);
   const [samplePlans, setSamplePlans] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [plansVersion, setPlansVersion] = useState(0);
   const [routers, setRouters] = useState([]);
   const [routerId, setRouterId] = useState('');
+  const [servers, setServers] = useState([]);
+  const [serverName, setServerName] = useState('');
+  const [serversState, setServersState] = useState(/** @type {'idle' | 'loading' | 'error'} */ ('idle'));
+  const [serversError, setServersError] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [pushing, setPushing] = useState(false);
@@ -125,6 +269,35 @@ export function TemplatesPage() {
       .catch((e) => setErr(e.message || 'Could not load organisation'))
       .finally(() => setLoading(false));
   }, [load]);
+
+  useEffect(() => {
+    setServers([]);
+    setServerName('');
+    setServersError('');
+    if (!routerId) {
+      setServersState('idle');
+      return undefined;
+    }
+    let cancelled = false;
+    setServersState('loading');
+    apiFetch(`/api/hotspot/routers/${routerId}/servers`)
+      .then((r) => {
+        if (cancelled) return;
+        const list = Array.isArray(r?.servers) ? r.servers : [];
+        setServers(list);
+        const enabled = list.filter((s) => !s.disabled);
+        if (enabled.length === 1) setServerName(enabled[0].name);
+        setServersState('idle');
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setServersError(e.message || 'Could not read hotspot servers from the router');
+        setServersState('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [routerId]);
 
   const previewBody = useMemo(
     () => ({
@@ -152,7 +325,7 @@ export function TemplatesPage() {
         .finally(() => setPreviewLoading(false));
     }, 450);
     return () => clearTimeout(t);
-  }, [previewBody, loading, org?.platformScope]);
+  }, [previewBody, plansVersion, loading, org?.platformScope]);
 
   const brandName = String(org?.billing?.merchantDisplayName || org?.name || 'Wi-Fi').trim();
   const ticketTitle = settings.voucherTitle.trim() || 'Wi-Fi Access';
@@ -197,6 +370,10 @@ export function TemplatesPage() {
       setErr('Select a router first.');
       return;
     }
+    if (!serverName) {
+      setErr('Select the hotspot server to push to.');
+      return;
+    }
     setPushing(true);
     setErr('');
     setInfo('');
@@ -204,13 +381,18 @@ export function TemplatesPage() {
       await saveBilling();
       const result = await apiFetch(`/api/hotspot/routers/${routerId}/push-captive-portal`, {
         method: 'POST',
-        body: '{}',
+        body: JSON.stringify({ hotspotServer: serverName }),
       });
       const files = (result.files || []).join(', ') || 'the hotspot login page';
+      const shared = result.sharedWith?.length
+        ? ` Servers ${result.sharedWith.join(', ')} use the same folder, so they show this page too.`
+        : '';
       const garden = result.walledGarden?.ok
         ? ''
         : ` Buy links may not open until the walled garden is updated (${result.walledGarden?.error || 'sync failed'}).`;
-      setInfo(`Pushed ${files} to ${result.routerName || 'the router'}.${garden}`);
+      setInfo(
+        `Pushed ${files} for hotspot server "${result.hotspotServer || serverName}" on ${result.routerName || 'the router'}.${shared}${garden}`
+      );
     } catch (e2) {
       setErr(e2.message || 'Could not push the login page');
     } finally {
@@ -335,7 +517,7 @@ export function TemplatesPage() {
             </section>
 
             <section className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
-              <h3 className="text-sm font-semibold text-white">Plans &amp; footer</h3>
+              <h3 className="text-sm font-semibold text-white">Plan list &amp; footer</h3>
               <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-300">
                 <input
                   type="checkbox"
@@ -373,24 +555,56 @@ export function TemplatesPage() {
               <p className="text-xs text-slate-500">The footer always ends with “© year {brandName}”.</p>
             </section>
 
+            {settings.portalShowPlans ? <PlansEditor onChanged={() => setPlansVersion((v) => v + 1)} /> : null}
+
             <section className="space-y-3 rounded-2xl border border-emerald-700/40 bg-emerald-950/20 p-4">
               <h3 className="text-sm font-semibold text-white">Push to router</h3>
               <p className="text-xs text-slate-400">
-                Saves, then the router downloads the page as its hotspot <span className="font-mono">login.html</span>.
-                Plans and prices are copied at push time — push again after changing packages.
+                Pick the router and the hotspot server guests connect to. We save your changes, then the router downloads
+                the page as <span className="font-mono">login.html</span> into that server&apos;s profile folder. Plans and
+                prices are copied at push time — push again after changing packages.
               </p>
-              <select value={routerId} onChange={(e) => setRouterId(e.target.value)} className={fieldClass}>
-                {routers.length === 0 ? <option value="">No routers yet</option> : null}
-                {routers.map((r) => (
-                  <option key={r._id} value={r._id}>
-                    {routerDisplayName(r) || r.host}
-                    {r.portalSlug ? '' : ' (no portal slug)'}
+              <label className="block text-xs text-slate-400">
+                Router
+                <select value={routerId} onChange={(e) => setRouterId(e.target.value)} className={fieldClass}>
+                  {routers.length === 0 ? <option value="">No routers yet</option> : null}
+                  {routers.map((r) => (
+                    <option key={r._id} value={r._id}>
+                      {routerDisplayName(r) || r.host}
+                      {r.portalSlug ? '' : ' (no portal slug)'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs text-slate-400">
+                Hotspot server
+                <select
+                  value={serverName}
+                  onChange={(e) => setServerName(e.target.value)}
+                  disabled={!routerId || serversState !== 'idle' || servers.length === 0}
+                  className={`${fieldClass} disabled:opacity-60`}
+                >
+                  <option value="">
+                    {serversState === 'loading'
+                      ? 'Reading servers from router…'
+                      : servers.length === 0
+                        ? 'No hotspot servers found'
+                        : 'Choose a hotspot server'}
                   </option>
-                ))}
-              </select>
+                  {servers.map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.name}
+                      {s.interface ? ` · ${s.interface}` : ''}
+                      {s.profile ? ` · profile ${s.profile}` : ''}
+                      {s.disabled ? ' (disabled)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {serversState === 'error' ? <p className="text-xs text-red-300">{serversError}</p> : null}
               <button
                 type="button"
-                disabled={pushing || saving || !routerId}
+                disabled={pushing || saving || !routerId || !serverName}
                 onClick={onPush}
                 className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
               >

@@ -1,6 +1,6 @@
 import express from 'express';
 import mongoose from 'mongoose';
-import { Organization, OrganizationAuditLog, Router as MikrotikRouter } from '../models/index.js';
+import { Organization, OrganizationAuditLog, PlanPackage, Router as MikrotikRouter } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { config } from '../config.js';
 import { sanitizeBillingForClient } from '../services/orgBillingService.js';
@@ -241,7 +241,10 @@ organizationRouter.post(
     let samplePlans = false;
     if (showPlans) {
       plans = org ? await loadPortalPlans(org._id) : [];
-      if (!plans.length) {
+      const hasAnyPlan =
+        plans.length > 0 ||
+        (org && (await PlanPackage.exists({ organizationId: org._id, kind: 'hotspot', isActive: true })));
+      if (!hasAnyPlan) {
         plans = SAMPLE_PLANS;
         samplePlans = true;
       }

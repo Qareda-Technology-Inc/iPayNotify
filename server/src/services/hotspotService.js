@@ -232,6 +232,8 @@ export async function listHotspotServersForRouter(routerId, organizationId) {
     return rows
       .map((r) => ({
         name: String(r.name || '').trim(),
+        interface: String(r.interface || '').trim(),
+        profile: String(r.profile || '').trim(),
         disabled: r.disabled === 'true' || r.disabled === true,
       }))
       .filter((s) => s.name);

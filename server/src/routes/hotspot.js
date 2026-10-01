@@ -44,7 +44,11 @@ hotspotRouter.post(
   '/routers/:id/push-captive-portal',
   requireRoles('super_admin', 'org_admin', 'org_staff'),
   asyncHandler(async (req, res) => {
-    res.json(await pushCaptivePortalToRouter(req.params.id, req.organizationId));
+    res.json(
+      await pushCaptivePortalToRouter(req.params.id, req.organizationId, {
+        hotspotServer: req.body?.hotspotServer,
+      })
+    );
   })
 );
 
