@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../api.js';
 import { presetMessages, useMessage } from '../../messages/index.js';
 import { money } from './common.js';
@@ -50,6 +50,7 @@ export function TicketCollectionsPage() {
   const [returnQty, setReturnQty] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const collectRef = useRef(null);
 
   const loadSellers = useCallback(async (site) => {
     setSellersLoading(true);
@@ -115,6 +116,26 @@ export function TicketCollectionsPage() {
     return rows;
   }, [sellers, search]);
   const hiddenSettled = sellers.length - visibleSellers.length;
+  const pickerSellers = useMemo(
+    () =>
+      [...sellers].sort(
+        (a, b) =>
+          Number(b.balanceCents > 0) - Number(a.balanceCents > 0) ||
+          a.sellerName.localeCompare(b.sellerName)
+      ),
+    [sellers]
+  );
+
+  useEffect(() => {
+    if (sellerKey && sellers.some((s) => s.sellerKey === sellerKey)) return;
+    const top = sellers.find((s) => s.balanceCents > 0);
+    setSellerKey(top ? top.sellerKey : '');
+  }, [sellers, sellerKey]);
+
+  function chooseSeller(key) {
+    setSellerKey(key);
+    collectRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   const openIssues = useMemo(
     () => issues.filter((i) => i.balanceCents !== 0 || i.holdingQty > 0 || i.maxCollectCents > 0),
@@ -198,91 +219,30 @@ export function TicketCollectionsPage() {
       <div>
         <h1 className="text-xl font-semibold text-white">Cash collections</h1>
         <p className="mt-1 text-sm text-slate-400">
-          Pick a seller, enter what they handed over. It is applied to their oldest issues first. Sellers with hotspot codes
-          owe for each code a customer has used; they can also pay ahead for codes they still hold.
+          Choose the seller who is paying and enter the cash they handed over. It clears their oldest tickets first. Sellers
+          with hotspot codes owe for each code a customer has used, and can also pay ahead for codes they still hold.
         </p>
       </div>
       {err && <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{err}</p>}
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+      <section ref={collectRef} className="space-y-4 rounded-2xl border border-amber-500/30 bg-slate-900/40 p-5">
         <div className="flex flex-wrap items-end gap-3">
-          <label className="text-sm text-slate-300">
-            Site
-            <select value={siteId} onChange={(e) => setSiteId(e.target.value)} className={inputCls}>
-              <option value="">All sites</option>
-              {sites.map((s) => (
-                <option key={s._id} value={s._id}>
-                  {s.name}
+          <h2 className="w-full text-lg font-medium text-white">Collect money</h2>
+          <label className="min-w-[240px] flex-1 text-sm text-slate-300">
+            Seller
+            <select value={sellerKey} onChange={(e) => setSellerKey(e.target.value)} className={inputCls}>
+              <option value="">{sellersLoading ? 'Loading sellers…' : sellers.length ? 'Choose the seller…' : 'No tickets issued yet'}</option>
+              {pickerSellers.map((s) => (
+                <option key={s.sellerKey} value={s.sellerKey}>
+                  {s.sellerName} · {s.siteName || 'Site'}
+                  {s.balanceCents > 0 ? ` · owes ${money(s.balanceCents)}` : s.balanceCents < 0 ? ' · paid ahead' : ' · settled'}
                 </option>
               ))}
             </select>
           </label>
-          <label className="min-w-[200px] flex-1 text-sm text-slate-300">
-            Find seller
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Name, site or phone"
-              className={inputCls}
-            />
-          </label>
         </div>
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm text-slate-300">
-            <thead>
-              <tr className="border-b border-slate-800 text-xs text-slate-500">
-                <th className="py-2 pr-3 font-medium">Seller</th>
-                <th className="py-2 pr-3 font-medium">Site</th>
-                <th className="py-2 pr-3 text-right font-medium">Owes</th>
-                <th className="py-2 pr-3 text-right font-medium">Holding</th>
-                <th className="py-2 pr-3 text-right font-medium">Paid ahead</th>
-                <th className="py-2 text-right font-medium">Owing for</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/80">
-              {visibleSellers.map((s) => (
-                <tr
-                  key={s.sellerKey}
-                  onClick={() => setSellerKey(s.sellerKey)}
-                  className={`cursor-pointer hover:bg-slate-800/40 ${s.sellerKey === sellerKey ? 'bg-emerald-500/10' : ''}`}
-                >
-                  <td className="py-2 pr-3 text-white">
-                    {s.sellerName}
-                    {s.sellerPhone ? <span className="ml-2 text-xs text-slate-500">{s.sellerPhone}</span> : null}
-                  </td>
-                  <td className="py-2 pr-3">{s.siteName || '—'}</td>
-                  <td className={`py-2 pr-3 text-right ${s.balanceCents > 0 ? 'font-medium text-amber-300' : 'text-slate-500'}`}>
-                    {money(Math.max(0, s.balanceCents))}
-                  </td>
-                  <td className="py-2 pr-3 text-right">{s.holdingQty}</td>
-                  <td className="py-2 pr-3 text-right text-emerald-300">
-                    {s.balanceCents < 0 ? money(-s.balanceCents) : ''}
-                  </td>
-                  <td className={`py-2 text-right ${owingTone(s.daysOwing)}`}>
-                    {s.balanceCents > 0 ? `${s.daysOwing} day${s.daysOwing === 1 ? '' : 's'}` : '—'}
-                  </td>
-                </tr>
-              ))}
-              {!sellersLoading && visibleSellers.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-4 text-slate-500">
-                    {sellers.length ? 'Everyone is settled.' : 'No tickets issued yet.'}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-          {sellersLoading ? <p className="mt-2 text-sm text-slate-500">Loading sellers…</p> : null}
-          {!search && hiddenSettled > 0 ? (
-            <p className="mt-2 text-xs text-slate-500">
-              {hiddenSettled} settled seller{hiddenSettled === 1 ? '' : 's'} hidden. Search to find them.
-            </p>
-          ) : null}
-        </div>
-      </section>
-
       {seller ? (
-        <section className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <>
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-lg text-white">
               {seller.sellerName} <span className="text-sm text-slate-500">· {seller.siteName}</span>
@@ -486,10 +446,107 @@ export function TicketCollectionsPage() {
               </tbody>
             </table>
           </div>
-        </section>
+        </>
       ) : (
-        <p className="text-sm text-slate-500">Select a seller above to collect cash or record returns.</p>
+        <p className="text-sm text-slate-500">
+          {sellers.length
+            ? 'Choose the seller who is paying. You will see what they owe, then enter the amount.'
+            : 'Issue tickets to a seller first; they will appear here to collect from.'}
+        </p>
       )}
+      </section>
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <h2 className="mb-3 text-lg text-white">Who owes</h2>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-sm text-slate-300">
+            Site
+            <select value={siteId} onChange={(e) => setSiteId(e.target.value)} className={inputCls}>
+              <option value="">All sites</option>
+              {sites.map((s) => (
+                <option key={s._id} value={s._id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-[200px] flex-1 text-sm text-slate-300">
+            Find seller
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Name, site or phone"
+              className={inputCls}
+            />
+          </label>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[640px] text-left text-sm text-slate-300">
+            <thead>
+              <tr className="border-b border-slate-800 text-xs text-slate-500">
+                <th className="py-2 pr-3 font-medium">Seller</th>
+                <th className="py-2 pr-3 font-medium">Site</th>
+                <th className="py-2 pr-3 text-right font-medium">Owes</th>
+                <th className="py-2 pr-3 text-right font-medium">Holding</th>
+                <th className="py-2 pr-3 text-right font-medium">Paid ahead</th>
+                <th className="py-2 pr-3 text-right font-medium">Owing for</th>
+                <th className="py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/80">
+              {visibleSellers.map((s) => (
+                <tr
+                  key={s.sellerKey}
+                  onClick={() => chooseSeller(s.sellerKey)}
+                  className={`cursor-pointer hover:bg-slate-800/40 ${s.sellerKey === sellerKey ? 'bg-emerald-500/10' : ''}`}
+                >
+                  <td className="py-2 pr-3 text-white">
+                    {s.sellerName}
+                    {s.sellerPhone ? <span className="ml-2 text-xs text-slate-500">{s.sellerPhone}</span> : null}
+                  </td>
+                  <td className="py-2 pr-3">{s.siteName || '—'}</td>
+                  <td className={`py-2 pr-3 text-right ${s.balanceCents > 0 ? 'font-medium text-amber-300' : 'text-slate-500'}`}>
+                    {money(Math.max(0, s.balanceCents))}
+                  </td>
+                  <td className="py-2 pr-3 text-right">{s.holdingQty}</td>
+                  <td className="py-2 pr-3 text-right text-emerald-300">
+                    {s.balanceCents < 0 ? money(-s.balanceCents) : ''}
+                  </td>
+                  <td className={`py-2 pr-3 text-right ${owingTone(s.daysOwing)}`}>
+                    {s.balanceCents > 0 ? `${s.daysOwing} day${s.daysOwing === 1 ? '' : 's'}` : '—'}
+                  </td>
+                  <td className="py-2 text-right">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        chooseSeller(s.sellerKey);
+                      }}
+                      className="rounded bg-amber-600 px-2.5 py-1 text-xs text-white hover:bg-amber-500"
+                    >
+                      Collect
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!sellersLoading && visibleSellers.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-4 text-slate-500">
+                    {sellers.length ? 'Everyone is settled.' : 'No tickets issued yet.'}
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+          {sellersLoading ? <p className="mt-2 text-sm text-slate-500">Loading sellers…</p> : null}
+          {!search && hiddenSettled > 0 ? (
+            <p className="mt-2 text-xs text-slate-500">
+              {hiddenSettled} settled seller{hiddenSettled === 1 ? '' : 's'} hidden. Search to find them.
+            </p>
+          ) : null}
+        </div>
+      </section>
+
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
         <h2 className="text-lg text-white">Recent collections</h2>
