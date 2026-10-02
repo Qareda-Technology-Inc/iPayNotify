@@ -5,7 +5,7 @@ import {
   getDefaultPlatformFeeBps,
   resolvePlatformFeeBps,
 } from './platformSettingsService.js';
-import { clipPortalCopy, normalizePortalDesign, normalizeVoucherDesign } from '../utils/portalDesigns.js';
+import { clipPortalCopy, normalizePortalDesign, normalizeVoucherDesign, normalizeVoucherSheet } from '../utils/portalDesigns.js';
 
 /**
  * Hubtel + merchant labels for a tenant.
@@ -65,6 +65,7 @@ export async function sanitizeBillingForClient(billing) {
       portalSupportPhone: '',
       portalShowPlans: true,
       voucherTitle: '',
+      voucherSheet: 'auto',
       platformFeeBps: null,
       platformFeePercent: defaultBps / 100,
       defaultPlatformFeePercent: defaultBps / 100,
@@ -89,6 +90,7 @@ export async function sanitizeBillingForClient(billing) {
     portalSupportPhone: clipPortalCopy('portalSupportPhone', billing.portalSupportPhone),
     portalShowPlans: billing.portalShowPlans !== false,
     voucherTitle: clipPortalCopy('voucherTitle', billing.voucherTitle),
+    voucherSheet: normalizeVoucherSheet(billing.voucherSheet),
     platformFeeBps: hasOverride ? feeBps : null,
     platformFeePercent: feeBps / 100,
     defaultPlatformFeePercent: defaultBps / 100,

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { apiFetch } from '../../api.js';
 import { presetMessages, useMessage } from '../../messages/index.js';
 import { VOUCHER_DESIGNS } from '../../portal/designs.js';
-import { downloadVouchersPdf } from '../../utils/exportVouchersPdf.js';
+import { downloadVouchersPdf, sheetOptions } from '../../utils/exportVouchersPdf.js';
 import { money } from './common.js';
 import {
   SellerOutstandingByTypePanel,
@@ -24,6 +24,7 @@ export function TicketIssuePage() {
   const [lastIssue, setLastIssue] = useState(null);
   const [printDesign, setPrintDesign] = useState('grid');
   const [printTitle, setPrintTitle] = useState('');
+  const [printSheet, setPrintSheet] = useState('auto');
   const [printBusy, setPrintBusy] = useState('');
   const [sites, setSites] = useState([]);
   const [types, setTypes] = useState([]);
@@ -95,6 +96,7 @@ export function TicketIssuePage() {
         const id = o?.billing?.voucherDesign;
         if (VOUCHER_DESIGNS.some((d) => d.id === id)) setPrintDesign(id);
         setPrintTitle(String(o?.billing?.voucherTitle || '').trim());
+        setPrintSheet(o?.billing?.voucherSheet || 'auto');
       })
       .catch(() => {});
   }, []);
@@ -126,6 +128,7 @@ export function TicketIssuePage() {
       const { printed, skipped } = downloadVouchersPdf(codes, {
         title: printTitle || 'Wi‑Fi Access',
         design: printDesign,
+        sheet: printSheet,
         filename: `issued-${String(label || 'tickets').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${Date.now()}.pdf`,
       });
       showSuccess(`Downloaded ${printed} ticket${printed === 1 ? '' : 's'}${skipped ? ` (${skipped} used or expired skipped)` : ''}.`);
@@ -488,6 +491,20 @@ export function TicketIssuePage() {
                     {VOUCHER_DESIGNS.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs text-slate-400">
+                  Per page
+                  <select
+                    value={printSheet}
+                    onChange={(e) => setPrintSheet(e.target.value)}
+                    className="mt-1 block rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-200"
+                  >
+                    {sheetOptions(printSheet).map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
                       </option>
                     ))}
                   </select>

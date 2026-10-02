@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../api.js';
 import { routerDisplayName } from '../utils/routerDisplayName.js';
-import { downloadVouchersPdf } from '../utils/exportVouchersPdf.js';
+import { downloadVouchersPdf, sheetOptions } from '../utils/exportVouchersPdf.js';
 import { VOUCHER_DESIGNS } from '../portal/designs.js';
 
 const PAGE_SIZE = 50;
@@ -86,6 +86,7 @@ export function TicketsPage() {
 
   const [printDesign, setPrintDesign] = useState('grid');
   const [printTitle, setPrintTitle] = useState('');
+  const [printSheet, setPrintSheet] = useState('auto');
 
   const [view, setView] = useState(/** @type {'tickets' | 'batches'} */ ('tickets'));
   const [showGenerate, setShowGenerate] = useState(false);
@@ -127,6 +128,7 @@ export function TicketsPage() {
         const id = o?.billing?.voucherDesign;
         if (VOUCHER_DESIGNS.some((d) => d.id === id)) setPrintDesign(id);
         setPrintTitle(String(o?.billing?.voucherTitle || '').trim());
+        setPrintSheet(o?.billing?.voucherSheet || 'auto');
       })
       .catch(() => {});
   }, []);
@@ -186,6 +188,7 @@ export function TicketsPage() {
       const { printed, skipped } = downloadVouchersPdf(rows, {
         title: printTitle || 'Wi‑Fi Access',
         design: printDesign,
+        sheet: printSheet,
         filename: `tickets-${slug(label)}-${printDesign}-${Date.now()}.pdf`,
       });
       setInfo(
@@ -429,16 +432,28 @@ export function TicketsPage() {
             </button>
           ))}
         </div>
-        <label className="mb-2 flex items-center gap-2 text-xs text-slate-400">
-          Print design
-          <select value={printDesign} onChange={(e) => setPrintDesign(e.target.value)} className={smallSelectCls}>
-            {VOUCHER_DESIGNS.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            Print design
+            <select value={printDesign} onChange={(e) => setPrintDesign(e.target.value)} className={smallSelectCls}>
+              {VOUCHER_DESIGNS.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            Per page
+            <select value={printSheet} onChange={(e) => setPrintSheet(e.target.value)} className={smallSelectCls}>
+              {sheetOptions(printSheet).map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {view === 'tickets' ? (

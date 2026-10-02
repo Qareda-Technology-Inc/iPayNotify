@@ -2,7 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../api.js';
 import { routerDisplayName } from '../utils/routerDisplayName.js';
-import { renderTicketSvg } from '../utils/exportVouchersPdf.js';
+import {
+  SHEET_PRESETS,
+  downloadVouchersPdf,
+  parseSheet,
+  renderSheetSvg,
+  renderTicketSvg,
+  sheetGeometry,
+  sheetSummary,
+} from '../utils/exportVouchersPdf.js';
 import { VOUCHER_DESIGNS } from '../portal/designs.js';
 
 const EMPTY_SETTINGS = {
@@ -77,7 +85,7 @@ function LoginPreviewCard({ design, selected, onSelect }) {
   );
 }
 
-function TicketPreviewCard({ design, svg, selected, onSelect }) {
+function TicketPreviewCard({ design, svg, selected, onSelect, sheetText }) {
   return (
     <Selectable selected={selected} onSelect={onSelect} className="bg-slate-900/50 p-3">
       <div
@@ -88,7 +96,7 @@ function TicketPreviewCard({ design, svg, selected, onSelect }) {
         {design.name}
         {selected ? <span className="ml-2 text-xs text-emerald-300">Selected</span> : null}
       </p>
-      <p className="mt-0.5 text-xs text-slate-400">{design.blurb}</p>
+      <p className="mt-0.5 text-xs text-slate-400">{sheetText || design.blurb}</p>
     </Selectable>
   );
 }
@@ -236,6 +244,7 @@ export function TemplatesPage() {
   const [tab, setTab] = useState(/** @type {'login' | 'tickets'} */ ('login'));
   const [portalDesign, setPortalDesign] = useState('midnight');
   const [voucherDesign, setVoucherDesign] = useState('grid');
+  const [voucherSheet, setVoucherSheet] = useState('auto');
   const [settings, setSettings] = useState(EMPTY_SETTINGS);
   const [previews, setPreviews] = useState([]);
   const [samplePlans, setSamplePlans] = useState(false);
@@ -263,6 +272,7 @@ export function TemplatesPage() {
     setRouterId((id) => id || list[0]?._id || '');
     setPortalDesign(o?.billing?.portalDesign || 'midnight');
     setVoucherDesign(o?.billing?.voucherDesign || 'grid');
+    setVoucherSheet(o?.billing?.voucherSheet || 'auto');
     setSettings(settingsFromBilling(o?.billing));
   }, []);
 
@@ -338,14 +348,49 @@ export function TemplatesPage() {
     [ticketTitle, brandName]
   );
 
+  const sheetGrid = parseSheet(voucherSheet);
+  const selectedSheet = useMemo(() => sheetSummary(voucherDesign, voucherSheet), [voucherDesign, voucherSheet]);
+  const sheetSvg = useMemo(
+    () => (tab === 'tickets' ? renderSheetSvg(voucherDesign, { sheet: voucherSheet, title: ticketTitle, venue: brandName }) : ''),
+    [tab, voucherDesign, voucherSheet, ticketTitle, brandName]
+  );
+
+  function setGrid(key, value) {
+    const n = Math.round(Number(value));
+    if (!value || !Number.isFinite(n) || n < 1) {
+      setVoucherSheet('auto');
+      return;
+    }
+    const g = sheetGeometry(voucherDesign, voucherSheet);
+    const next = { cols: Math.min(12, g.cols), rows: Math.min(12, g.rows), [key]: Math.min(12, n) };
+    setVoucherSheet(`${next.cols}x${next.rows}`);
+  }
+
+  function downloadSample() {
+    const sample = Array.from({ length: selectedSheet.perPage }, (_, i) => ({
+      code: String(100000 + ((i * 7919 + 4421) % 900000)),
+      packageId: { name: 'Daily pass', priceCents: 500, currency: 'GHS' },
+      elapsedSeconds: 86400,
+      dataLimitBytes: 1073741824,
+    }));
+    downloadVouchersPdf(sample, {
+      title: ticketTitle,
+      venue: brandName,
+      design: voucherDesign,
+      sheet: voucherSheet,
+      filename: `sample-${voucherDesign}-${voucherSheet}.pdf`,
+    });
+  }
+
   async function saveBilling() {
     const updated = await apiFetch('/api/organization', {
       method: 'PATCH',
-      body: JSON.stringify({ billing: { portalDesign, voucherDesign, ...settings } }),
+      body: JSON.stringify({ billing: { portalDesign, voucherDesign, voucherSheet, ...settings } }),
     });
     setOrg(updated);
     setPortalDesign(updated?.billing?.portalDesign || portalDesign);
     setVoucherDesign(updated?.billing?.voucherDesign || voucherDesign);
+    setVoucherSheet(updated?.billing?.voucherSheet || voucherSheet);
     setSettings(settingsFromBilling(updated?.billing));
     return updated;
   }
@@ -689,6 +734,90 @@ export function TemplatesPage() {
               design when printing from Tickets.
             </p>
           </section>
+          <section className="grid gap-5 rounded-2xl border border-slate-800 bg-slate-900/40 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Page layout</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  How many tickets fit on one A4 sheet. Custom grids shrink or enlarge the design to fit and turn the page
+                  sideways when that gives bigger tickets.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {SHEET_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setVoucherSheet(p.id)}
+                    className={`rounded-lg border px-2.5 py-1.5 text-xs ${
+                      voucherSheet === p.id
+                        ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200'
+                        : 'border-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-end gap-2 text-xs text-slate-400">
+                <label>
+                  Rows
+                  <input
+                    type="number"
+                    min={1}
+                    max={12}
+                    value={sheetGrid?.rows ?? ''}
+                    placeholder="auto"
+                    onChange={(e) => setGrid('rows', e.target.value)}
+                    className="mt-1 block w-20 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-white"
+                  />
+                </label>
+                <span className="pb-2">×</span>
+                <label>
+                  Columns
+                  <input
+                    type="number"
+                    min={1}
+                    max={12}
+                    value={sheetGrid?.cols ?? ''}
+                    placeholder="auto"
+                    onChange={(e) => setGrid('cols', e.target.value)}
+                    className="mt-1 block w-20 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-white"
+                  />
+                </label>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
+                <p>
+                  <span className="font-medium text-white">{selectedTicket?.name}</span> · {selectedSheet.text}
+                </p>
+                {selectedSheet.scale < 0.75 ? (
+                  <p className="mt-1 text-amber-300">
+                    Tickets are printed at {Math.round(selectedSheet.scale * 100)}% of this design&apos;s normal size. Codes
+                    may be hard to read; try a design marked &quot;Mini&quot; or &quot;Pocket&quot;, or fewer columns.
+                  </p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={downloadSample}
+                className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-emerald-500 hover:text-white"
+              >
+                Download a sample page (PDF)
+              </button>
+              <p className="text-xs text-slate-500">
+                Saved as the default for printing from Tickets and Issue tickets. Press Save at the top to keep it.
+              </p>
+            </div>
+            <div>
+              <p className="mb-2 text-xs text-slate-500">Print preview · sample codes</p>
+              <div
+                className={`mx-auto overflow-hidden rounded border border-slate-700 bg-white shadow-lg ${
+                  selectedSheet.orientation === 'landscape' ? 'max-w-full' : 'max-w-md'
+                }`}
+                dangerouslySetInnerHTML={{ __html: sheetSvg }}
+              />
+            </div>
+          </section>
           <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
             {VOUCHER_DESIGNS.map((d) => (
               <TicketPreviewCard
@@ -697,6 +826,7 @@ export function TemplatesPage() {
                 svg={ticketSvgs[d.id]}
                 selected={voucherDesign === d.id}
                 onSelect={() => setVoucherDesign(d.id)}
+                sheetText={sheetGrid ? sheetSummary(d.id, voucherSheet).text : ''}
               />
             ))}
           </div>

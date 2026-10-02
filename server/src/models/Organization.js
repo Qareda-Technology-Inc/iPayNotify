@@ -41,6 +41,8 @@ const organizationBillingSchema = new mongoose.Schema(
     portalShowPlans: { type: Boolean, default: true },
     /** Optional title on printed vouchers. Empty uses "Wi‑Fi Access". */
     voucherTitle: { type: String, trim: true, default: '' },
+    /** Tickets per A4 sheet: `auto` (design's own size) or `<columns>x<rows>`, e.g. `8x5`. */
+    voucherSheet: { type: String, trim: true, default: 'auto' },
   },
   { _id: false }
 );

@@ -12,7 +12,7 @@ import {
 } from '../services/orgLimitsService.js';
 import { routerDisplayName } from '../utils/routerLabel.js';
 import { requireRoles } from '../middleware/requireRoles.js';
-import { PORTAL_DESIGN_IDS, VOUCHER_DESIGN_IDS, clipPortalCopy } from '../utils/portalDesigns.js';
+import { PORTAL_DESIGN_IDS, VOUCHER_DESIGN_IDS, clipPortalCopy, normalizeVoucherSheet } from '../utils/portalDesigns.js';
 import { LOGIN_THEMES, SAMPLE_PLANS, renderLoginPage } from '../services/captiveTemplates.js';
 import { loadPortalPlans } from '../services/portalContextService.js';
 import {
@@ -120,6 +120,9 @@ function applyBillingPatch(doc, billingBody, { isSuperAdmin = false } = {}) {
       throw err;
     }
     doc.billing.voucherDesign = id;
+  }
+  if (b.voucherSheet !== undefined) {
+    doc.billing.voucherSheet = normalizeVoucherSheet(b.voucherSheet);
   }
   for (const field of [
     'portalHeadline',

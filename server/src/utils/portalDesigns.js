@@ -2,6 +2,14 @@ import { LOGIN_THEME_IDS } from '../services/captiveTemplates.js';
 
 export const PORTAL_DESIGN_IDS = LOGIN_THEME_IDS;
 
+/** `auto` or `<columns>x<rows>` (1–12 each); anything else falls back to `auto`. */
+export function normalizeVoucherSheet(v) {
+  const s = String(v || '').trim().toLowerCase();
+  const m = s.match(/^(\d{1,2})x(\d{1,2})$/);
+  if (m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 12) return `${+m[1]}x${+m[2]}`;
+  return 'auto';
+}
+
 /** Must match `TICKET_DESIGNS` ids in client/src/utils/exportVouchersPdf.js. */
 export const VOUCHER_DESIGN_IDS = [
   'grid',
@@ -24,6 +32,8 @@ export const VOUCHER_DESIGN_IDS = [
   'promo',
   'receipt',
   'cafe',
+  'tile',
+  'lagoon',
 ];
 
 export function normalizePortalDesign(value) {

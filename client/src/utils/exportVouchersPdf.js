@@ -316,6 +316,21 @@ const LAYOUTS = {
     txt(p, k.venue, x + w / 2, y + 31.3, w - 4, { size: 4.6, color: SOFT, align: 'center' });
     p.text('Thank you', x + w / 2, y + h - 1.8, { size: 4.2, color: SOFT, align: 'center' });
   },
+
+  tile(p, x, y, w, h, k, c) {
+    cutFrame(p, x, y, w, h);
+    p.fill(c.h);
+    p.rect(x, y, w, 7, 'F');
+    txt(p, k.title, x + w / 2, y + 4.7, w - 3, { size: 6.2, bold: true, color: WHITE, align: 'center' });
+    p.text('ACCESS CODE', x + w / 2, y + 11, { size: 4.2, color: SOFT, align: 'center' });
+    p.fill(c.t);
+    p.rrect(x + 2, y + 12.4, w - 4, 6.6, 1, 'F');
+    p.text(k.code, x + w / 2, y + 17.2, { size: 12.5, bold: true, mono: true, color: c.c, align: 'center' });
+    txt(p, k.pkg, x + w / 2, y + 23.4, w - 3, { size: 6, bold: true, color: INK, align: 'center' });
+    txt(p, k.detail, x + w / 2, y + 26.6, w - 3, { size: 4.9, color: MUTED, align: 'center' });
+    if (k.price) p.text(k.price, x + w / 2, y + 31.8, { size: 8.5, bold: true, color: c.h, align: 'center' });
+    txt(p, k.venue, x + w / 2, y + h - 1.9, w - 3, { size: 4.4, color: SOFT, align: 'center' });
+  },
 };
 
 /* ---------- the 20 designs (sizes in mm, laid out and centred on A4 portrait) ---------- */
@@ -331,6 +346,7 @@ const SIZES = {
   outline: { w: 46, h: 24, cols: 4, rows: 11, gapX: 2, gapY: 1.5 },
   ribbon: { w: 48, h: 26, cols: 4, rows: 10, gapX: 2, gapY: 1.5 },
   receipt: { w: 44, h: 36, cols: 4, rows: 7, gapX: 2, gapY: 2 },
+  tile: { w: 34, h: 38, cols: 5, rows: 7, gapX: 2, gapY: 2 },
 };
 
 /** h = main colour, c = code colour, t = tint, p = price colour on dark panels, bar = top accent bar. */
@@ -355,6 +371,8 @@ const DESIGNS = [
   { id: 'promo', name: 'Promo', layout: 'ribbon', desc: 'Violet corner ribbon.', c: { h: '#7c3aed', c: '#6d28d9', t: '#ede9fe' } },
   { id: 'receipt', name: 'Receipt', layout: 'receipt', desc: 'Till-receipt style.', c: { h: '#111827', c: '#111827', t: '#f3f4f6' } },
   { id: 'cafe', name: 'Café', layout: 'receipt', desc: 'Receipt in coffee brown.', c: { h: '#6f4e37', c: '#6f4e37', t: '#f5ede3' } },
+  { id: 'tile', name: 'Tile', layout: 'tile', desc: 'Square tile, best for 5 rows × 8 columns.', c: { h: '#0f172a', c: '#047857', t: '#ecfdf5' } },
+  { id: 'lagoon', name: 'Lagoon', layout: 'tile', desc: 'Teal square tile, best for 5 rows × 8 columns.', c: { h: '#0e7490', c: '#0e7490', t: '#ecfeff' } },
 ];
 
 function designById(id) {
@@ -373,6 +391,171 @@ export const VOUCHER_LAYOUTS = Object.fromEntries(
     return [d.id, { w: s.w, h: s.h, perPage: s.cols * s.rows }];
   })
 );
+
+/* ---------- sheet layout: design default, or any columns × rows on A4 ---------- */
+
+/** `auto` = each design's own size; `<columns>x<rows>` scales the design to fit that grid. */
+export const SHEET_PRESETS = [
+  { id: 'auto', label: 'Design default' },
+  { id: '8x5', label: '5 rows × 8 columns (40)' },
+  { id: '5x8', label: '8 rows × 5 columns (40)' },
+  { id: '4x8', label: '8 rows × 4 columns (32)' },
+  { id: '5x10', label: '10 rows × 5 columns (50)' },
+  { id: '6x10', label: '10 rows × 6 columns (60)' },
+  { id: '4x5', label: '5 rows × 4 columns (20)' },
+];
+
+/** Presets, plus the given custom grid when it is not one of them (for print pickers). */
+export function sheetOptions(current) {
+  const g = parseSheet(current);
+  if (!g || SHEET_PRESETS.some((p) => p.id === `${g.cols}x${g.rows}`)) return SHEET_PRESETS;
+  return [...SHEET_PRESETS, { id: `${g.cols}x${g.rows}`, label: `${g.rows} rows × ${g.cols} columns (${g.cols * g.rows})` }];
+}
+
+export function parseSheet(sheet) {
+  const m = String(sheet || '').trim().toLowerCase().match(/^(\d{1,2})x(\d{1,2})$/);
+  if (!m) return null;
+  const cols = Math.min(12, Math.max(1, +m[1]));
+  const rows = Math.min(12, Math.max(1, +m[2]));
+  return { cols, rows };
+}
+
+const A4 = { w: 210, h: 297 };
+const SHEET_MARGIN = 6;
+const SHEET_GAP = 2;
+const MAX_UPSCALE = 1.35;
+const MAX_STRETCH = 1.5;
+
+/**
+ * Where every card goes on the page. Custom grids pick the orientation that gives the biggest cards;
+ * a card is scaled evenly and, when the cell is wider than the design, stretched sideways (up to 1.5×).
+ */
+export function sheetGeometry(designId, sheet) {
+  const d = designById(designId);
+  const L = SIZES[d.layout];
+  const grid = parseSheet(sheet);
+  if (!grid) {
+    const blockW = L.cols * L.w + (L.cols - 1) * L.gapX;
+    const blockH = L.rows * L.h + (L.rows - 1) * L.gapY;
+    return {
+      orientation: 'portrait',
+      pageW: A4.w,
+      pageH: A4.h,
+      cols: L.cols,
+      rows: L.rows,
+      perPage: L.cols * L.rows,
+      scale: 1,
+      drawW: L.w,
+      drawH: L.h,
+      cardW: L.w,
+      cardH: L.h,
+      origin: (i) => ({
+        x: (A4.w - blockW) / 2 + (i % L.cols) * (L.w + L.gapX),
+        y: (A4.h - blockH) / 2 + Math.floor(i / L.cols) * (L.h + L.gapY),
+      }),
+    };
+  }
+  const options = [
+    { orientation: 'portrait', pageW: A4.w, pageH: A4.h },
+    { orientation: 'landscape', pageW: A4.h, pageH: A4.w },
+  ].map((o) => {
+    const cellW = (o.pageW - 2 * SHEET_MARGIN - (grid.cols - 1) * SHEET_GAP) / grid.cols;
+    const cellH = (o.pageH - 2 * SHEET_MARGIN - (grid.rows - 1) * SHEET_GAP) / grid.rows;
+    const scale = Math.min(cellW / L.w, cellH / L.h, MAX_UPSCALE);
+    return { ...o, cellW, cellH, scale };
+  });
+  const best = options[0].scale >= options[1].scale ? options[0] : options[1];
+  const drawW = Math.min(best.cellW / best.scale, L.w * MAX_STRETCH);
+  const cardW = drawW * best.scale;
+  const cardH = L.h * best.scale;
+  return {
+    orientation: best.orientation,
+    pageW: best.pageW,
+    pageH: best.pageH,
+    cols: grid.cols,
+    rows: grid.rows,
+    perPage: grid.cols * grid.rows,
+    scale: best.scale,
+    drawW,
+    drawH: L.h,
+    cardW,
+    cardH,
+    origin: (i) => ({
+      x: SHEET_MARGIN + (i % grid.cols) * (best.cellW + SHEET_GAP) + (best.cellW - cardW) / 2,
+      y: SHEET_MARGIN + Math.floor(i / grid.cols) * (best.cellH + SHEET_GAP) + (best.cellH - cardH) / 2,
+    }),
+  };
+}
+
+/** Short description of a design on a sheet, e.g. "40 per page, 34 × 18 mm, landscape". */
+export function sheetSummary(designId, sheet) {
+  const g = sheetGeometry(designId, sheet);
+  return {
+    perPage: g.perPage,
+    orientation: g.orientation,
+    cardW: Math.round(g.cardW * 10) / 10,
+    cardH: Math.round(g.cardH * 10) / 10,
+    scale: g.scale,
+    text: `${g.perPage} per page · ${Math.round(g.cardW)} × ${Math.round(g.cardH)} mm · A4 ${g.orientation}`,
+  };
+}
+
+function placedPainter(base, ox, oy, s) {
+  const X = (x) => ox + x * s;
+  const Y = (y) => oy + y * s;
+  const font = (o = {}) => ({ ...o, size: (o.size || 6) * s });
+  return {
+    fill: base.fill,
+    stroke: base.stroke,
+    lw: (w) => base.lw(w * s),
+    dash: (pattern) => base.dash(pattern && pattern.length ? pattern.map((v) => v * s) : pattern),
+    rect: (x, y, w, h, mode) => base.rect(X(x), Y(y), w * s, h * s, mode),
+    rrect: (x, y, w, h, r, mode) => base.rrect(X(x), Y(y), w * s, h * s, r * s, mode),
+    line: (x1, y1, x2, y2) => base.line(X(x1), Y(y1), X(x2), Y(y2)),
+    circle: (cx, cy, r, mode) => base.circle(X(cx), Y(cy), r * s, mode),
+    tri: (x1, y1, x2, y2, x3, y3, mode) => base.tri(X(x1), Y(y1), X(x2), Y(y2), X(x3), Y(y3), mode),
+    text: (str, x, y, o) => base.text(str, X(x), Y(y), font(o)),
+    width: (str, o) => base.width(str, font(o)) / s,
+  };
+}
+
+function drawCard(p, geo, idx, k, d) {
+  const { x, y } = geo.origin(idx);
+  LAYOUTS[d.layout](placedPainter(p, x, y, geo.scale), 0, 0, geo.drawW, geo.drawH, k, d.c);
+}
+
+const SAMPLE_PLANS = [
+  { name: 'Daily pass', priceCents: 500, currency: 'GHS', elapsedSeconds: 86400, dataLimitBytes: 1073741824 },
+  { name: 'Weekly', priceCents: 2500, currency: 'GHS', elapsedSeconds: 604800, dataLimitBytes: 5368709120 },
+  { name: '3 hours', priceCents: 200, currency: 'GHS', elapsedSeconds: 10800 },
+];
+
+/**
+ * A whole A4 page with sample tickets, as SVG — "what will my printout look like".
+ * @param {string} designId
+ * @param {{ sheet?: string, title?: string, venue?: string, showPrice?: boolean }} [opts]
+ */
+export function renderSheetSvg(designId, opts = {}) {
+  const d = designById(designId);
+  const geo = sheetGeometry(designId, opts.sheet);
+  const p = svgPainter();
+  const title = String(opts.title || 'Wi-Fi Access').trim() || 'Wi-Fi Access';
+  p.fill('#ffffff');
+  p.rect(0, 0, geo.pageW, geo.pageH, 'F');
+  let seed = 7;
+  for (let i = 0; i < geo.perPage; i++) {
+    seed = (seed * 48271) % 2147483647;
+    const plan = SAMPLE_PLANS[i % SAMPLE_PLANS.length];
+    const row = {
+      code: String(100000 + (seed % 900000)),
+      packageId: { name: plan.name, priceCents: plan.priceCents, currency: plan.currency },
+      elapsedSeconds: plan.elapsedSeconds,
+      dataLimitBytes: plan.dataLimitBytes,
+    };
+    drawCard(p, geo, i, cardContext(row, { title, venue: opts.venue ?? 'Main hall', showPrice: opts.showPrice }), d);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${geo.pageW} ${geo.pageH}" width="100%" preserveAspectRatio="xMidYMid meet">${p.parts.join('')}</svg>`;
+}
 
 const SAMPLE_TICKET = {
   code: '482193',
@@ -410,7 +593,7 @@ function isPrintable(v, now) {
  * Printable hotspot tickets on A4. Used or expired tickets are skipped unless `includeUsed` is set.
  * Each card shows its own plan, price and router; `packageName` / `venue` are fallbacks.
  * @param {object[]} rows
- * @param {{ title?: string, venue?: string, packageName?: string, filename?: string, design?: string, includeUsed?: boolean, showPrice?: boolean }} [opts]
+ * @param {{ title?: string, venue?: string, packageName?: string, filename?: string, design?: string, sheet?: string, includeUsed?: boolean, showPrice?: boolean }} [opts]
  * @returns {{ printed: number, skipped: number }}
  */
 export function downloadVouchersPdf(rows, opts = {}) {
@@ -425,26 +608,16 @@ export function downloadVouchersPdf(rows, opts = {}) {
 
   const title = String(opts.title || 'Wi-Fi Access').trim() || 'Wi-Fi Access';
   const d = designById(opts.design);
-  const L = SIZES[d.layout];
+  const geo = sheetGeometry(d.id, opts.sheet);
   const filename = String(opts.filename || '').trim() || `tickets-${d.id}-${Date.now()}.pdf`;
 
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const doc = new jsPDF({ orientation: geo.orientation, unit: 'mm', format: 'a4' });
   const p = pdfPainter(doc);
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const blockW = L.cols * L.w + (L.cols - 1) * L.gapX;
-  const blockH = L.rows * L.h + (L.rows - 1) * L.gapY;
-  const left = (pageW - blockW) / 2;
-  const top = (pageH - blockH) / 2;
-  const perPage = L.cols * L.rows;
 
   list.forEach((v, i) => {
-    if (i > 0 && i % perPage === 0) doc.addPage();
-    const idx = i % perPage;
-    const x = left + (idx % L.cols) * (L.w + L.gapX);
-    const y = top + Math.floor(idx / L.cols) * (L.h + L.gapY);
+    if (i > 0 && i % geo.perPage === 0) doc.addPage('a4', geo.orientation);
     const k = cardContext(v, { title, venue: String(opts.venue || '').trim(), packageName: opts.packageName, showPrice: opts.showPrice });
-    LAYOUTS[d.layout](p, x, y, L.w, L.h, k, d.c);
+    drawCard(p, geo, i % geo.perPage, k, d);
   });
 
   doc.save(filename);
