@@ -17,6 +17,7 @@ import {
 import { syncHotspotExpiryScheduler } from '../services/hotspotExpirySchedulerService.js';
 import { pushCaptivePortalToRouter } from '../services/captivePortalPushService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { archiveLinkedUsage } from '../services/ticketLedgerService.js';
 import { requireRoles } from '../middleware/requireRoles.js';
 import { orgQuery } from '../utils/tenantScope.js';
 
@@ -233,6 +234,7 @@ hotspotRouter.delete(
     } catch {
       /* router may be offline — still delete DB row */
     }
+    await archiveLinkedUsage([v]);
     await HotspotVoucher.deleteOne({ _id: v._id });
     res.json({ ok: true });
   })

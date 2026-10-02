@@ -137,6 +137,13 @@ export async function notifyTicketTransactionUpdate({
         .lean(),
     ]);
     if (!sale) return;
+    if (sale.collectionGroupId) {
+      const group = await TicketSale.find({ organizationId, collectionGroupId: sale.collectionGroupId })
+        .select('amountCents quantity')
+        .lean();
+      sale.amountCents = group.reduce((n, g) => n + Number(g.amountCents || 0), 0);
+      sale.quantity = group.reduce((n, g) => n + Number(g.quantity || 0), 0);
+    }
 
     const recipients = uniqueBy(
       [...orgAdmins, { email: actor?.email || '', phone: '' }],
@@ -147,13 +154,16 @@ export async function notifyTicketTransactionUpdate({
       const who = sale.receivedFromName?.trim()
         ? `${sale.sellerName} (cash handed over by ${sale.receivedFromName.trim()})`
         : sale.sellerName;
-      const title = eventKind === 'issued' ? 'Ticket issued update' : 'Ticket collection update';
-      const line = `${eventKind === 'issued' ? 'Issued' : 'Collected'} qty ${sale.quantity} · ${money(sale.amountCents)} · ${
+      const verb = { issued: 'Issued', collected: 'Collected', returned: 'Returned' }[eventKind] || 'Recorded';
+      const title =
+        { issued: 'Ticket issued update', collected: 'Ticket collection update', returned: 'Ticket return update' }[
+          eventKind
+        ] || 'Ticket update';
+      const line = `${verb} qty ${sale.quantity} · ${money(sale.amountCents)} · ${
         sale.ticketTypeId?.label || 'Ticket'
       } · ${sale.siteId?.name || 'Site'} · Seller ${who}.`;
       const recorder = recordedByLabel(actor);
-      const actorLine =
-        eventKind === 'issued' ? `Issued by ${recorder}.` : `Collected by ${recorder}.`;
+      const actorLine = `${verb} by ${recorder}.`;
       const textBody = `${title}\n\n${line}\n${actorLine}`;
 
       await Promise.allSettled(

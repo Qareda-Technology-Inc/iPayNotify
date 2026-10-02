@@ -9,6 +9,8 @@ const ticketSiteSchema = new mongoose.Schema(
     },
     name: { type: String, required: true, trim: true },
     active: { type: Boolean, default: true },
+    /** Hotspot router whose printed tickets this site's sellers receive (linked issues). */
+    routerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Router', default: null },
   },
   { timestamps: true }
 );

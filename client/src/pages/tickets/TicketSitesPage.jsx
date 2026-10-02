@@ -6,7 +6,9 @@ export function TicketSitesPage() {
   const { showSuccess } = useMessage();
   const [me, setMe] = useState(null);
   const [sites, setSites] = useState([]);
+  const [routers, setRouters] = useState([]);
   const [name, setName] = useState('');
+  const [newRouterId, setNewRouterId] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -23,9 +25,14 @@ export function TicketSitesPage() {
   async function load() {
     setErr('');
     try {
-      const [m, s] = await Promise.all([apiFetch('/api/auth/me'), apiFetch('/api/ticket-sales/sites')]);
+      const [m, s, opts] = await Promise.all([
+        apiFetch('/api/auth/me'),
+        apiFetch('/api/ticket-sales/sites'),
+        apiFetch('/api/ticket-sales/link-options').catch(() => null),
+      ]);
       setMe(m);
       setSites(Array.isArray(s) ? s : []);
+      setRouters(Array.isArray(opts?.routers) ? opts.routers : []);
     } catch (e) {
       setErr(e.message || 'Could not load sites');
     }
@@ -133,9 +140,10 @@ export function TicketSitesPage() {
     try {
       await apiFetch('/api/ticket-sales/sites', {
         method: 'POST',
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({ name: name.trim(), routerId: newRouterId || null }),
       });
       setName('');
+      setNewRouterId('');
       showSuccess(presetMessages.siteCreated);
       await load();
     } catch (e2) {
@@ -195,6 +203,20 @@ export function TicketSitesPage() {
             New site name
             <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
           </label>
+          <label className="mt-3 block text-sm text-slate-300">
+            Hotspot router (optional)
+            <select value={newRouterId} onChange={(e) => setNewRouterId(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+              <option value="">None</option>
+              {routers.map((r) => (
+                <option key={r._id} value={r._id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 block text-xs text-slate-500">
+              Tickets generated on this router can then be issued to the site&apos;s sellers as real codes.
+            </span>
+          </label>
           <button type="submit" disabled={busy || !name.trim()} className="mt-3 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-50">
             Add site
           </button>
@@ -219,6 +241,26 @@ export function TicketSitesPage() {
                     <span className={`rounded px-1.5 py-0.5 text-[10px] ${s.active ? 'bg-emerald-900/40 text-emerald-300' : 'bg-slate-800 text-slate-500'}`}>
                       {s.active ? 'active' : 'inactive'}
                     </span>
+                    {canManageSites ? (
+                      <select
+                        value={s.routerId ? String(s.routerId) : ''}
+                        disabled={busy}
+                        onChange={(e) => patchSite(s, { routerId: e.target.value || null })}
+                        title="Hotspot router for this site"
+                        className="rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-xs text-slate-300"
+                      >
+                        <option value="">No router</option>
+                        {routers.map((r) => (
+                          <option key={r._id} value={r._id}>
+                            {r.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : s.routerId ? (
+                      <span className="text-xs text-slate-500">
+                        Router: {routers.find((r) => String(r._id) === String(s.routerId))?.name || 'linked'}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button

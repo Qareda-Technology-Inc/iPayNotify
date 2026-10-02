@@ -37,6 +37,11 @@ const hotspotVoucherSchema = new mongoose.Schema(
     bytesIn: { type: Number, default: 0 },
     bytesOut: { type: Number, default: 0 },
     mikrotikInternalId: { type: String },
+    /** Ticket operations: the issue (TicketSale) that handed this code to a seller. */
+    issueSaleId: { type: mongoose.Schema.Types.ObjectId, ref: 'TicketSale', default: null, index: true },
+    issuedAt: { type: Date, default: null },
+    /** `online` = bought by a customer on the portal; never handed to sellers. */
+    source: { type: String, enum: ['batch', 'online'], default: 'batch' },
   },
   { timestamps: true }
 );

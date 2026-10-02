@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { TicketSale } from '../models/index.js';
+import { issuesWithBalances } from './ticketLedgerService.js';
 
 function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -10,7 +10,7 @@ function gh(cents) {
 }
 
 /**
- * For one seller at one site: sum unpaid balance (issued minus collected)
+ * For one seller at one site: sum unpaid balance (what they owe minus what was collected)
  * grouped by ticket type across all batches.
  *
  * @param {mongoose.Types.ObjectId | string} organizationId
@@ -27,37 +27,15 @@ export async function aggregateSellerOutstandingByTicketType(organizationId, sit
   const name = String(sellerName || '').trim();
   if (!name) return [];
 
-  const matchIssued = {
-    organizationId: orgOid,
-    kind: 'issued',
+  const issued = await issuesWithBalances(orgOid, {
     siteId: siteOid,
     sellerName: new RegExp(`^${escapeRegex(name)}$`, 'i'),
-  };
-
-  const issued = await TicketSale.find(matchIssued)
-    .select('_id ticketTypeId amountCents')
-    .populate('ticketTypeId', 'label')
-    .lean();
-
-  const ids = issued.map((r) => r._id).filter(Boolean);
-  if (ids.length === 0) return [];
-
-  const sums = await TicketSale.aggregate([
-    {
-      $match: {
-        organizationId: orgOid,
-        kind: 'collected',
-        issueSaleId: { $in: ids.map((id) => new mongoose.Types.ObjectId(String(id))) },
-      },
-    },
-    { $group: { _id: '$issueSaleId', total: { $sum: '$amountCents' } } },
-  ]);
-  const collectedByIssue = new Map(sums.map((s) => [String(s._id), Number(s.total || 0)]));
+  });
+  if (issued.length === 0) return [];
 
   const byType = new Map();
   for (const r of issued) {
-    const collected = collectedByIssue.get(String(r._id)) || 0;
-    const remaining = Math.max(0, Number(r.amountCents || 0) - collected);
+    const remaining = Math.max(0, Number(r.balanceCents || 0));
     const tid =
       r.ticketTypeId != null && typeof r.ticketTypeId === 'object' && r.ticketTypeId._id != null
         ? String(r.ticketTypeId._id)

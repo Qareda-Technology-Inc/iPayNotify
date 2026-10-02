@@ -746,6 +746,7 @@ export async function fulfillPaidTransaction(txDoc) {
       routerId: tx.meta.routerId,
       hotspotServer: tx.meta.hotspotServer || '',
       pushToRouter: true,
+      source: 'online',
     });
     const v = vouchers[0];
     tx.hotspotVoucherId = v._id;

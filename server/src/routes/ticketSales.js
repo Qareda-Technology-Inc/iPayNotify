@@ -3,15 +3,68 @@ import mongoose from 'mongoose';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
 import { requireOrgModule } from '../middleware/requireOrgModule.js';
-import { Admin, TicketSale, TicketSite, TicketSiteSeller, TicketType } from '../models/index.js';
+import {
+  Admin,
+  HotspotVoucher,
+  PlanPackage,
+  Router,
+  TicketSale,
+  TicketSite,
+  TicketSiteSeller,
+  TicketType,
+} from '../models/index.js';
 import { notifyTicketTransactionUpdate } from '../services/ticketNotificationService.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
+import {
+  collectFromSeller,
+  issueTickets,
+  issuesWithBalances,
+  returnTickets,
+  rollupSellers,
+  sellerBalances,
+  sellerKeyOf,
+  sellerQueryFromKey,
+  stockForType,
+  voidEntry,
+} from '../services/ticketLedgerService.js';
 import { orgQuery } from '../utils/tenantScope.js';
 
 export const ticketSalesRouter = express.Router();
 
 function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Body value → ObjectId string, null to clear, or undefined when not sent. Throws on garbage. */
+function optionalRef(v) {
+  if (v === undefined) return undefined;
+  if (v === null || v === '') return null;
+  if (!mongoose.isValidObjectId(String(v))) {
+    const e = new Error('Invalid id');
+    e.status = 400;
+    throw e;
+  }
+  return String(v);
+}
+
+async function checkRouter(organizationId, routerId) {
+  if (!routerId) return;
+  const ok = await Router.exists({ _id: routerId, organizationId });
+  if (!ok) {
+    const e = new Error('Router not found');
+    e.status = 404;
+    throw e;
+  }
+}
+
+async function checkHotspotPackage(organizationId, packageId) {
+  if (!packageId) return;
+  const ok = await PlanPackage.exists({ _id: packageId, organizationId, kind: 'hotspot' });
+  if (!ok) {
+    const e = new Error('Hotspot plan not found');
+    e.status = 404;
+    throw e;
+  }
 }
 
 ticketSalesRouter.use(
@@ -33,11 +86,14 @@ ticketSalesRouter.post(
   asyncHandler(async (req, res) => {
     const name = String(req.body?.name || '').trim();
     if (!name) return res.status(400).json({ error: 'name is required' });
+    const routerId = optionalRef(req.body?.routerId);
+    await checkRouter(req.organizationId, routerId);
     try {
       const doc = await TicketSite.create({
         organizationId: req.organizationId,
         name,
         active: req.body?.active !== false,
+        routerId: routerId || null,
       });
       res.status(201).json(doc.toObject());
     } catch (e) {
@@ -62,6 +118,11 @@ ticketSalesRouter.patch(
       doc.name = n;
     }
     if (req.body?.active != null) doc.active = Boolean(req.body.active);
+    const routerId = optionalRef(req.body?.routerId);
+    if (routerId !== undefined) {
+      await checkRouter(req.organizationId, routerId);
+      doc.routerId = routerId;
+    }
     try {
       await doc.save();
     } catch (e) {
@@ -125,6 +186,8 @@ ticketSalesRouter.post(
       .select('_id')
       .lean();
     if (!site) return res.status(404).json({ error: 'Active site not found for organisation' });
+    const packageId = optionalRef(req.body?.packageId);
+    await checkHotspotPackage(req.organizationId, packageId);
     const doc = await TicketType.create({
       organizationId: req.organizationId,
       siteId,
@@ -132,6 +195,7 @@ ticketSalesRouter.post(
       durationDays: Math.round(durationDays),
       priceCents: Math.round(priceCents),
       active: req.body?.active !== false,
+      packageId: packageId || null,
     });
     res.status(201).json(doc.toObject());
   })
@@ -163,6 +227,11 @@ ticketSalesRouter.patch(
     }
     if (req.body?.active != null) {
       doc.active = Boolean(req.body.active);
+    }
+    const packageId = optionalRef(req.body?.packageId);
+    if (packageId !== undefined) {
+      await checkHotspotPackage(req.organizationId, packageId);
+      doc.packageId = packageId;
     }
     await doc.save();
     res.json(doc.toObject());
@@ -336,225 +405,270 @@ ticketSalesRouter.get(
   })
 );
 
+/** Routers and hotspot plans a site / ticket type can be linked to. */
+ticketSalesRouter.get(
+  '/link-options',
+  asyncHandler(async (req, res) => {
+    const [routers, packages] = await Promise.all([
+      Router.find({ organizationId: req.organizationId }).select('name comment').sort({ name: 1 }).lean(),
+      PlanPackage.find({ organizationId: req.organizationId, kind: 'hotspot' })
+        .select('name priceCents currency isActive elapsedSeconds pausedSeconds')
+        .sort({ priceCents: 1, name: 1 })
+        .lean(),
+    ]);
+    res.json({ routers, packages });
+  })
+);
+
+/** Unused, unissued hotspot codes available for a ticket type (count-only types: linked=false). */
+ticketSalesRouter.get(
+  '/types/:id/stock',
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
+    res.json(await stockForType(req.organizationId, req.params.id));
+  })
+);
+
 ticketSalesRouter.post(
   '/sales',
   asyncHandler(async (req, res) => {
-    const ticketTypeId = String(req.body?.ticketTypeId || '').trim();
-    const quantity = Number(req.body?.quantity || 1);
-    const ticketSiteSellerIdRaw = String(req.body?.ticketSiteSellerId || '').trim();
-    let sellerName = String(req.body?.sellerName || '').trim();
-    let sellerPhone = String(req.body?.sellerPhone || '').trim();
     const note = String(req.body?.note || '').trim();
-    if (!mongoose.isValidObjectId(ticketTypeId)) {
-      return res.status(400).json({ error: 'ticketTypeId is required' });
-    }
-    if (!Number.isFinite(quantity) || quantity < 1) {
-      return res.status(400).json({ error: 'quantity must be >= 1' });
-    }
-    const tt = await TicketType.findOne({
-      _id: ticketTypeId,
+    const { issue, codes } = await issueTickets({
       organizationId: req.organizationId,
-      active: true,
-    })
-      .select('_id siteId priceCents')
-      .lean();
-    if (!tt) return res.status(404).json({ error: 'Active ticket type not found' });
-
-    let ticketSiteSellerId = null;
-    if (mongoose.isValidObjectId(ticketSiteSellerIdRaw)) {
-      const ts = await TicketSiteSeller.findOne({
-        _id: ticketSiteSellerIdRaw,
-        organizationId: req.organizationId,
-        siteId: tt.siteId,
-        active: true,
-      }).lean();
-      if (!ts) {
-        return res.status(400).json({ error: 'ticketSiteSellerId not found for this ticket site' });
-      }
-      ticketSiteSellerId = ts._id;
-      sellerName = String(ts.name || '').trim();
-      if (!sellerPhone) sellerPhone = String(ts.phone || '').trim();
-    }
-    if (!sellerName) {
-      return res.status(400).json({ error: 'sellerName or ticketSiteSellerId is required' });
-    }
-
-    const amountCents = Math.round(Number(tt.priceCents || 0) * Math.round(quantity));
-    const doc = await TicketSale.create({
-      organizationId: req.organizationId,
-      siteId: tt.siteId,
-      ticketTypeId: tt._id,
-      kind: 'issued',
-      sellerName,
-      sellerAdminId: req.admin.id,
-      quantity: Math.round(quantity),
-      amountCents,
-      ...(ticketSiteSellerId ? { ticketSiteSellerId } : {}),
-      ...(sellerPhone ? { sellerPhone } : {}),
-      ...(note ? { note } : {}),
+      admin: req.admin,
+      ticketTypeId: String(req.body?.ticketTypeId || '').trim(),
+      quantity: req.body?.quantity,
+      batchId: req.body?.batchId,
+      seller: {
+        ticketSiteSellerId: String(req.body?.ticketSiteSellerId || '').trim(),
+        sellerName: req.body?.sellerName,
+        sellerPhone: req.body?.sellerPhone,
+      },
+      note,
     });
     notifyTicketTransactionUpdate({
       organizationId: req.organizationId,
       actorAdminId: req.admin.id,
       eventKind: 'issued',
-      saleId: doc._id,
+      saleId: issue._id,
     });
     void logOrgAudit({
       organizationId: req.organizationId,
       actorEmail: req.admin?.email,
       action: 'ticket.issue',
       meta: {
-        saleId: String(doc._id),
-        quantity: doc.quantity,
-        amountCents: doc.amountCents,
-        sellerName: doc.sellerName,
+        saleId: String(issue._id),
+        quantity: issue.quantity,
+        amountCents: issue.amountCents,
+        sellerName: issue.sellerName,
+        linked: issue.linked,
       },
     });
-    res.status(201).json(doc.toObject());
+    res.status(201).json({ ...issue, codes });
+  })
+);
+
+/** One issue with its balance and (linked) codes, for reprinting. */
+ticketSalesRouter.get(
+  '/issues/:id([0-9a-fA-F]{24})',
+  asyncHandler(async (req, res) => {
+    const [row] = await issuesWithBalances(req.organizationId, {
+      _id: new mongoose.Types.ObjectId(req.params.id),
+    });
+    if (!row) return res.status(404).json({ error: 'Issue not found' });
+    const codes = row.linked
+      ? await HotspotVoucher.find({ issueSaleId: row._id, organizationId: req.organizationId })
+          .sort({ code: 1 })
+          .populate('packageId', 'name priceCents currency')
+          .populate('routerId', 'name comment')
+          .lean()
+      : [];
+    res.json({ ...row, sellerKey: sellerKeyOf(row), codes });
   })
 );
 
 ticketSalesRouter.post(
   '/collections',
   asyncHandler(async (req, res) => {
-    const issueSaleId = String(req.body?.issueSaleId || '').trim();
-    const amountCents = Number(req.body?.amountCents);
     const note = String(req.body?.note || '').trim();
     const receivedFromName = String(req.body?.receivedFromName || '').trim();
     const receivedFromPhone = String(req.body?.receivedFromPhone || '').trim();
-    if (!mongoose.isValidObjectId(issueSaleId)) {
-      return res.status(400).json({ error: 'issueSaleId is required' });
-    }
-    if (!Number.isFinite(amountCents) || amountCents < 0) {
-      return res.status(400).json({ error: 'amountCents must be >= 0' });
-    }
-    const issue = await TicketSale.findOne({
-      _id: issueSaleId,
-      organizationId: req.organizationId,
-      kind: 'issued',
-    })
-      .select('siteId sellerName sellerPhone ticketSiteSellerId amountCents ticketTypeId')
-      .lean();
-    if (!issue) return res.status(404).json({ error: 'Issued batch not found' });
-    const agg = await TicketSale.aggregate([
-      {
-        $match: {
-          organizationId: new mongoose.Types.ObjectId(req.organizationId),
-          kind: 'collected',
-          issueSaleId: new mongoose.Types.ObjectId(issueSaleId),
-        },
-      },
-      { $group: { _id: null, total: { $sum: '$amountCents' } } },
-    ]);
-    const already = Number(agg?.[0]?.total || 0);
-    const remaining = Math.max(0, Number(issue.amountCents || 0) - already);
-    const add = Math.round(amountCents);
-    if (add <= 0) return res.status(400).json({ error: 'amountCents must be > 0' });
-    if (add > remaining) {
-      return res.status(400).json({
-        error: `Collection exceeds remaining balance (${remaining} cents left on this issued batch)`,
+    const amountCents = Math.round(Number(req.body?.amountCents) || 0);
+    let sellerKey = String(req.body?.sellerKey || '').trim();
+    const issueSaleId = String(req.body?.issueSaleId || '').trim();
+
+    let result;
+    if (!sellerKey && mongoose.isValidObjectId(issueSaleId)) {
+      const [row] = await issuesWithBalances(req.organizationId, {
+        _id: new mongoose.Types.ObjectId(issueSaleId),
+      });
+      if (!row) return res.status(404).json({ error: 'Issue not found' });
+      if (amountCents <= 0) return res.status(400).json({ error: 'Enter the amount received' });
+      if (amountCents > row.maxCollectCents) {
+        return res.status(400).json({
+          error: `This issue can take at most GHS ${(row.maxCollectCents / 100).toFixed(2)} right now.`,
+        });
+      }
+      const price = Number(row.unitPriceCents || 0);
+      const doc = await TicketSale.create({
+        organizationId: req.organizationId,
+        siteId: row.siteId?._id || row.siteId,
+        ...(row.ticketTypeId ? { ticketTypeId: row.ticketTypeId._id || row.ticketTypeId } : {}),
+        kind: 'collected',
+        sellerName: row.sellerName,
+        ...(row.ticketSiteSellerId ? { ticketSiteSellerId: row.ticketSiteSellerId } : {}),
+        sellerAdminId: req.admin.id,
+        issueSaleId: row._id,
+        quantity: price > 0 ? Math.max(1, Math.round(amountCents / price)) : 1,
+        amountCents,
+        ...(receivedFromName ? { receivedFromName } : {}),
+        ...(receivedFromPhone ? { receivedFromPhone } : {}),
+        ...(note ? { note } : {}),
+      });
+      result = { collectionGroupId: '', entries: [doc.toObject()], allocatedTo: 1 };
+      sellerKey = sellerKeyOf(row);
+    } else {
+      if (!sellerKey) return res.status(400).json({ error: 'Choose a seller' });
+      result = await collectFromSeller({
+        organizationId: req.organizationId,
+        admin: req.admin,
+        sellerKey,
+        amountCents,
+        receivedFromName,
+        receivedFromPhone,
+        note,
       });
     }
-    let collectedQty = 1;
-    if (issue.ticketTypeId) {
-      const tt = await TicketType.findOne({
-        _id: issue.ticketTypeId,
+
+    if (result.entries[0]) {
+      notifyTicketTransactionUpdate({
         organizationId: req.organizationId,
-      })
-        .select('priceCents')
-        .lean();
-      const unitPrice = Number(tt?.priceCents || 0);
-      if (unitPrice > 0) {
-        collectedQty = Number((add / unitPrice).toFixed(2));
-      }
+        actorAdminId: req.admin.id,
+        eventKind: 'collected',
+        saleId: result.entries[0]._id,
+      });
     }
-    const doc = await TicketSale.create({
-      organizationId: req.organizationId,
-      siteId: issue.siteId,
-      ...(issue.ticketTypeId ? { ticketTypeId: issue.ticketTypeId } : {}),
-      kind: 'collected',
-      sellerName: issue.sellerName,
-      issueSaleId: issue._id,
-      ...(issue.ticketSiteSellerId ? { ticketSiteSellerId: issue.ticketSiteSellerId } : {}),
-      sellerAdminId: req.admin.id,
-      quantity: collectedQty,
-      amountCents: add,
-      ...(receivedFromName ? { receivedFromName } : {}),
-      ...(receivedFromPhone ? { receivedFromPhone } : {}),
-      ...(note ? { note } : {}),
-    });
-    notifyTicketTransactionUpdate({
-      organizationId: req.organizationId,
-      actorAdminId: req.admin.id,
-      eventKind: 'collected',
-      saleId: doc._id,
-    });
     void logOrgAudit({
       organizationId: req.organizationId,
       actorEmail: req.admin?.email,
       action: 'ticket.collect',
       meta: {
-        saleId: String(doc._id),
-        issueSaleId: String(issue._id),
-        amountCents: doc.amountCents,
+        sellerKey,
+        amountCents,
+        entries: result.entries.map((e) => String(e._id)),
       },
     });
-    res.status(201).json(doc.toObject());
+    res.status(201).json(result);
+  })
+);
+
+ticketSalesRouter.post(
+  '/returns',
+  asyncHandler(async (req, res) => {
+    const issueSaleId = String(req.body?.issueSaleId || '').trim();
+    if (!mongoose.isValidObjectId(issueSaleId)) return res.status(400).json({ error: 'Choose the issue' });
+    const doc = await returnTickets({
+      organizationId: req.organizationId,
+      admin: req.admin,
+      issueSaleId,
+      quantity: req.body?.quantity,
+      note: String(req.body?.note || '').trim(),
+    });
+    notifyTicketTransactionUpdate({
+      organizationId: req.organizationId,
+      actorAdminId: req.admin.id,
+      eventKind: 'returned',
+      saleId: doc._id,
+    });
+    void logOrgAudit({
+      organizationId: req.organizationId,
+      actorEmail: req.admin?.email,
+      action: 'ticket.return',
+      meta: { saleId: String(doc._id), issueSaleId, quantity: doc.quantity },
+    });
+    res.status(201).json(doc);
+  })
+);
+
+ticketSalesRouter.post(
+  '/sales/:id/void',
+  requireRoles('super_admin', 'org_admin'),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
+    const doc = await voidEntry({
+      organizationId: req.organizationId,
+      admin: req.admin,
+      saleId: req.params.id,
+      reason: req.body?.reason,
+    });
+    void logOrgAudit({
+      organizationId: req.organizationId,
+      actorEmail: req.admin?.email,
+      action: 'ticket.void',
+      meta: { saleId: String(doc._id), kind: doc.kind, amountCents: doc.amountCents, reason: doc.voidReason },
+    });
+    res.json(doc);
+  })
+);
+
+/** Per-seller position: owed, paid ahead, tickets held, days owing. */
+ticketSalesRouter.get(
+  '/seller-balances',
+  asyncHandler(async (req, res) => {
+    res.json(await sellerBalances(req.organizationId, { siteId: req.query.siteId }));
+  })
+);
+
+/** One seller's issues (oldest first) with balances. */
+ticketSalesRouter.get(
+  '/seller-balances/:key/issues',
+  asyncHandler(async (req, res) => {
+    res.json(await issuesWithBalances(req.organizationId, sellerQueryFromKey(req.organizationId, req.params.key)));
   })
 );
 
 ticketSalesRouter.get(
   '/issues/open',
   asyncHandler(async (req, res) => {
-    const matchIssued = { ...orgQuery(req.organizationId), kind: 'issued' };
+    const q = {};
     if (req.query.siteId && mongoose.isValidObjectId(String(req.query.siteId))) {
-      matchIssued.siteId = String(req.query.siteId);
+      q.siteId = new mongoose.Types.ObjectId(String(req.query.siteId));
     }
     if (req.query.ticketTypeId && mongoose.isValidObjectId(String(req.query.ticketTypeId))) {
-      matchIssued.ticketTypeId = String(req.query.ticketTypeId);
+      q.ticketTypeId = new mongoose.Types.ObjectId(String(req.query.ticketTypeId));
     }
     if (req.query.sellerName) {
-      matchIssued.sellerName = new RegExp(`^${escapeRegex(String(req.query.sellerName).trim())}$`, 'i');
+      q.sellerName = new RegExp(`^${escapeRegex(String(req.query.sellerName).trim())}$`, 'i');
     }
-    const issued = await TicketSale.find(matchIssued)
-      .sort({ soldAt: -1, createdAt: -1 })
-      .limit(300)
-      .populate('siteId', 'name')
-      .populate('ticketTypeId', 'label priceCents')
-      .lean();
-    const ids = issued.map((r) => r._id).filter(Boolean);
-    const sumMatch = {
-      kind: 'collected',
-      issueSaleId: { $in: ids.map((id) => new mongoose.Types.ObjectId(String(id))) },
-      ...orgQuery(req.organizationId),
-    };
-    if (sumMatch.organizationId) {
-      sumMatch.organizationId = new mongoose.Types.ObjectId(String(sumMatch.organizationId));
-    }
-    const sums = await TicketSale.aggregate([
-      { $match: sumMatch },
-      { $group: { _id: '$issueSaleId', total: { $sum: '$amountCents' } } },
-    ]);
-    const m = new Map(sums.map((s) => [String(s._id), Number(s.total || 0)]));
-    const rows = issued.map((r) => {
-      const collectedCents = m.get(String(r._id)) || 0;
-      const expectedCents = Number(r.amountCents || 0);
-      const remainingCents = Math.max(0, expectedCents - collectedCents);
-      return {
-        ...r,
-        expectedCents,
-        collectedCents,
-        remainingCents,
-      };
-    });
-    res.json(rows.filter((r) => r.remainingCents > 0));
+    const rows = await issuesWithBalances(req.organizationId, q, { openOnly: true });
+    res.json(
+      rows
+        .reverse()
+        .slice(0, 300)
+        .map((r) => ({
+          ...r,
+          sellerKey: sellerKeyOf(r),
+          expectedCents: r.owedCents,
+          remainingCents: Math.max(0, r.balanceCents),
+        }))
+    );
   })
 );
+
+function rangeFromQuery(req) {
+  const now = new Date();
+  const from = req.query.from ? new Date(String(req.query.from)) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const to = req.query.to ? new Date(String(req.query.to)) : now;
+  return {
+    from: Number.isNaN(from.getTime()) ? new Date(now.getFullYear(), now.getMonth(), now.getDate()) : from,
+    to: Number.isNaN(to.getTime()) ? now : to,
+  };
+}
 
 ticketSalesRouter.get(
   '/sales',
   asyncHandler(async (req, res) => {
-    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+    const limit = Math.min(2000, Math.max(1, Number(req.query.limit) || 100));
     const q = { ...orgQuery(req.organizationId) };
     if (req.admin.role === 'ticket_manager') {
       q.sellerAdminId = req.admin.id;
@@ -564,256 +678,143 @@ ticketSalesRouter.get(
     if (req.query.siteId && mongoose.isValidObjectId(String(req.query.siteId))) {
       q.siteId = String(req.query.siteId);
     }
-    if (req.query.kind && ['issued', 'collected'].includes(String(req.query.kind))) {
+    if (req.query.kind && ['issued', 'collected', 'returned'].includes(String(req.query.kind))) {
       q.kind = String(req.query.kind);
     }
     if (req.query.sellerName) {
       q.sellerName = new RegExp(`^${escapeRegex(String(req.query.sellerName).trim())}$`, 'i');
     }
+    if (req.query.from || req.query.to) {
+      const { from, to } = rangeFromQuery(req);
+      q.soldAt = { $gte: from, $lte: to };
+    }
+    if (String(req.query.includeVoided || '') !== '1') q.voidedAt = null;
     const rows = await TicketSale.find(q)
       .sort({ soldAt: -1, createdAt: -1 })
       .limit(limit)
       .populate('ticketTypeId', 'label durationDays priceCents')
       .populate('siteId', 'name active')
       .populate('sellerAdminId', 'email role fullName')
+      .populate('voidedByAdminId', 'email fullName')
       .lean();
     res.json(rows);
   })
 );
 
+/**
+ * Report: activity in a date range plus everyone's current position.
+ * Owed follows the ledger rules (linked codes owe once used; count-only owe once issued).
+ */
 ticketSalesRouter.get(
   '/summary',
   asyncHandler(async (req, res) => {
     const orgId = new mongoose.Types.ObjectId(req.organizationId);
-    const q = { organizationId: orgId };
-    if (req.admin.role === 'ticket_manager') q.sellerAdminId = new mongoose.Types.ObjectId(req.admin.id);
-    if (req.query.siteId && mongoose.isValidObjectId(String(req.query.siteId))) {
-      q.siteId = new mongoose.Types.ObjectId(String(req.query.siteId));
+    const base = { organizationId: orgId, voidedAt: null };
+    const issueQuery = {};
+    if (req.admin.role === 'ticket_manager') {
+      base.sellerAdminId = new mongoose.Types.ObjectId(req.admin.id);
+      issueQuery.sellerAdminId = base.sellerAdminId;
     }
-    const now = new Date();
-    const from = req.query.from ? new Date(String(req.query.from)) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const to = req.query.to ? new Date(String(req.query.to)) : now;
-    const match = {
-      ...q,
-      soldAt: { $gte: from, $lte: to },
-    };
-    const overallTotals = await TicketSale.aggregate([
-      { $match: q },
-      {
-        $group: {
-          _id: null,
-          issuedQty: { $sum: { $cond: [{ $eq: ['$kind', 'issued'] }, '$quantity', 0] } },
-          issuedCents: { $sum: { $cond: [{ $eq: ['$kind', 'issued'] }, '$amountCents', 0] } },
-          collectedCents: { $sum: { $cond: [{ $eq: ['$kind', 'collected'] }, '$amountCents', 0] } },
-          transactionCount: { $sum: 1 },
-        },
-      },
+    if (req.query.siteId && mongoose.isValidObjectId(String(req.query.siteId))) {
+      base.siteId = new mongoose.Types.ObjectId(String(req.query.siteId));
+      issueQuery.siteId = base.siteId;
+    }
+    const { from, to } = rangeFromQuery(req);
+
+    const sumBy = () => ({
+      issuedQty: { $sum: { $cond: [{ $eq: ['$kind', 'issued'] }, '$quantity', 0] } },
+      issuedCents: { $sum: { $cond: [{ $eq: ['$kind', 'issued'] }, '$amountCents', 0] } },
+      collectedCents: { $sum: { $cond: [{ $eq: ['$kind', 'collected'] }, '$amountCents', 0] } },
+      returnedQty: { $sum: { $cond: [{ $eq: ['$kind', 'returned'] }, '$quantity', 0] } },
+      returnedCents: { $sum: { $cond: [{ $eq: ['$kind', 'returned'] }, '$amountCents', 0] } },
+      transactionCount: { $sum: 1 },
+    });
+
+    const [rangeTotals, rangeBySite, issues] = await Promise.all([
+      TicketSale.aggregate([{ $match: { ...base, soldAt: { $gte: from, $lte: to } } }, { $group: { _id: null, ...sumBy() } }]),
+      TicketSale.aggregate([
+        { $match: { ...base, soldAt: { $gte: from, $lte: to } } },
+        { $group: { _id: '$siteId', ...sumBy() } },
+      ]),
+      issuesWithBalances(req.organizationId, issueQuery),
     ]);
-    const rangeTotals = await TicketSale.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: null,
-          issuedQty: { $sum: { $cond: [{ $eq: ['$kind', 'issued'] }, '$quantity', 0] } },
-          issuedCents: { $sum: { $cond: [{ $eq: ['$kind', 'issued'] }, '$amountCents', 0] } },
-          collectedCents: { $sum: { $cond: [{ $eq: ['$kind', 'collected'] }, '$amountCents', 0] } },
-          transactionCount: { $sum: 1 },
-        },
+
+    const sellers = rollupSellers(issues);
+    const position = sellers.reduce(
+      (t, s) => {
+        t.owedCents += Math.max(0, s.balanceCents);
+        t.creditCents += Math.max(0, -s.balanceCents);
+        t.holdingQty += s.holdingQty;
+        t.usedQty += s.usedQty;
+        if (s.balanceCents > 0) t.sellersOwing += 1;
+        if (s.balanceCents > 0 && s.daysOwing > 7) t.overdueCents += s.balanceCents;
+        return t;
       },
-    ]);
-    const outstanding = await TicketSale.aggregate([
-      { $match: { ...q, kind: 'issued' } },
-      {
-        $lookup: {
-          from: 'ticketsales',
-          let: { issueId: '$_id' },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ['$issueSaleId', '$$issueId'] },
-                kind: 'collected',
-                organizationId: new mongoose.Types.ObjectId(req.organizationId),
-              },
-            },
-            { $group: { _id: null, total: { $sum: '$amountCents' } } },
-          ],
-          as: 'c',
-        },
-      },
-      {
-        $addFields: {
-          collectedCents: { $ifNull: [{ $first: '$c.total' }, 0] },
-        },
-      },
-      {
-        $addFields: {
-          remainingCents: { $max: [0, { $subtract: ['$amountCents', '$collectedCents'] }] },
-        },
-      },
-      { $match: { remainingCents: { $gt: 0 } } },
-      {
-        $group: {
-          _id: null,
-          remainingOpenBatches: { $sum: 1 },
-          remainingOpenQty: { $sum: '$quantity' },
-          remainingOpenCents: { $sum: '$remainingCents' },
-        },
-      },
-    ]);
-    const remainingByType = await TicketSale.aggregate([
-      { $match: { ...q, kind: 'issued' } },
-      {
-        $lookup: {
-          from: 'ticketsales',
-          let: { issueId: '$_id' },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ['$issueSaleId', '$$issueId'] },
-                kind: 'collected',
-                organizationId: orgId,
-              },
-            },
-            { $group: { _id: null, total: { $sum: '$amountCents' } } },
-          ],
-          as: 'c',
-        },
-      },
-      {
-        $addFields: {
-          collectedCents: { $ifNull: [{ $first: '$c.total' }, 0] },
-          remainingCents: {
-            $max: [0, { $subtract: ['$amountCents', { $ifNull: [{ $first: '$c.total' }, 0] }] }],
-          },
-        },
-      },
-      { $match: { remainingCents: { $gt: 0 } } },
-      {
-        $group: {
-          _id: '$ticketTypeId',
-          remainingQty: { $sum: '$quantity' },
-          remainingCents: { $sum: '$remainingCents' },
-          openBatches: { $sum: 1 },
-        },
-      },
-      { $sort: { remainingCents: -1 } },
-    ]);
-    const bySite = await TicketSale.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: '$siteId',
-          issuedQty: {
-            $sum: {
-              $cond: [{ $eq: ['$kind', 'issued'] }, '$quantity', 0],
-            },
-          },
-          issuedCents: {
-            $sum: {
-              $cond: [{ $eq: ['$kind', 'issued'] }, '$amountCents', 0],
-            },
-          },
-          collectedCents: {
-            $sum: {
-              $cond: [{ $eq: ['$kind', 'collected'] }, '$amountCents', 0],
-            },
-          },
-        },
-      },
-      { $addFields: { varianceCents: { $subtract: ['$issuedCents', '$collectedCents'] } } },
-      { $sort: { amountCents: -1 } },
-    ]);
-    const bySeller = await TicketSale.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: { sellerName: '$sellerName', siteId: '$siteId' },
-          issuedQty: {
-            $sum: {
-              $cond: [{ $eq: ['$kind', 'issued'] }, '$quantity', 0],
-            },
-          },
-          issuedCents: {
-            $sum: {
-              $cond: [{ $eq: ['$kind', 'issued'] }, '$amountCents', 0],
-            },
-          },
-          collectedCents: {
-            $sum: {
-              $cond: [{ $eq: ['$kind', 'collected'] }, '$amountCents', 0],
-            },
-          },
-        },
-      },
-      { $addFields: { varianceCents: { $subtract: ['$issuedCents', '$collectedCents'] } } },
-      { $sort: { issuedCents: -1 } },
-    ]);
-    const siteIds = [...new Set([...bySite.map((r) => r._id), ...bySeller.map((r) => r._id.siteId)].filter(Boolean))];
-    const typeIds = remainingByType.map((r) => r._id).filter(Boolean);
-    const [sites, types] = await Promise.all([
-      TicketSite.find({ _id: { $in: siteIds } }).select('name').lean(),
-      TicketType.find({ _id: { $in: typeIds } }).select('label durationDays priceCents').lean(),
-    ]);
-    const siteMap = new Map(sites.map((r) => [String(r._id), r]));
-    const typeMap = new Map(types.map((r) => [String(r._id), r]));
-    const all = overallTotals[0] || {};
+      { owedCents: 0, creditCents: 0, holdingQty: 0, usedQty: 0, sellersOwing: 0, overdueCents: 0 }
+    );
+
+    const siteOwed = new Map();
+    for (const s of sellers) {
+      const cur = siteOwed.get(s.siteId) || { owedCents: 0, holdingQty: 0 };
+      cur.owedCents += Math.max(0, s.balanceCents);
+      cur.holdingQty += s.holdingQty;
+      siteOwed.set(s.siteId, cur);
+    }
+
+    const byType = new Map();
+    for (const r of issues) {
+      if (r.balanceCents <= 0 && r.holdingQty <= 0) continue;
+      const key = String(r.ticketTypeId?._id || r.ticketTypeId || '');
+      const cur = byType.get(key) || {
+        ticketTypeId: key || null,
+        ticketTypeLabel: r.ticketTypeId?.label || 'Ticket',
+        priceCents: Number(r.ticketTypeId?.priceCents || 0),
+        owedCents: 0,
+        holdingQty: 0,
+        openBatches: 0,
+      };
+      cur.owedCents += Math.max(0, r.balanceCents);
+      cur.holdingQty += r.holdingQty;
+      cur.openBatches += 1;
+      byType.set(key, cur);
+    }
+
+    const siteIds = [...new Set([...rangeBySite.map((r) => String(r._id)), ...siteOwed.keys()].filter(Boolean))];
+    const sites = await TicketSite.find({ _id: { $in: siteIds }, organizationId: orgId }).select('name').lean();
+    const siteName = new Map(sites.map((s) => [String(s._id), s.name]));
+    const rangeSite = new Map(rangeBySite.map((r) => [String(r._id), r]));
     const rr = rangeTotals[0] || {};
-    const oo = outstanding[0] || {};
+
     res.json({
       from,
       to,
-      overview: {
-        overall: {
-          totalTransactions: Number(all.transactionCount || 0),
-          totalIssuedQty: Number(all.issuedQty || 0),
-          totalIssuedCents: Number(all.issuedCents || 0),
-          totalCollectedCents: Number(all.collectedCents || 0),
-          remainingOpenBatches: Number(oo.remainingOpenBatches || 0),
-          remainingOpenQty: Number(oo.remainingOpenQty || 0),
-          remainingCents: Number(oo.remainingOpenCents || 0),
-        },
-        inRange: {
-          totalTransactions: Number(rr.transactionCount || 0),
-          issuedQty: Number(rr.issuedQty || 0),
-          issuedCents: Number(rr.issuedCents || 0),
-          collectedCents: Number(rr.collectedCents || 0),
-          remainingCents: Math.max(0, Number(rr.issuedCents || 0) - Number(rr.collectedCents || 0)),
-        },
+      inRange: {
+        transactionCount: Number(rr.transactionCount || 0),
+        issuedQty: Number(rr.issuedQty || 0),
+        issuedCents: Number(rr.issuedCents || 0),
+        collectedCents: Number(rr.collectedCents || 0),
+        returnedQty: Number(rr.returnedQty || 0),
+        returnedCents: Number(rr.returnedCents || 0),
       },
-      bySite: bySite.map((r) => ({
-        siteId: r._id,
-        siteName: siteMap.get(String(r._id))?.name || 'Unknown site',
-        issuedQty: r.issuedQty,
-        issuedCents: r.issuedCents,
-        collectedCents: r.collectedCents,
-        varianceCents: r.varianceCents,
-      })),
-      bySeller: bySeller.map((r) => ({
-        sellerName: r._id.sellerName || 'Unknown seller',
-        siteId: r._id.siteId,
-        siteName: siteMap.get(String(r._id.siteId))?.name || 'Unknown site',
-        issuedQty: r.issuedQty,
-        issuedCents: r.issuedCents,
-        collectedCents: r.collectedCents,
-        varianceCents: r.varianceCents,
-      })),
-      remainingByType: remainingByType.map((r) => ({
-        ticketTypeId: r._id,
-        ticketTypeLabel: typeMap.get(String(r._id))?.label || 'Unknown ticket',
-        durationDays: Number(typeMap.get(String(r._id))?.durationDays || 0),
-        priceCents: Number(typeMap.get(String(r._id))?.priceCents || 0),
-        remainingQty:
-          Number(typeMap.get(String(r._id))?.priceCents || 0) > 0
-            ? Number(
-                (
-                  Number(r.remainingCents || 0) /
-                  Number(typeMap.get(String(r._id))?.priceCents || 1)
-                ).toFixed(2)
-              )
-            : Number(r.remainingQty || 0),
-        remainingCents: Number(r.remainingCents || 0),
-        openBatches: Number(r.openBatches || 0),
-      })),
+      position,
+      bySite: siteIds
+        .map((id) => {
+          const r = rangeSite.get(id) || {};
+          const o = siteOwed.get(id) || {};
+          return {
+            siteId: id,
+            siteName: siteName.get(id) || 'Unknown site',
+            issuedQty: Number(r.issuedQty || 0),
+            issuedCents: Number(r.issuedCents || 0),
+            collectedCents: Number(r.collectedCents || 0),
+            returnedQty: Number(r.returnedQty || 0),
+            owedCents: Number(o.owedCents || 0),
+            holdingQty: Number(o.holdingQty || 0),
+          };
+        })
+        .sort((a, b) => b.owedCents - a.owedCents || b.collectedCents - a.collectedCents),
+      sellers,
+      remainingByType: [...byType.values()].sort((a, b) => b.owedCents - a.owedCents),
     });
   })
 );

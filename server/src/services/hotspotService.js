@@ -13,6 +13,7 @@ import { organizationIdForRouter } from '../db/defaultOrganizationId.js';
 import { syncHotspotExpiryScheduler } from './hotspotExpirySchedulerService.js';
 import { config } from '../config.js';
 import { normalizePrintRows } from '../mikrotik/helpers.js';
+import { archiveLinkedUsage } from './ticketLedgerService.js';
 import { configuredHtmlDirectory } from './captivePortalPushService.js';
 
 /** Per-router secret the on-login script sends home (created on first profile sync). */
@@ -452,6 +453,7 @@ export async function generateVouchers({
   codes: previewCodes,
   pushToRouter = true,
   organizationId,
+  source = 'batch',
 }) {
   const pkgQ = { _id: packageId };
   if (
@@ -547,6 +549,7 @@ export async function generateVouchers({
     usersPerTicket: Math.max(1, Number(pkg.usersPerTicket) || 1),
     speedUpMbps: pkg.speedUpMbps,
     speedDownMbps: pkg.speedDownMbps,
+    source: source === 'online' ? 'online' : 'batch',
   }));
 
   const vouchers = await HotspotVoucher.insertMany(docs, { ordered: true });
@@ -751,6 +754,7 @@ export async function deleteTickets(vouchers) {
       summary.routerErrors.push({ routerId: rid, message: e.message });
     }
   }
+  await archiveLinkedUsage(vouchers);
   const r = await HotspotVoucher.deleteMany({ _id: { $in: vouchers.map((v) => v._id) } });
   summary.deleted = r.deletedCount || 0;
   return summary;

@@ -17,6 +17,8 @@ const ticketTypeSchema = new mongoose.Schema(
     durationDays: { type: Number, required: true, min: 1 },
     priceCents: { type: Number, required: true, min: 0 },
     active: { type: Boolean, default: true },
+    /** Hotspot plan these tickets are; when set (and the site has a router) issues hand out real codes. */
+    packageId: { type: mongoose.Schema.Types.ObjectId, ref: 'PlanPackage', default: null },
   },
   { timestamps: true }
 );
