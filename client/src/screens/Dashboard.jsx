@@ -26,6 +26,7 @@ import { TicketTypesPage } from '../pages/tickets/TicketTypesPage.jsx';
 import { TicketIssuePage } from '../pages/tickets/TicketIssuePage.jsx';
 import { TicketCollectionsPage } from '../pages/tickets/TicketCollectionsPage.jsx';
 import { TicketReportsPage } from '../pages/tickets/TicketReportsPage.jsx';
+import { TicketSalesReportPage } from '../pages/tickets/TicketSalesReportPage.jsx';
 import { MessageProvider } from '../messages/MessageProvider.jsx';
 
 export function Dashboard({ onSignOut }) {
@@ -115,6 +116,14 @@ export function Dashboard({ onSignOut }) {
               module="tickets"
             >
               <TicketCollectionsPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="tickets/sales"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']} module="tickets">
+              <TicketSalesReportPage />
             </RoleGate>
           }
         />

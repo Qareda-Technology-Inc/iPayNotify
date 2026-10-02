@@ -240,7 +240,7 @@ function stockQuery(organizationId, routerId, packageId) {
 const onlineBackfilled = new Set();
 
 /** Codes bought on the portal before `source` existed: tag them so they never reach a seller. */
-async function backfillOnlineVouchers(organizationId) {
+export async function backfillOnlineVouchers(organizationId) {
   const key = String(organizationId);
   if (onlineBackfilled.has(key)) return;
   const ids = await Transaction.distinct('hotspotVoucherId', {

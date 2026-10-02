@@ -55,6 +55,7 @@ function headerTitleForPath(pathname) {
     '/tickets/issue': 'Issue tickets',
     '/tickets/collections': 'Cash collections',
     '/tickets/reports': 'Ticket reports',
+    '/tickets/sales': 'Ticket sales',
     '/finance/pppoe': 'PPPoE',
     '/users/remote-access': 'Remote access',
     '/finance/packages': 'Packages',
@@ -266,6 +267,11 @@ export function AdminShell({ onSignOut }) {
               <SideLink to="/tickets/collections" accent="amber">
                 Collections
               </SideLink>
+              {adminRole !== 'ticket_manager' ? (
+                <SideLink to="/tickets/sales" accent="amber">
+                  Sales
+                </SideLink>
+              ) : null}
               <SideLink to="/tickets/reports" accent="amber">
                 Reports
               </SideLink>

@@ -27,6 +27,7 @@ import {
   stockForType,
   voidEntry,
 } from '../services/ticketLedgerService.js';
+import { ticketSalesReport } from '../services/ticketSalesReportService.js';
 import { orgQuery } from '../utils/tenantScope.js';
 
 export const ticketSalesRouter = express.Router();
@@ -698,6 +699,31 @@ ticketSalesRouter.get(
       .populate('voidedByAdminId', 'email fullName')
       .lean();
     res.json(rows);
+  })
+);
+
+/** Tickets sold and sales value per router / site / plan / seller / channel / day. */
+ticketSalesRouter.get(
+  '/sales-report',
+  requireRoles('super_admin', 'org_admin', 'org_staff'),
+  asyncHandler(async (req, res) => {
+    const { from, to } = rangeFromQuery(req);
+    if (to - from > 400 * 86400000) return res.status(400).json({ error: 'Pick a period of 400 days or less.' });
+    const id = (v) => (v && mongoose.isValidObjectId(String(v)) ? String(v) : '');
+    const tz = /^[A-Za-z_]+\/[A-Za-z_]+$/.test(String(req.query.tz || '')) ? String(req.query.tz) : 'Africa/Accra';
+    res.json(
+      await ticketSalesReport(req.organizationId, {
+        from,
+        to,
+        tz,
+        routerId: id(req.query.routerId),
+        siteId: id(req.query.siteId),
+        packageId: id(req.query.packageId),
+        ticketTypeId: id(req.query.ticketTypeId),
+        sellerKey: String(req.query.sellerKey || ''),
+        channel: String(req.query.channel || ''),
+      })
+    );
   })
 );
 
