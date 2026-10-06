@@ -432,6 +432,24 @@ async function pushVoucherBatchToRouter(vouchers, router, pkg) {
   );
 }
 
+/** Push vouchers already saved in the DB (one router, one plan) to MikroTik. */
+export async function pushSavedVouchersToRouter(vouchers) {
+  if (!vouchers.length) return;
+  const router = await resolveRouter(vouchers[0].routerId);
+  const pkg = await PlanPackage.findById(vouchers[0].packageId);
+  if (!pkg) {
+    const err = new Error('Hotspot package no longer exists');
+    err.status = 400;
+    throw err;
+  }
+  await pushVoucherBatchToRouter(vouchers, router, pkg);
+  try {
+    await syncHotspotExpiryScheduler(router._id, await organizationIdForRouter(router));
+  } catch (e) {
+    console.error('[hotspot] expiry scheduler sync failed', e?.message || e);
+  }
+}
+
 export async function removeVoucherFromRouter(voucher) {
   const router = await resolveRouter(voucher.routerId);
   await withRouterMikrotik(router, async (api) => {

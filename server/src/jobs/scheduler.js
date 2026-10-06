@@ -5,7 +5,10 @@ import {
 } from '../services/renewalService.js';
 import { enforceHotspotPlans } from '../services/hotspotService.js';
 import { runExpiryReminderSmsJob } from '../services/expiryReminderSmsService.js';
-import { expireStalePendingPayments } from '../services/paymentService.js';
+import {
+  expireStalePendingPayments,
+  retryPendingVoucherFulfillments,
+} from '../services/paymentService.js';
 import { enforceRemoteAccessRouters } from '../services/remoteAccessService.js';
 import { config } from '../config.js';
 
@@ -15,8 +18,27 @@ let pppoeExpiryTask;
 let hotspotPlanTask;
 let expiryReminderSmsTask;
 let stalePaymentsTask;
+let voucherFulfillTask;
 
 export function startBillingScheduler() {
+  if (!voucherFulfillTask) {
+    voucherFulfillTask = cron.schedule(
+      '*/2 * * * *',
+      async () => {
+        try {
+          const summary = await retryPendingVoucherFulfillments({ maxAgeHours: 24, limit: 50 });
+          if (summary.checked > 0) {
+            console.log('[billing] paid voucher fulfilment retry', new Date().toISOString(), summary);
+          }
+        } catch (e) {
+          console.error('[billing] paid voucher fulfilment retry failed', e);
+        }
+      },
+      { timezone: config.cronTz }
+    );
+    console.log(`[billing] paid voucher fulfilment retry every 2 minutes (${config.cronTz})`);
+  }
+
   if (!task) {
     task = cron.schedule(
       '0 0 * * *',
@@ -162,5 +184,9 @@ export function stopBillingScheduler() {
   if (stalePaymentsTask) {
     stalePaymentsTask.stop();
     stalePaymentsTask = null;
+  }
+  if (voucherFulfillTask) {
+    voucherFulfillTask.stop();
+    voucherFulfillTask = null;
   }
 }

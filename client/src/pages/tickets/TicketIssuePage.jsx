@@ -364,7 +364,7 @@ export function TicketIssuePage() {
                 {stock.available === 0 ? (
                   <>
                     {' '}
-                    <Link to="/tickets" className="text-emerald-300 underline">
+                    <Link to="/hotspot" className="text-emerald-300 underline">
                       Generate tickets
                     </Link>{' '}
                     for this plan first.

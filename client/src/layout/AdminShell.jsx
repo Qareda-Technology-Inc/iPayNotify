@@ -49,7 +49,6 @@ function headerTitleForPath(pathname) {
   const exact = {
     '/users/customers': 'Customers',
     '/users/active': 'Active users',
-    '/tickets/sales': 'Ticket operations',
     '/tickets/sites': 'Ticket sites',
     '/tickets/types': 'Ticket types',
     '/tickets/issue': 'Issue tickets',

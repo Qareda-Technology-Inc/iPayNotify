@@ -1,12 +1,12 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
-import { Transaction, PppoeAccount, PlanPackage, User, Router } from '../models/index.js';
+import { Transaction, PppoeAccount, PlanPackage, User, Router, HotspotVoucher } from '../models/index.js';
 import { resolveDefaultOrganizationId } from '../db/defaultOrganizationId.js';
 import { normalizeGhanaMsisdn } from '../utils/phoneGhana.js';
 import { normalizeRenewCode } from '../utils/renewCode.js';
 import { config } from '../config.js';
 import { syncPppoeAccountToRouter } from './pppoeService.js';
-import { generateVouchers } from './hotspotService.js';
+import { generateVouchers, pushSavedVouchersToRouter } from './hotspotService.js';
 import {
   buildHubtelCheckoutSession,
   fetchHubtelTransactionStatus,
@@ -662,6 +662,91 @@ function needsPaidNotifications(tx) {
   return sms !== 'sent' || email !== 'sent';
 }
 
+/** Hubtel callback, status poll and cron can all fulfil the same tx at once. */
+const voucherFulfillInFlight = new Set();
+
+/**
+ * The code is saved on the tx before the router push, so a router that is offline or slow
+ * never loses a paid code: later attempts reuse it and only retry the push.
+ */
+async function fulfillVoucherTransaction(tx) {
+  const key = String(tx._id);
+  if (voucherFulfillInFlight.has(key)) return { ok: false, reason: 'in_progress' };
+  voucherFulfillInFlight.add(key);
+  try {
+    const fresh = await Transaction.findById(tx._id).select('hotspotVoucherId meta').lean();
+    if (fresh?.meta?.fulfillment === 'done') return { ok: true, already: true };
+    if (fresh?.hotspotVoucherId) tx.hotspotVoucherId = fresh.hotspotVoucherId;
+
+    let v = tx.hotspotVoucherId ? await HotspotVoucher.findById(tx.hotspotVoucherId) : null;
+    const attempts = Number(tx.meta?.routerPushAttempts || 0) + 1;
+    try {
+      if (!v) {
+        [v] = await generateVouchers({
+          count: 1,
+          packageId: tx.packageId,
+          routerId: tx.meta.routerId,
+          hotspotServer: tx.meta.hotspotServer || '',
+          pushToRouter: false,
+          source: 'online',
+        });
+        tx.hotspotVoucherId = v._id;
+        mergeTxMeta(tx, { fulfillment: 'router_pending', voucherCode: v.code });
+        await tx.save();
+      }
+      await pushSavedVouchersToRouter([v]);
+    } catch (e) {
+      console.error('[voucher.fulfill] failed', tx.clientReference, `attempt=${attempts}`, e?.message || e);
+      mergeTxMeta(tx, {
+        fulfillment: v ? 'router_pending' : 'pending',
+        routerPushAttempts: attempts,
+        routerPushError: { at: new Date().toISOString(), error: e?.message || 'push_failed' },
+      });
+      await tx.save();
+      return { ok: false, reason: v ? 'router_push_failed' : 'voucher_create_failed', code: v?.code };
+    }
+
+    const pkg = await PlanPackage.findById(tx.packageId);
+    mergeTxMeta(tx, {
+      fulfillment: 'done',
+      voucherCode: v.code,
+      routerPushAttempts: attempts,
+      routerPushError: null,
+    });
+    await notifyPaidChannels(tx, {
+      kind: 'voucher',
+      code: v.code,
+      voucherCode: v.code,
+      validUntil: v.validUntil,
+      packageName: pkg?.name,
+    });
+    await tx.save();
+    return { ok: true, kind: 'voucher', code: v.code };
+  } finally {
+    voucherFulfillInFlight.delete(key);
+  }
+}
+
+/** Paid voucher txs whose code never reached the router (cron safety net). */
+export async function retryPendingVoucherFulfillments({ maxAgeHours = 24, limit = 50 } = {}) {
+  const since = new Date(Date.now() - Math.max(1, Number(maxAgeHours) || 24) * 60 * 60 * 1000);
+  const rows = await Transaction.find({
+    kind: 'voucher',
+    status: 'paid',
+    createdAt: { $gte: since },
+    'meta.fulfillment': { $in: ['pending', 'router_pending'] },
+  })
+    .sort({ createdAt: 1 })
+    .limit(Math.min(200, Math.max(1, Number(limit) || 50)));
+  const summary = { checked: rows.length, done: 0, failed: 0 };
+  for (const tx of rows) {
+    const r = await fulfillPaidTransaction(tx);
+    if (r.ok) summary.done += 1;
+    else summary.failed += 1;
+  }
+  return summary;
+}
+
 export async function fulfillPaidTransaction(txDoc) {
   const tx =
     txDoc instanceof Transaction ? txDoc : await Transaction.findById(txDoc._id || txDoc);
@@ -740,27 +825,7 @@ export async function fulfillPaidTransaction(txDoc) {
   }
 
   if (tx.kind === 'voucher' && tx.packageId && tx.meta?.routerId) {
-    const vouchers = await generateVouchers({
-      count: 1,
-      packageId: tx.packageId,
-      routerId: tx.meta.routerId,
-      hotspotServer: tx.meta.hotspotServer || '',
-      pushToRouter: true,
-      source: 'online',
-    });
-    const v = vouchers[0];
-    tx.hotspotVoucherId = v._id;
-    const pkg = await PlanPackage.findById(tx.packageId);
-    mergeTxMeta(tx, { fulfillment: 'done', voucherCode: v.code });
-    await notifyPaidChannels(tx, {
-      kind: 'voucher',
-      code: v.code,
-      voucherCode: v.code,
-      validUntil: v.validUntil,
-      packageName: pkg?.name,
-    });
-    await tx.save();
-    return { ok: true, kind: 'voucher', code: v.code };
+    return fulfillVoucherTransaction(tx);
   }
 
   mergeTxMeta(tx, { fulfillment: 'skipped', reason: 'unknown_kind' });

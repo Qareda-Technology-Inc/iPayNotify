@@ -74,7 +74,6 @@ export function Dashboard({ onSignOut }) {
             </RoleGate>
           }
         />
-        <Route path="tickets/sales" element={<Navigate to="/tickets/issue" replace />} />
         <Route
           path="tickets/sites"
           element={

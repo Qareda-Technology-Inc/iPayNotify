@@ -7,6 +7,7 @@ import {
   createPppoeRenewalCheckout,
   createHotspotPurchaseCheckout,
   getTransactionByReference,
+  fulfillPaidTransaction,
   markTransactionPaidByReference,
   reconcilePaymentFromHubtelStatus,
   recordHubtelClientCheckoutEvent,
@@ -295,6 +296,18 @@ publicPortalRouter.get(
           tx = await getTransactionByReference(req.params.ref);
         } catch (e) {
           console.warn('[hubtel.reconcile] status poll failed', req.params.ref, e?.message || e);
+        }
+      }
+    }
+
+    if (tx.status === 'paid' && tx.kind === 'voucher' && tx.meta?.fulfillment !== 'done') {
+      const lastTry = tx.meta?.routerPushError?.at ? new Date(tx.meta.routerPushError.at).getTime() : 0;
+      if (!lastTry || Date.now() - lastTry >= 10_000) {
+        try {
+          await fulfillPaidTransaction({ _id: tx._id });
+          tx = await getTransactionByReference(req.params.ref);
+        } catch (e) {
+          console.warn('[voucher.fulfill] status poll retry failed', req.params.ref, e?.message || e);
         }
       }
     }

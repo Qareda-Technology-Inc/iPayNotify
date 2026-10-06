@@ -3,6 +3,11 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { publicFetch } from '../api.js';
 
 const MAX_TRIES = 40;
+const MAX_ACTIVATE_TRIES = 60;
+
+function voucherActivating(data) {
+  return data?.status === 'paid' && data?.kind === 'voucher' && data?.fulfillment !== 'done';
+}
 
 export function PayReturnPage() {
   const [params] = useSearchParams();
@@ -35,6 +40,7 @@ export function PayReturnPage() {
     }
     let cancelled = false;
     let tries = 0;
+    let activateTries = 0;
     setTimedOut(false);
     const tick = async () => {
       try {
@@ -45,6 +51,9 @@ export function PayReturnPage() {
           setTimeout(tick, 1500);
         } else if (data.status === 'pending') {
           setTimedOut(true);
+        } else if (voucherActivating(data) && activateTries < MAX_ACTIVATE_TRIES) {
+          activateTries += 1;
+          setTimeout(tick, 5000);
         }
       } catch (e) {
         if (!cancelled) setError(e.message);
@@ -134,7 +143,26 @@ export function PayReturnPage() {
     );
   }
 
+  if (status.status === 'paid' && status.kind === 'voucher' && !status.voucherCode) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-16 text-center">
+        <h1 className="text-lg font-semibold text-white">Payment received</h1>
+        <p className="mt-4 text-slate-400">Preparing your Wi‑Fi ticket code… keep this page open.</p>
+        <p className="mt-4 font-mono text-xs text-slate-500 break-all">{ref}</p>
+        <button
+          type="button"
+          disabled={checking}
+          onClick={checkAgain}
+          className="mt-6 rounded-lg border border-emerald-600/50 bg-emerald-950/40 px-4 py-2 text-sm text-emerald-200 disabled:opacity-50"
+        >
+          {checking ? 'Checking…' : 'Check again'}
+        </button>
+      </div>
+    );
+  }
+
   if (status.status === 'paid' && status.kind === 'voucher' && status.voucherCode) {
+    const activating = voucherActivating(status);
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center">
         <h1 className="text-lg font-semibold text-white">Payment successful</h1>
@@ -151,6 +179,19 @@ export function PayReturnPage() {
         >
           {copied ? 'Copied' : 'Copy code'}
         </button>
+        {activating ? (
+          <div className="mt-6 rounded-lg border border-amber-500/40 bg-amber-950/30 px-3 py-2 text-sm text-amber-100">
+            <p>Activating this code on the Wi‑Fi router… it can take a few minutes.</p>
+            <button
+              type="button"
+              disabled={checking}
+              onClick={checkAgain}
+              className="mt-2 text-xs text-amber-200 underline disabled:opacity-50"
+            >
+              {checking ? 'Checking…' : 'Check again'}
+            </button>
+          </div>
+        ) : null}
         <p className="mt-6 text-sm text-slate-500">
           Go back to the Wi‑Fi login page and enter this code to connect. Keep it until your plan runs out.
         </p>
