@@ -16,9 +16,10 @@ export function PayReturnPage() {
   const renewHref = siteSlug
     ? `/portal/renew?r=${encodeURIComponent(siteSlug)}`
     : '/portal/renew';
-  const hotspotHref = siteSlug
-    ? `/portal/hotspot?r=${encodeURIComponent(siteSlug)}`
-    : '/portal/hotspot';
+  const serverName = params.get('s');
+  const hotspotHref = `/portal/hotspot${siteSlug ? `?r=${encodeURIComponent(siteSlug)}` : ''}${
+    serverName ? `${siteSlug ? '&' : '?'}s=${encodeURIComponent(serverName)}` : ''
+  }`;
   const [status, setStatus] = useState(null);
   const [error, setError] = useState('');
   const [timedOut, setTimedOut] = useState(false);

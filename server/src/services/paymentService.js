@@ -303,9 +303,17 @@ export async function createPppoeRenewalCheckout({
   });
 }
 
+/** `$(server-name)` from the login page; unreplaced placeholders and junk are dropped. */
+function cleanHotspotServerName(value) {
+  const s = String(value || '').trim();
+  if (!s || s.length > 64 || s.includes('$(') || /[\u0000-\u001f"\\]/.test(s)) return '';
+  return s;
+}
+
 export async function createHotspotPurchaseCheckout({
   packageId,
   routerId,
+  hotspotServer,
   customerMsisdn,
   customerName,
 }) {
@@ -322,7 +330,9 @@ export async function createHotspotPurchaseCheckout({
     throw err;
   }
 
-  const routerDoc = await Router.findById(routerId).select('organizationId').lean();
+  const routerDoc = await Router.findById(routerId)
+    .select('organizationId captivePortal.hotspotServer')
+    .lean();
   if (!routerDoc) {
     const err = new Error('Router not found');
     err.status = 404;
@@ -354,6 +364,9 @@ export async function createHotspotPurchaseCheckout({
     customerName: resolvedName,
     meta: {
       routerId: String(routerId),
+      hotspotServer:
+        cleanHotspotServerName(hotspotServer) ||
+        cleanHotspotServerName(routerDoc.captivePortal?.hotspotServer),
       fulfillment: 'pending',
     },
   });
@@ -680,13 +693,22 @@ async function fulfillVoucherTransaction(tx) {
 
     let v = tx.hotspotVoucherId ? await HotspotVoucher.findById(tx.hotspotVoucherId) : null;
     const attempts = Number(tx.meta?.routerPushAttempts || 0) + 1;
+    let serverName = cleanHotspotServerName(tx.meta?.hotspotServer);
+    if (!serverName) {
+      const r = await Router.findById(tx.meta.routerId).select('captivePortal.hotspotServer').lean();
+      serverName = cleanHotspotServerName(r?.captivePortal?.hotspotServer);
+    }
     try {
+      if (v && !v.hotspotServer && serverName) {
+        v.hotspotServer = serverName;
+        await v.save();
+      }
       if (!v) {
         [v] = await generateVouchers({
           count: 1,
           packageId: tx.packageId,
           routerId: tx.meta.routerId,
-          hotspotServer: tx.meta.hotspotServer || '',
+          hotspotServer: serverName,
           pushToRouter: false,
           source: 'online',
         });

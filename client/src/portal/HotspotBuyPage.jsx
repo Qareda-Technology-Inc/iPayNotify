@@ -55,11 +55,14 @@ export function HotspotBuyPage() {
 
   const siteReady = Boolean(ctx?.resolved && ctx.router?.id);
   const slug = getPortalSlugFromLocation();
+  const hotspotServer = new URLSearchParams(window.location.search).get('s') || '';
   const brandName = String(ctx?.branding?.displayName || '').trim() || 'Wi‑Fi';
   const footerText = String(ctx?.branding?.portalFooter || '').trim();
   const supportPhone = String(ctx?.branding?.portalSupportPhone || '').trim();
   const returnPath = (ref) =>
-    `/portal/pay/return?ref=${encodeURIComponent(ref)}&flow=hotspot${slug ? `&r=${encodeURIComponent(slug)}` : ''}`;
+    `/portal/pay/return?ref=${encodeURIComponent(ref)}&flow=hotspot${slug ? `&r=${encodeURIComponent(slug)}` : ''}${
+      hotspotServer ? `&s=${encodeURIComponent(hotspotServer)}` : ''
+    }`;
 
   useEffect(() => {
     if (!siteReady) {
@@ -108,6 +111,7 @@ export function HotspotBuyPage() {
         body: JSON.stringify({
           packageId,
           portalSlug: getPortalSlugFromLocation() || undefined,
+          hotspotServer: hotspotServer || undefined,
           customerMsisdn: digits,
           customerName: undefined,
         }),

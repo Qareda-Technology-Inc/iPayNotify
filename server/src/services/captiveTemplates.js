@@ -367,7 +367,7 @@ ${layout}`;
  *   headline?: string, subtitle?: string, buttonLabel?: string, buyLabel?: string, buyUrl?: string,
  *   footerText?: string, supportPhone?: string, plans?: object[], showPlans?: boolean,
  *   mode?: 'router' | 'web' | 'preview',
- *   web?: { action?: string, dst?: string, error?: string, username?: string },
+ *   web?: { action?: string, dst?: string, error?: string, username?: string, serverName?: string },
  * }} o
  */
 export function renderLoginPage(o = {}) {
@@ -378,9 +378,15 @@ export function renderLoginPage(o = {}) {
   const buttonLabel = pick(o.buttonLabel, 'Connect');
   const buyLabel = pick(o.buyLabel, 'Buy a code');
   const brandName = pick(o.brandName, 'Wi-Fi');
-  const buyUrl = String(o.buyUrl || '').trim();
   const mode = o.mode === 'web' || o.mode === 'preview' ? o.mode : 'router';
   const web = o.web || {};
+  const buyUrl = String(o.buyUrl || '').trim();
+  const webServer = mode === 'web' ? String(web.serverName || '').trim() : '';
+  /* Left unescaped so the router fills in $(server-name) for the server the guest is on. */
+  const serverQuery =
+    mode === 'router' ? 's=$(server-name)' : webServer ? `s=${esc(encodeURIComponent(webServer))}` : '';
+  const buyHref = (url) =>
+    serverQuery ? `${esc(url)}${url.includes('?') ? '&amp;' : '?'}${serverQuery}` : esc(url);
 
   let action = '$(link-login-only)';
   let dst = '$(link-orig)';
@@ -407,7 +413,7 @@ export function renderLoginPage(o = {}) {
   const site = String(o.siteName || '').trim();
   const brand = `<p class="brand">${logo}<span>${esc(brandName)}${site ? ` <span class="site">· ${esc(site)}</span>` : ''}</span></p>`;
   const lead = `<div class="lead"><h1>${esc(headline)}</h1><p class="sub">${esc(subtitle)}</p></div>`;
-  const buyLink = buyUrl ? `<a class="buy" href="${esc(buyUrl)}">${esc(buyLabel)}</a>` : '';
+  const buyLink = buyUrl ? `<a class="buy" href="${buyHref(buyUrl)}">${esc(buyLabel)}</a>` : '';
   const form = `${errorBlock}
 <form action="${action}" method="post"${formAttrs}>
 <input type="hidden" name="dst" value="${dst}">
@@ -426,7 +432,7 @@ ${buyLink}`;
       if (!buyUrl) return `<div class="plan">${inner}</div>`;
       const sep = buyUrl.includes('?') ? '&' : '?';
       const href = /^[a-f\d]{24}$/i.test(String(p._id)) ? `${buyUrl}${sep}package=${p._id}` : buyUrl;
-      return `<a class="plan" href="${esc(href)}">${inner}</a>`;
+      return `<a class="plan" href="${buyHref(href)}">${inner}</a>`;
     })
     .join('');
   const plansBlock = planItems ? `<section class="plans"><h2>Plans &amp; prices</h2>${planItems}</section>` : '';

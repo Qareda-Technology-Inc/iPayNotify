@@ -95,6 +95,7 @@ publicPortalRouter.get(
       web: {
         action,
         dst: String(req.query.dst || req.query['link-orig'] || ''),
+        serverName: String(req.query['server-name'] || req.query.s || ''),
         error: action
           ? String(req.query.error || '')
           : 'Open this page from the venue Wi-Fi login so the router can accept your code.',
@@ -253,7 +254,7 @@ publicPortalRouter.post(
 publicPortalRouter.post(
   '/hotspot/checkout',
   asyncHandler(async (req, res) => {
-    const { packageId, customerMsisdn, customerName, portalSlug } = req.body;
+    const { packageId, customerMsisdn, customerName, portalSlug, hotspotServer } = req.body;
     if (!packageId) {
       return res.status(400).json({ error: 'packageId is required' });
     }
@@ -270,6 +271,7 @@ publicPortalRouter.post(
     const out = await createHotspotPurchaseCheckout({
       packageId,
       routerId: ctx.router.id,
+      hotspotServer,
       customerMsisdn: customerMsisdn ? String(customerMsisdn).replace(/\s/g, '') : undefined,
       customerName,
     });
