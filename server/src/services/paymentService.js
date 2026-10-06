@@ -749,22 +749,124 @@ async function fulfillVoucherTransaction(tx) {
   }
 }
 
-/** Paid voucher txs whose code never reached the router (cron safety net). */
-export async function retryPendingVoucherFulfillments({ maxAgeHours = 24, limit = 50 } = {}) {
+async function syncRenewalToRouter(tx, acc) {
+  try {
+    await syncPppoeAccountToRouter(acc);
+    mergeTxMeta(tx, { routerSyncPending: false, routerSyncError: null });
+    return true;
+  } catch (e) {
+    console.error('[renewal.fulfill] router sync failed', tx.clientReference || tx._id, e?.message || e);
+    mergeTxMeta(tx, {
+      routerSyncPending: true,
+      routerSyncError: { at: new Date().toISOString(), error: e?.message || 'sync_failed' },
+    });
+    return false;
+  }
+}
+
+/**
+ * The callback, the pay-return status poll and the checkout success event can all confirm the
+ * same payment at once; the atomic claim lets exactly one of them extend paidUntil.
+ * A router sync failure never re-runs the extension, only the sync.
+ */
+async function fulfillRenewalTransaction(txDoc) {
+  const tx = await Transaction.findOneAndUpdate(
+    {
+      _id: txDoc._id,
+      status: 'paid',
+      'meta.renewedUntil': { $exists: false },
+      'meta.renewClaimedAt': { $exists: false },
+    },
+    { $set: { 'meta.renewClaimedAt': new Date().toISOString() } },
+    { new: true }
+  );
+  if (!tx) return { ok: true, already: true };
+
+  const acc = await PppoeAccount.findById(tx.pppoeAccountId);
+  if (!acc) {
+    mergeTxMeta(tx, { fulfillment: 'failed', reason: 'account_missing' });
+    await tx.save();
+    return { ok: false, reason: 'account_missing' };
+  }
+  const pkg = tx.packageId
+    ? await PlanPackage.findById(tx.packageId)
+    : acc.packageId
+      ? await PlanPackage.findById(acc.packageId)
+      : null;
+  const now = new Date();
+  const base = acc.paidUntil > now ? acc.paidUntil : now;
+  acc.paidUntil = extendPaidUntilByPackage(base, pkg);
+  acc.disabled = false;
+  await acc.save();
+  mergeTxMeta(tx, {
+    fulfillment: 'done',
+    renewedFrom: base.toISOString(),
+    renewedUntil: acc.paidUntil,
+  });
+  await tx.save();
+
+  await syncRenewalToRouter(tx, acc);
+  let customerNameForSms = tx.customerName;
+  if (!String(customerNameForSms || '').trim() && tx.userId) {
+    const u = await User.findById(tx.userId).select('fullName').lean();
+    customerNameForSms = u?.fullName;
+  }
+  await notifyPaidChannels(tx, {
+    kind: 'renewal',
+    renewalType: 'pppoe',
+    paidUntil: acc.paidUntil,
+    secretName: acc.secretName,
+    routerId: acc.routerId,
+    packageDoc: pkg && typeof pkg.toObject === 'function' ? pkg.toObject() : pkg,
+    packageName: pkg?.name,
+    customerName: customerNameForSms,
+  });
+  await tx.save();
+  return { ok: true, kind: 'renewal', paidUntil: acc.paidUntil };
+}
+
+/**
+ * Cron safety net: paid voucher codes that never reached the router, and paid renewals whose
+ * router sync failed (paidUntil is already extended; only the sync is retried).
+ */
+export async function retryPaidFulfillments({ maxAgeHours = 24, limit = 50 } = {}) {
   const since = new Date(Date.now() - Math.max(1, Number(maxAgeHours) || 24) * 60 * 60 * 1000);
-  const rows = await Transaction.find({
+  const cap = Math.min(200, Math.max(1, Number(limit) || 50));
+  const vouchers = await Transaction.find({
     kind: 'voucher',
     status: 'paid',
     createdAt: { $gte: since },
     'meta.fulfillment': { $in: ['pending', 'router_pending'] },
   })
     .sort({ createdAt: 1 })
-    .limit(Math.min(200, Math.max(1, Number(limit) || 50)));
-  const summary = { checked: rows.length, done: 0, failed: 0 };
-  for (const tx of rows) {
+    .limit(cap);
+  const summary = { checked: vouchers.length, done: 0, failed: 0, renewalSyncs: 0, renewalSyncFailed: 0 };
+  for (const tx of vouchers) {
     const r = await fulfillPaidTransaction(tx);
     if (r.ok) summary.done += 1;
     else summary.failed += 1;
+  }
+
+  const renewals = await Transaction.find({
+    kind: 'renewal',
+    status: 'paid',
+    createdAt: { $gte: since },
+    'meta.routerSyncPending': true,
+  })
+    .sort({ createdAt: 1 })
+    .limit(cap);
+  summary.checked += renewals.length;
+  for (const tx of renewals) {
+    const acc = tx.pppoeAccountId ? await PppoeAccount.findById(tx.pppoeAccountId) : null;
+    if (!acc) {
+      mergeTxMeta(tx, { routerSyncPending: false });
+      await tx.save();
+      continue;
+    }
+    const ok = await syncRenewalToRouter(tx, acc);
+    await tx.save();
+    if (ok) summary.renewalSyncs += 1;
+    else summary.renewalSyncFailed += 1;
   }
   return summary;
 }
@@ -809,41 +911,7 @@ export async function fulfillPaidTransaction(txDoc) {
   }
 
   if (tx.kind === 'renewal' && tx.pppoeAccountId) {
-    const acc = await PppoeAccount.findById(tx.pppoeAccountId);
-    if (!acc) {
-      mergeTxMeta(tx, { fulfillment: 'failed', reason: 'account_missing' });
-      await tx.save();
-      return { ok: false, reason: 'account_missing' };
-    }
-    const pkg = tx.packageId
-      ? await PlanPackage.findById(tx.packageId)
-      : acc.packageId
-        ? await PlanPackage.findById(acc.packageId)
-        : null;
-    const now = new Date();
-    const base = acc.paidUntil > now ? acc.paidUntil : now;
-    acc.paidUntil = extendPaidUntilByPackage(base, pkg);
-    acc.disabled = false;
-    await acc.save();
-    await syncPppoeAccountToRouter(acc);
-    mergeTxMeta(tx, { fulfillment: 'done', renewedUntil: acc.paidUntil });
-    let customerNameForSms = tx.customerName;
-    if (!String(customerNameForSms || '').trim() && tx.userId) {
-      const u = await User.findById(tx.userId).select('fullName').lean();
-      customerNameForSms = u?.fullName;
-    }
-    await notifyPaidChannels(tx, {
-      kind: 'renewal',
-      renewalType: 'pppoe',
-      paidUntil: acc.paidUntil,
-      secretName: acc.secretName,
-      routerId: acc.routerId,
-      packageDoc: pkg && typeof pkg.toObject === 'function' ? pkg.toObject() : pkg,
-      packageName: pkg?.name,
-      customerName: customerNameForSms,
-    });
-    await tx.save();
-    return { ok: true, kind: 'renewal', paidUntil: acc.paidUntil };
+    return fulfillRenewalTransaction(tx);
   }
 
   if (tx.kind === 'voucher' && tx.packageId && tx.meta?.routerId) {
@@ -868,10 +936,21 @@ export async function markTransactionFailedByReference(clientReference, provider
 }
 
 export async function markTransactionPaidByReference(clientReference, providerData = {}) {
-  const tx = await Transaction.findOne({ clientReference });
+  /* Atomic: when several confirmations race, only one moves the tx to paid. */
+  let tx = await Transaction.findOneAndUpdate(
+    { clientReference, status: { $in: ['pending', 'failed'] } },
+    { $set: { status: 'paid' } },
+    { new: true }
+  );
+  const claimedPaid = Boolean(tx);
+  if (!tx) tx = await Transaction.findOne({ clientReference });
   if (!tx) return { ok: false, reason: 'not_found' };
-  if (tx.status === 'paid') {
+  if (!claimedPaid && tx.status !== 'paid') {
+    return { ok: false, reason: 'not_payable', status: tx.status };
+  }
+  if (!claimedPaid) {
     await fulfillPaidTransaction(tx);
+    tx = (await Transaction.findById(tx._id)) || tx;
     try {
       await settlePaidTransactionToWallet(tx);
       mergeTxMeta(tx, { walletSettleFailed: null });
@@ -901,6 +980,8 @@ export async function markTransactionPaidByReference(clientReference, providerDa
   mergeTxMeta(tx, { callback: providerData, paymentFailed: false });
   await tx.save();
   const result = await fulfillPaidTransaction(tx);
+  /* Fulfilment saves its own copy of the tx; reload so the saves below do not overwrite it. */
+  tx = (await Transaction.findById(tx._id)) || tx;
   try {
     await settlePaidTransactionToWallet(tx);
     mergeTxMeta(tx, { walletSettleFailed: null });

@@ -103,6 +103,52 @@ async function fetchPrintList(adapter, printCmd) {
   return parseActiveListStdout(lastOut, kind);
 }
 
+/** Single-record system prints and the fields that prove a parse actually worked. */
+const SYSTEM_PRINT_KEYS = {
+  '/system/identity/print': ['name'],
+  '/system/resource/print': ['version', 'uptime', 'board-name'],
+  '/system/routerboard/print': ['model', 'board-name', 'routerboard'],
+};
+
+/**
+ * `print as-value` typed at the terminal prints nothing on many RouterOS builds (it only returns a
+ * value inside scripts), so the plain `key: value` print goes first.
+ */
+async function fetchSystemPrint(adapter, printCmd) {
+  const verb = apiPathToCliVerb(printCmd.replace(/\/print$/, ''));
+  const keys = SYSTEM_PRINT_KEYS[printCmd];
+  const usable = (row) => row && keys.some((k) => String(row[k] ?? '').trim());
+  let lastErr = null;
+  let lastOut = '';
+  for (const line of [`${verb} print without-paging`, `${verb} print as-value without-paging`]) {
+    let out;
+    try {
+      out = await execRos(adapter.conn, line);
+    } catch (e) {
+      lastErr = e;
+      continue;
+    }
+    lastOut = out || lastOut;
+    const candidates = [parseColonDetailOutput(out), ...parseAsValuePrintOutput(out)];
+    if (printCmd === '/system/identity/print') {
+      const name = parseIdentityName(out);
+      if (name) candidates.push({ name });
+    }
+    const row = candidates.find(usable);
+    if (row) return [row];
+  }
+  if (lastOut.trim()) {
+    console.warn('[mikrotik.print]', printCmd, 'no fields parsed; stdout sample=', lastOut.slice(0, 280).replace(/\s+/g, ' '));
+    return [];
+  }
+  if (lastErr) {
+    const err = new Error(`${lastErr.message}\n(SSH exec: ${verb} print)`);
+    err.status = lastErr.status;
+    throw err;
+  }
+  return [];
+}
+
 /** Minimal RouterOS API-like surface over SSH exec (same CLI as Winbox terminal). */
 export class SshRosAdapter {
   constructor(conn) {
@@ -127,6 +173,9 @@ export class SshRosAdapter {
   async write(cmd, ..._rest) {
     if (typeof cmd === 'string' && isActiveSessionsListPrint(cmd)) {
       return fetchPrintList(this, cmd);
+    }
+    if (typeof cmd === 'string' && SYSTEM_PRINT_KEYS[cmd]) {
+      return fetchSystemPrint(this, cmd);
     }
 
     const execLine = buildExecFromWriteArgs(cmd);

@@ -7,7 +7,7 @@ import { enforceHotspotPlans } from '../services/hotspotService.js';
 import { runExpiryReminderSmsJob } from '../services/expiryReminderSmsService.js';
 import {
   expireStalePendingPayments,
-  retryPendingVoucherFulfillments,
+  retryPaidFulfillments,
 } from '../services/paymentService.js';
 import { enforceRemoteAccessRouters } from '../services/remoteAccessService.js';
 import { config } from '../config.js';
@@ -26,17 +26,17 @@ export function startBillingScheduler() {
       '*/2 * * * *',
       async () => {
         try {
-          const summary = await retryPendingVoucherFulfillments({ maxAgeHours: 24, limit: 50 });
+          const summary = await retryPaidFulfillments({ maxAgeHours: 24, limit: 50 });
           if (summary.checked > 0) {
-            console.log('[billing] paid voucher fulfilment retry', new Date().toISOString(), summary);
+            console.log('[billing] paid fulfilment retry', new Date().toISOString(), summary);
           }
         } catch (e) {
-          console.error('[billing] paid voucher fulfilment retry failed', e);
+          console.error('[billing] paid fulfilment retry failed', e);
         }
       },
       { timezone: config.cronTz }
     );
-    console.log(`[billing] paid voucher fulfilment retry every 2 minutes (${config.cronTz})`);
+    console.log(`[billing] paid fulfilment retry every 2 minutes (${config.cronTz})`);
   }
 
   if (!task) {
