@@ -270,7 +270,7 @@ export async function removeOrgTeamMember(organizationId, adminId, actorAdminId,
     const otherAdmins = await Admin.countDocuments({
       organizationId,
       role: 'org_admin',
-      status: 'active',
+      status: { $ne: 'invited' },
       _id: { $ne: target._id },
     });
     if (otherAdmins === 0) {

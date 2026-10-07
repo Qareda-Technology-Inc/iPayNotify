@@ -645,7 +645,8 @@ routersApi.post(
       .select('name comment host organizationId')
       .lean();
     if (!doc) return res.status(404).json({ error: 'Router not found' });
-    const sent = await sendRouterAlert(doc, 'test');
+    const target = doc.organizationId || !req.organizationId ? doc : { ...doc, organizationId: req.organizationId };
+    const sent = await sendRouterAlert(target, 'test');
     res.json({ ok: true, ...sent });
   })
 );

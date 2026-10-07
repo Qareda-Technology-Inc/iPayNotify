@@ -272,7 +272,15 @@ export function RoutersPanel() {
     setMonitorMsg('');
     try {
       const res = await apiFetch(`/api/routers/${selectedId}/monitor/test-alert`, { method: 'POST' });
-      setMonitorMsg(`Test sent — ${res.result}`);
+      if (!res.people) {
+        setMonitorErr('No one to alert — this router’s organisation has no active team members. Add them under Organisation → Team.');
+        return;
+      }
+      const notes = [];
+      if (res.fallback) notes.push('no organisation team found, sent to platform admins');
+      if (res.emails && !res.phones) notes.push('no team phone numbers saved, so no SMS');
+      if (res.emailErrors?.length) notes.push(`email error: ${res.emailErrors[0]}`);
+      setMonitorMsg(`Test sent — ${res.result}${notes.length ? ` (${notes.join('; ')})` : ''}`);
     } catch (e) {
       setMonitorErr(e.message || 'Test alert failed');
     } finally {
