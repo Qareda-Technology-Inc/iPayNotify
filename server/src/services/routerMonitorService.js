@@ -24,7 +24,9 @@ const PROBE_TIMEOUT_MS = 25_000;
 const PROBE_CONCURRENCY = 4;
 /** Router answered (refused / rejected login / slow): it is up, the app just cannot manage it. */
 const REACHABLE_CODES = new Set(['login', 'refused', 'slow']);
-const ALERT_ROLES = ['org_admin', 'org_staff'];
+const ALERT_ROLES = ['org_admin', 'org_staff', 'ticket_manager'];
+/** Accounts created before `status` existed have no stored value; only pending invites are excluded. */
+const NOT_INVITED = { $ne: 'invited' };
 const TZ = 'Africa/Accra';
 
 let running = false;
@@ -74,11 +76,13 @@ async function probeRouter(routerId) {
 async function alertRecipients(organizationId) {
   const q =
     organizationId && mongoose.isValidObjectId(String(organizationId))
-      ? { organizationId, role: { $in: ALERT_ROLES }, status: 'active' }
+      ? { organizationId, role: { $in: ALERT_ROLES }, status: NOT_INVITED }
       : null;
   let admins = q ? await Admin.find(q).select('email phone').lean() : [];
+  let fallback = false;
   if (!admins.length) {
-    admins = await Admin.find({ role: 'super_admin', status: 'active' }).select('email phone').lean();
+    fallback = true;
+    admins = await Admin.find({ role: 'super_admin', status: NOT_INVITED }).select('email phone').lean();
   }
   const emails = new Set();
   const phones = new Set();
@@ -88,7 +92,7 @@ async function alertRecipients(organizationId) {
     const p = normalizeGhanaMsisdn(a.phone);
     if (p) phones.add(p);
   }
-  return { emails: [...emails], phones: [...phones] };
+  return { emails: [...emails], phones: [...phones], people: admins.length, fallback };
 }
 
 function smsText(brand, kind, name, info) {
@@ -106,7 +110,7 @@ function smsText(brand, kind, name, info) {
 export async function sendRouterAlert(router, kind, info = {}) {
   const name = routerDisplayName(router) || router.name || router.host;
   const orgId = router.organizationId ? String(router.organizationId) : null;
-  const { emails, phones } = await alertRecipients(orgId);
+  const { emails, phones, people, fallback } = await alertRecipients(orgId);
   const branding = await resolveSmsBranding(String(router._id), orgId);
   const { subject, text, html } = buildRouterStatusAlertEmail({
     brand: branding.brandName,
@@ -126,8 +130,19 @@ export async function sendRouterAlert(router, kind, info = {}) {
   ]);
   const okCount = (rs) => rs.filter((r) => r.status === 'fulfilled' && r.value?.ok).length;
   const result = `email ${okCount(mailResults)}/${emails.length}, sms ${okCount(smsResults)}/${phones.length}`;
-  console.log('[router.monitor] alert', kind, name, result);
-  return { result, emails: emails.length, phones: phones.length };
+  console.log('[router.monitor] alert', kind, name, result, { orgId, people, fallback });
+  return {
+    result,
+    emails: emails.length,
+    phones: phones.length,
+    people,
+    fallback,
+    organizationId: orgId,
+    emailErrors: mailResults
+      .map((r) => (r.status === 'rejected' ? r.reason?.message : r.value?.ok ? null : r.value?.error))
+      .filter(Boolean)
+      .slice(0, 3),
+  };
 }
 
 /**

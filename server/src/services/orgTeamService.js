@@ -138,7 +138,12 @@ export async function resendOrgTeamInvite(organizationId, adminId, actor) {
   };
 }
 
-export async function updateOrgTeamMember(organizationId, adminId, body) {
+export async function updateOrgTeamMember(organizationId, adminId, body, actorAdminId, actorEmail) {
+  if (!mongoose.isValidObjectId(String(adminId))) {
+    const e = new Error('Invalid id');
+    e.status = 400;
+    throw e;
+  }
   const doc = await Admin.findOne({
     _id: adminId,
     organizationId,
@@ -155,6 +160,26 @@ export async function updateOrgTeamMember(organizationId, adminId, body) {
       const e = new Error('Invalid role');
       e.status = 400;
       throw e;
+    }
+    if (role !== doc.role) {
+      if (actorAdminId && String(actorAdminId) === String(doc._id)) {
+        const e = new Error('You cannot change your own access level');
+        e.status = 400;
+        throw e;
+      }
+      if (doc.role === 'org_admin' && doc.status === 'active') {
+        const otherAdmins = await Admin.countDocuments({
+          organizationId,
+          role: 'org_admin',
+          status: { $ne: 'invited' },
+          _id: { $ne: doc._id },
+        });
+        if (otherAdmins === 0) {
+          const e = new Error('This is the only active organisation admin. Make someone else an admin first.');
+          e.status = 400;
+          throw e;
+        }
+      }
     }
     doc.role = role;
   }
@@ -207,7 +232,16 @@ export async function updateOrgTeamMember(organizationId, adminId, body) {
     }
     doc.fullName = fn;
   }
+  const changed = doc.modifiedPaths().filter((p) => p !== 'passwordHash' && p !== 'inviteTokenHash');
   await doc.save();
+  if (changed.length) {
+    void logOrgAudit({
+      organizationId,
+      actorEmail,
+      action: 'admin.update',
+      meta: { email: doc.email, changed, role: doc.role },
+    });
+  }
   return mapAdmin(doc);
 }
 

@@ -419,7 +419,7 @@ organizationRouter.patch(
       return res.status(400).json({ error: 'No organisation context' });
     }
     try {
-      res.json(await updateOrgTeamMember(oid, req.params.adminId, req.body));
+      res.json(await updateOrgTeamMember(oid, req.params.adminId, req.body, req.admin?.id, req.admin?.email));
     } catch (e) {
       const status = e.status && Number(e.status) >= 400 ? e.status : 500;
       return res.status(status).json({ error: e.message || 'Update failed' });

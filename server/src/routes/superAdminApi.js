@@ -31,6 +31,7 @@ import {
   normalizeOrgLimits,
 } from '../services/orgLimitsService.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
+import { updateOrgTeamMember } from '../services/orgTeamService.js';
 import { wireguardAdminRouter } from './wireguardAdmin.js';
 
 const SALT = 10;
@@ -345,62 +346,14 @@ router.patch(
     if (!mongoose.isValidObjectId(req.params.orgId) || !mongoose.isValidObjectId(req.params.adminId)) {
       return res.status(400).json({ error: 'Invalid id' });
     }
-    const doc = await Admin.findOne({
-      _id: req.params.adminId,
-      organizationId: req.params.orgId,
-      role: { $in: ORG_SCOPED_ADMIN_ROLES },
-    });
-    if (!doc) return res.status(404).json({ error: 'Administrator not found' });
-    if (req.body.role != null) {
-      const role = String(req.body.role).trim();
-      if (!ORG_INVITE_ROLES.includes(role)) {
-        return res.status(400).json({ error: 'Invalid role' });
-      }
-      doc.role = role;
+    try {
+      res.json(
+        await updateOrgTeamMember(req.params.orgId, req.params.adminId, req.body || {}, req.admin?.id, req.admin?.email)
+      );
+    } catch (e) {
+      const status = e.status && Number(e.status) >= 400 ? e.status : 500;
+      return res.status(status).json({ error: e.message || 'Update failed' });
     }
-    if (req.body.email != null) {
-      const email = String(req.body.email).toLowerCase().trim();
-      if (!email) return res.status(400).json({ error: 'email cannot be empty' });
-      const clash = await Admin.findOne({ email, _id: { $ne: doc._id } });
-      if (clash) return res.status(400).json({ error: 'Email already in use' });
-      doc.email = email;
-    }
-    if (req.body.password != null && String(req.body.password).length > 0) {
-      if (String(req.body.password).length < 8) {
-        return res.status(400).json({ error: 'password must be at least 8 characters' });
-      }
-      doc.passwordHash = await bcrypt.hash(String(req.body.password), SALT);
-      doc.status = 'active';
-      doc.inviteTokenHash = '';
-      doc.inviteExpiresAt = null;
-    }
-    if (req.body.phone !== undefined) {
-      const raw = req.body.phone;
-      if (raw == null || String(raw).trim() === '') {
-        doc.phone = '';
-      } else {
-        const n = normalizeGhanaMsisdn(String(raw).trim());
-        if (!n) {
-          return res.status(400).json({ error: 'Invalid phone (Ghana 0XX… or 233…)' });
-        }
-        doc.phone = n;
-      }
-    }
-    if (req.body.fullName !== undefined) {
-      const fn = String(req.body.fullName || '').trim();
-      if (!fn) return res.status(400).json({ error: 'fullName cannot be empty' });
-      doc.fullName = fn;
-    }
-    await doc.save();
-    res.json({
-      _id: doc._id,
-      email: doc.email,
-      fullName: doc.fullName || '',
-      phone: doc.phone || '',
-      role: doc.role,
-      organizationId: doc.organizationId,
-      updatedAt: doc.updatedAt,
-    });
   })
 );
 

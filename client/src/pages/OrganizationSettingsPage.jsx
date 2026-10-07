@@ -220,8 +220,9 @@ export function OrganizationSettingsPage() {
 
       <OrgTeamSection
         canManage={isSuper || me?.admin?.role === 'org_admin'}
-        usage={usage}
         limits={limits}
+        currentAdminId={me?.admin?.id}
+        onChanged={loadAudit}
       />
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
