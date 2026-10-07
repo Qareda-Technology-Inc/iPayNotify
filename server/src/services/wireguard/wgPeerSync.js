@@ -103,6 +103,45 @@ function mapVpsSshError(e) {
   return e;
 }
 
+/**
+ * Last handshake per peer from the VPS in one SSH call: Map<publicKey, unixSeconds> (0 = never).
+ * Returns null when WireGuard VPS access is not configured.
+ */
+export async function readWgLatestHandshakes() {
+  if (!(await isWireGuardFullyConfigured())) return null;
+  const auth = await resolveWgVpsSshAuth();
+  if (!auth) return null;
+  const iface = String(config.wireguard.interfaceName || 'wg0').trim();
+  if (!/^[a-zA-Z0-9_.-]+$/.test(iface)) {
+    const err = new Error('Invalid WG_INTERFACE name');
+    err.status = 500;
+    throw err;
+  }
+  const ssh = new NodeSSH();
+  try {
+    await ssh.connect({ ...vpsSshConnectOptions(auth), readyTimeout: 20000 });
+    const result = await ssh.execCommand(`sudo -n wg show ${iface} latest-handshakes`);
+    if (result.code !== 0 && result.code != null) {
+      const detail = (result.stderr || result.stdout || `exit ${result.code}`).trim().slice(0, 300);
+      throw new Error(`wg show latest-handshakes failed: ${detail}`);
+    }
+    const map = new Map();
+    for (const line of String(result.stdout || '').split('\n')) {
+      const [key, ts] = line.trim().split(/\s+/);
+      if (key && /^\d+$/.test(ts || '')) map.set(key, Number(ts));
+    }
+    return map;
+  } catch (e) {
+    throw mapVpsSshError(e);
+  } finally {
+    try {
+      ssh.dispose();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 /** Smoke-test VPS SSH with the stored admin key. */
 export async function testWgVpsSshConnection() {
   if (!(await isWireGuardFullyConfigured())) {

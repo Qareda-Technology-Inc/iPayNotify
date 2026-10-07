@@ -43,6 +43,26 @@ const routerSchema = new mongoose.Schema(
       file: { type: String, default: '' },
       pushedAt: { type: Date, default: null },
     },
+    /** Uptime monitor (WireGuard handshake from the VPS, login probe to confirm / explain). */
+    monitor: {
+      state: { type: String, enum: ['unknown', 'online', 'offline'], default: 'unknown' },
+      /** When the current state began (for offline: last contact, when known). */
+      since: { type: Date, default: null },
+      lastSeenAt: { type: Date, default: null },
+      checkedAt: { type: Date, default: null },
+      method: { type: String, default: '' },
+      /** Consecutive unhealthy checks while still online (debounce). */
+      failCount: { type: Number, default: 0 },
+      /** Short reason while offline, or a warning while online (e.g. login rejected). */
+      reason: { type: String, default: '' },
+      hint: { type: String, default: '' },
+      alertsEnabled: { type: Boolean, default: true },
+      /** An offline alert went out for the current outage (so a recovery alert follows). */
+      alertedOffline: { type: Boolean, default: false },
+      lastAlertAt: { type: Date, default: null },
+      lastAlertKind: { type: String, default: '' },
+      lastAlertResult: { type: String, default: '' },
+    },
   },
   { timestamps: true }
 );

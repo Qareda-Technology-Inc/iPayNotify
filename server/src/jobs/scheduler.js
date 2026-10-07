@@ -10,6 +10,7 @@ import {
   retryPaidFulfillments,
 } from '../services/paymentService.js';
 import { enforceRemoteAccessRouters } from '../services/remoteAccessService.js';
+import { runRouterMonitor } from '../services/routerMonitorService.js';
 import { config } from '../config.js';
 
 let task;
@@ -19,8 +20,27 @@ let hotspotPlanTask;
 let expiryReminderSmsTask;
 let stalePaymentsTask;
 let voucherFulfillTask;
+let routerMonitorTask;
 
 export function startBillingScheduler() {
+  if (!routerMonitorTask) {
+    routerMonitorTask = cron.schedule(
+      '* * * * *',
+      async () => {
+        try {
+          const summary = await runRouterMonitor();
+          if (summary.alerts > 0) {
+            console.log('[router.monitor] tick', new Date().toISOString(), summary);
+          }
+        } catch (e) {
+          console.error('[router.monitor] tick failed', e);
+        }
+      },
+      { timezone: config.cronTz }
+    );
+    console.log(`[router.monitor] router online/offline check every minute (${config.cronTz})`);
+  }
+
   if (!voucherFulfillTask) {
     voucherFulfillTask = cron.schedule(
       '*/2 * * * *',
@@ -188,5 +208,9 @@ export function stopBillingScheduler() {
   if (voucherFulfillTask) {
     voucherFulfillTask.stop();
     voucherFulfillTask = null;
+  }
+  if (routerMonitorTask) {
+    routerMonitorTask.stop();
+    routerMonitorTask = null;
   }
 }

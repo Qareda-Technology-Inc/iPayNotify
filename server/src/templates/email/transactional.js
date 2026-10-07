@@ -215,3 +215,63 @@ export function buildPaymentSuccessAdminEmail(p) {
 
   return { subject, text, html };
 }
+
+/**
+ * Router went offline / is still offline / came back online.
+ * @param {{
+ *   brand: string, kind: 'offline'|'reminder'|'online'|'test', routerName: string, host?: string,
+ *   sinceLabel?: string, durationLabel?: string, reason?: string, hint?: string, appUrl?: string,
+ * }} p
+ */
+export function buildRouterStatusAlertEmail(p) {
+  const brand = String(p.brand || 'QareFi Billing').trim();
+  const name = String(p.routerName || 'Router').trim();
+  const kind = p.kind;
+  const statusLabel =
+    kind === 'online' ? 'Back online' : kind === 'test' ? 'Test alert' : kind === 'reminder' ? 'Still offline' : 'Offline';
+  const subject =
+    kind === 'online'
+      ? `✅ ${name} is back online${p.durationLabel ? ` (down ${p.durationLabel})` : ''}`
+      : kind === 'test'
+        ? `${brand} — router alert test (${name})`
+        : kind === 'reminder'
+          ? `⚠️ ${name} is still offline (${p.durationLabel || 'ongoing'})`
+          : `🔴 ${name} is offline`;
+  const lead =
+    kind === 'online'
+      ? 'The router is reachable again.'
+      : kind === 'test'
+        ? 'This is a test. Router offline alerts will arrive like this.'
+        : 'The router stopped answering. Customers on this site may have no internet.';
+
+  const rows = [
+    ['Router', name],
+    p.host ? ['Address', p.host] : null,
+    ['Status', statusLabel],
+    p.sinceLabel ? [kind === 'online' ? 'Went offline' : 'Offline since', p.sinceLabel] : null,
+    p.durationLabel ? ['Duration', p.durationLabel] : null,
+    p.reason ? ['Reason', p.reason] : null,
+    p.hint ? ['What to check', p.hint] : null,
+  ].filter(Boolean);
+
+  const appUrl = String(p.appUrl || '').trim();
+  const text = [brand, '', lead, '', ...rows.map(([k, v]) => `${k}: ${v}`), appUrl ? `\nDashboard: ${appUrl}` : '']
+    .filter(Boolean)
+    .join('\n');
+  const row = (label, value) =>
+    `<tr><td style="padding:6px 0;color:#94a3b8;width:36%;vertical-align:top;">${escapeHtml(label)}</td><td style="padding:6px 0;color:#e2e8f0;font-weight:500;">${escapeHtml(value)}</td></tr>`;
+  const innerHtml = `
+    <p style="margin:0 0 16px;">${escapeHtml(lead)}</p>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:14px;">
+      ${rows.map(([k, v]) => row(k, v)).join('')}
+    </table>
+  `.trim();
+  const html = wrapTransactionalHtml({
+    brand,
+    title: `${name}: ${statusLabel}`,
+    preheader: `${name} · ${statusLabel}`,
+    innerHtml,
+    footerText: appUrl ? `Dashboard: ${appUrl}` : '',
+  });
+  return { subject, text, html };
+}

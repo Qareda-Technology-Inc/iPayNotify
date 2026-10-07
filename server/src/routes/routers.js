@@ -30,6 +30,7 @@ import { claimWireGuardPeerAsRouter } from '../services/wireguard/claimPeerAsRou
 import { buildWireGuardInstallScript } from '../services/wireguard/buildInstallScript.js';
 import { orgQuery } from '../utils/tenantScope.js';
 import { isWgTunnelHost } from '../mikrotik/wgJump.js';
+import { sendRouterAlert } from '../services/routerMonitorService.js';
 
 export const routersApi = express.Router();
 
@@ -541,7 +542,11 @@ routersApi.patch(
       portalSlug,
       smsBrandName,
       smsSenderId,
+      monitorAlerts,
     } = req.body;
+    if (monitorAlerts !== undefined) {
+      doc.set('monitor.alertsEnabled', Boolean(monitorAlerts));
+    }
     if (comment !== undefined) {
       const c = String(comment).trim();
       doc.comment = c;
@@ -626,7 +631,22 @@ routersApi.patch(
       portalSlug: doc.portalSlug,
       smsBrandName: doc.smsBrandName || '',
       smsSenderId: doc.smsSenderId || '',
+      monitor: doc.monitor,
     });
+  })
+);
+
+/** Send a test offline alert (email + SMS) to everyone who would receive real alerts. */
+routersApi.post(
+  '/:id/monitor/test-alert',
+  requireRoles('super_admin', 'org_admin'),
+  asyncHandler(async (req, res) => {
+    const doc = await MikrotikRouter.findOne({ _id: req.params.id, ...orgQuery(req.organizationId) })
+      .select('name comment host organizationId')
+      .lean();
+    if (!doc) return res.status(404).json({ error: 'Router not found' });
+    const sent = await sendRouterAlert(doc, 'test');
+    res.json({ ok: true, ...sent });
   })
 );
 

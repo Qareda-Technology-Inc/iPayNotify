@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../api.js';
 import { routerDisplayName as routerLabel } from '../utils/routerDisplayName.js';
 import { AddRouterWizard } from './AddRouterWizard.jsx';
+import { routerMonitorStatus } from '../utils/routerMonitor.js';
 
 function connectDisplay(r) {
   if (!r?.host) return '';
@@ -47,13 +48,41 @@ export function RoutersPanel() {
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState('');
 
+  /* Polled separately so status refreshes never reset the edit form (which keys off `selected`). */
+  const [monitorById, setMonitorById] = useState({});
+  const [monitorBusy, setMonitorBusy] = useState(false);
+  const [monitorMsg, setMonitorMsg] = useState('');
+  const [monitorErr, setMonitorErr] = useState('');
+
   const loadRouters = useCallback(async () => {
     setListError('');
     const list = await apiFetch('/api/routers');
     const arr = Array.isArray(list) ? list : [];
     setRouters(arr);
+    setMonitorById({});
     return arr;
   }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      apiFetch('/api/routers')
+        .then((list) => {
+          if (!Array.isArray(list)) return;
+          setMonitorById(Object.fromEntries(list.map((r) => [String(r._id), r.monitor || null])));
+        })
+        .catch(() => {});
+    }, 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const withMonitor = useCallback(
+    (r) => (r && monitorById[String(r._id)] !== undefined ? { ...r, monitor: monitorById[String(r._id)] } : r),
+    [monitorById]
+  );
+  const offlineCount = useMemo(
+    () => routers.filter((r) => withMonitor(r)?.monitor?.state === 'offline').length,
+    [routers, withMonitor]
+  );
 
   useEffect(() => {
     setListLoading(true);
@@ -104,6 +133,8 @@ export function RoutersPanel() {
     setLiveSnap(null);
     setLiveError('');
     setDetailTab('access');
+    setMonitorMsg('');
+    setMonitorErr('');
   }, [selected]);
 
   useEffect(() => {
@@ -215,8 +246,48 @@ export function RoutersPanel() {
     }
   }
 
+  async function setAlertsEnabled(enabled) {
+    if (!selectedId) return;
+    setMonitorBusy(true);
+    setMonitorErr('');
+    setMonitorMsg('');
+    try {
+      const res = await apiFetch(`/api/routers/${selectedId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ monitorAlerts: enabled }),
+      });
+      setMonitorById((m) => ({ ...m, [String(selectedId)]: res.monitor || null }));
+      setMonitorMsg(enabled ? 'Offline alerts on' : 'Offline alerts off for this router');
+    } catch (e) {
+      setMonitorErr(e.message || 'Could not update alerts');
+    } finally {
+      setMonitorBusy(false);
+    }
+  }
+
+  async function sendTestAlert() {
+    if (!selectedId) return;
+    setMonitorBusy(true);
+    setMonitorErr('');
+    setMonitorMsg('');
+    try {
+      const res = await apiFetch(`/api/routers/${selectedId}/monitor/test-alert`, { method: 'POST' });
+      setMonitorMsg(`Test sent — ${res.result}`);
+    } catch (e) {
+      setMonitorErr(e.message || 'Test alert failed');
+    } finally {
+      setMonitorBusy(false);
+    }
+  }
+
   const detailProps = {
     selected,
+    monitor: withMonitor(selected)?.monitor || null,
+    monitorBusy,
+    monitorMsg,
+    monitorErr,
+    setAlertsEnabled,
+    sendTestAlert,
     detailTab,
     setDetailTab,
     testing,
@@ -263,6 +334,9 @@ export function RoutersPanel() {
               : `${routers.length} site${routers.length === 1 ? '' : 's'}${
                   vpnCount ? ` · ${vpnCount} on VPN` : ''
                 }`}
+            {!listLoading && offlineCount ? (
+              <span className="font-medium text-red-300"> · {offlineCount} offline</span>
+            ) : null}
           </p>
         </div>
         <button
@@ -278,6 +352,19 @@ export function RoutersPanel() {
         <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-200">
           {listError}
         </p>
+      ) : null}
+
+      {!listLoading && offlineCount ? (
+        <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-3 py-2.5 text-sm text-red-100">
+          <span className="font-semibold">
+            {offlineCount} router{offlineCount === 1 ? ' is' : 's are'} offline:
+          </span>{' '}
+          {routers
+            .map(withMonitor)
+            .filter((r) => r.monitor?.state === 'offline')
+            .map((r) => `${routerLabel(r)} (${routerMonitorStatus(r).detail.replace(/^for /, '')})`)
+            .join(', ')}
+        </div>
       ) : null}
 
       {listLoading ? (
@@ -333,7 +420,8 @@ export function RoutersPanel() {
                 <p className="px-4 py-10 text-center text-sm text-slate-500">No sites match “{query}”.</p>
               ) : (
                 <ul className="divide-y divide-slate-800/80">
-                  {filtered.map((r) => {
+                  {filtered.map((row) => {
+                    const r = withMonitor(row);
                     const active = String(r._id) === String(selectedId);
                     const tunnel = r.wireguard?.tunnelIp;
                     return (
@@ -348,10 +436,8 @@ export function RoutersPanel() {
                           }`}
                         >
                           <span
-                            className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${
-                              tunnel ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.55)]' : 'bg-slate-600'
-                            }`}
-                            title={tunnel ? 'On VPN' : 'Direct'}
+                            className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${routerMonitorStatus(r).dot}`}
+                            title={`${routerMonitorStatus(r).label} ${routerMonitorStatus(r).detail}`.trim()}
                           />
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-2">
@@ -371,6 +457,11 @@ export function RoutersPanel() {
                                 ? `Winbox ${r.wireguard.endpoints?.winbox || `${tunnel}:8291`}`
                                 : r.host}
                             </span>
+                            {r.monitor?.state === 'offline' ? (
+                              <span className="mt-0.5 block truncate text-xs font-medium text-red-300">
+                                Offline {routerMonitorStatus(r).detail}
+                              </span>
+                            ) : null}
                           </span>
                           <svg
                             className="h-4 w-4 shrink-0 text-slate-600 lg:hidden"
@@ -443,8 +534,66 @@ export function RoutersPanel() {
   );
 }
 
+function MonitorCard({ selected, monitor, monitorBusy, monitorMsg, monitorErr, setAlertsEnabled, sendTestAlert }) {
+  const status = routerMonitorStatus({ ...selected, monitor });
+  const m = monitor || {};
+  const alertsOn = m.alertsEnabled !== false;
+  const fmt = (d) => (d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+  return (
+    <div className="space-y-2 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${status.pill}`}>{status.label}</span>
+        {status.detail ? <span className="text-xs text-slate-400">{status.detail}</span> : null}
+        {m.lastSeenAt ? (
+          <span className="ml-auto text-[11px] text-slate-500">Last contact {fmt(m.lastSeenAt)}</span>
+        ) : null}
+      </div>
+      {m.reason ? (
+        <p className={`text-xs ${m.state === 'offline' ? 'text-red-200' : 'text-amber-200'}`}>
+          {m.reason}
+          {m.hint ? <span className="block text-slate-500">{m.hint}</span> : null}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-slate-300">
+          <input
+            type="checkbox"
+            checked={alertsOn}
+            disabled={monitorBusy}
+            onChange={(e) => setAlertsEnabled(e.target.checked)}
+            className="h-4 w-4 accent-emerald-500"
+          />
+          Email &amp; SMS admins when offline
+        </label>
+        <button
+          type="button"
+          onClick={sendTestAlert}
+          disabled={monitorBusy}
+          className="ml-auto rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+        >
+          Send test alert
+        </button>
+      </div>
+      {m.lastAlertAt ? (
+        <p className="text-[11px] text-slate-500">
+          Last alert: {m.lastAlertKind} · {fmt(m.lastAlertAt)}
+          {m.lastAlertResult ? ` · ${m.lastAlertResult}` : ''}
+        </p>
+      ) : null}
+      {monitorMsg ? <p className="text-xs text-emerald-300">{monitorMsg}</p> : null}
+      {monitorErr ? <p className="text-xs text-red-300">{monitorErr}</p> : null}
+    </div>
+  );
+}
+
 function RouterDetail({
   selected,
+  monitor,
+  monitorBusy,
+  monitorMsg,
+  monitorErr,
+  setAlertsEnabled,
+  sendTestAlert,
   detailTab,
   setDetailTab,
   testing,
@@ -513,6 +662,16 @@ function RouterDetail({
           </p>
         ) : null}
       </div>
+
+      <MonitorCard
+        selected={selected}
+        monitor={monitor}
+        monitorBusy={monitorBusy}
+        monitorMsg={monitorMsg}
+        monitorErr={monitorErr}
+        setAlertsEnabled={setAlertsEnabled}
+        sendTestAlert={sendTestAlert}
+      />
 
       <div className="flex gap-1 rounded-xl bg-slate-950/80 p-1">
         {[
