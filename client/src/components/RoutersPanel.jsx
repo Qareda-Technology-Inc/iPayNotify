@@ -50,6 +50,7 @@ export function RoutersPanel() {
 
   /* Polled separately so status refreshes never reset the edit form (which keys off `selected`). */
   const [monitorById, setMonitorById] = useState({});
+  const [monitorHealth, setMonitorHealth] = useState(null);
   const [monitorBusy, setMonitorBusy] = useState(false);
   const [monitorMsg, setMonitorMsg] = useState('');
   const [monitorErr, setMonitorErr] = useState('');
@@ -64,14 +65,20 @@ export function RoutersPanel() {
   }, []);
 
   useEffect(() => {
+    const loadHealth = () =>
+      apiFetch('/api/routers/monitor/health')
+        .then(setMonitorHealth)
+        .catch(() => {});
+    loadHealth();
     const id = setInterval(() => {
+      loadHealth();
       apiFetch('/api/routers')
         .then((list) => {
           if (!Array.isArray(list)) return;
           setMonitorById(Object.fromEntries(list.map((r) => [String(r._id), r.monitor || null])));
         })
         .catch(() => {});
-    }, 60000);
+    }, 30000);
     return () => clearInterval(id);
   }, []);
 
@@ -346,6 +353,7 @@ export function RoutersPanel() {
               <span className="font-medium text-red-300"> · {offlineCount} offline</span>
             ) : null}
           </p>
+          <MonitorHealthLine health={monitorHealth} />
         </div>
         <button
           type="button"
@@ -539,6 +547,38 @@ export function RoutersPanel() {
         />
       ) : null}
     </div>
+  );
+}
+
+function MonitorHealthLine({ health }) {
+  if (!health) return null;
+  const ageSec = health.at ? Math.round((Date.now() - new Date(health.at).getTime()) / 1000) : null;
+  let tone = 'text-slate-500';
+  let dot = 'bg-emerald-400';
+  let text;
+  if (ageSec == null) {
+    tone = 'text-amber-300';
+    dot = 'bg-amber-400';
+    text = 'Automatic monitoring has not run yet since the server started';
+  } else if (ageSec > 300) {
+    tone = 'text-red-300';
+    dot = 'bg-red-400';
+    text = `Automatic monitoring stopped — last check ${Math.round(ageSec / 60)} min ago (is the server asleep?)`;
+  } else if (health.failed) {
+    tone = 'text-red-300';
+    dot = 'bg-red-400';
+    text = `Automatic check failed${health.error ? `: ${health.error}` : ''}`;
+  } else {
+    text = `Auto-check every minute · last ${ageSec < 60 ? `${ageSec}s` : `${Math.round(ageSec / 60)} min`} ago`;
+  }
+  return (
+    <p className={`mt-1 flex items-center gap-1.5 text-[11px] ${tone}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+      {text}
+      {health.handshakeIssue ? (
+        <span className="text-amber-300/90"> · VPN handshakes unavailable, using login checks</span>
+      ) : null}
+    </p>
   );
 }
 

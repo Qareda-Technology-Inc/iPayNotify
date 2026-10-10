@@ -31,6 +31,13 @@ const TZ = 'Africa/Accra';
 
 let running = false;
 let lastVpsWarnAt = 0;
+let lastHandshakeIssue = '';
+const lastRun = { at: null, durationMs: 0, summary: null, error: '' };
+
+/** Health of the background monitor itself, for the routers page. */
+export function getRouterMonitorHealth() {
+  return { ...lastRun, running, handshakeIssue: lastHandshakeIssue };
+}
 
 export function formatDuration(ms) {
   const mins = Math.max(1, Math.round(ms / 60000));
@@ -251,7 +258,9 @@ async function mapLimit(items, limit, fn) {
 export async function runRouterMonitor() {
   if (running) return { skipped: true };
   running = true;
+  const t0 = Date.now();
   const summary = { checked: 0, online: 0, offline: 0, alerts: 0, blind: 0 };
+  let failure = '';
   try {
     const routers = await Router.find({}).select('name comment host organizationId monitor').lean();
     if (!routers.length) return summary;
@@ -263,16 +272,18 @@ export async function runRouterMonitor() {
     const peerByIp = new Map(peers.map((p) => [p.tunnelIp, p]));
 
     let handshakes = null;
-    let vpsError = null;
     if (routers.some((r) => isWgTunnelHost(r.host))) {
+      let why = '';
       try {
         handshakes = await readWgLatestHandshakes();
+        if (!handshakes) why = 'WireGuard VPS SSH is not configured';
       } catch (e) {
-        vpsError = e;
-        if (Date.now() - lastVpsWarnAt > 15 * 60 * 1000) {
-          lastVpsWarnAt = Date.now();
-          console.warn('[router.monitor] VPS handshake read failed; tunnel routers not judged this pass:', e?.message || e);
-        }
+        why = e?.message || String(e);
+      }
+      lastHandshakeIssue = why;
+      if (why && Date.now() - lastVpsWarnAt > 15 * 60 * 1000) {
+        lastVpsWarnAt = Date.now();
+        console.warn(`[router.monitor] cannot read WireGuard handshakes (${why}); using login checks for tunnel routers`);
       }
     }
 
@@ -282,20 +293,12 @@ export async function runRouterMonitor() {
       const host = String(r.host || '').trim();
       const peer = peerByRouter.get(String(r._id)) || peerByIp.get(host);
       let observation;
-      if (isWgTunnelHost(host) && peer) {
-        if (!handshakes) {
-          summary.blind += 1;
-          return;
-        }
+      if (isWgTunnelHost(host) && peer && handshakes) {
         const ts = handshakes.get(peer.publicKey) || 0;
         const lastSeenAt = ts ? new Date(ts * 1000) : null;
         if (ts) peerSeen.push({ id: peer._id, at: lastSeenAt });
         observation = { method: 'wireguard', healthy: ts > 0 && nowSec - ts <= HANDSHAKE_STALE_SEC, lastSeenAt };
       } else {
-        if (isWgTunnelHost(host) && vpsError) {
-          summary.blind += 1;
-          return;
-        }
         const probe = await probeRouter(r._id);
         if (!probe.ok && probe.d?.code === 'vpn_server') {
           summary.blind += 1;
@@ -344,7 +347,11 @@ export async function runRouterMonitor() {
       );
     }
     return summary;
+  } catch (e) {
+    failure = e?.message || String(e);
+    throw e;
   } finally {
     running = false;
+    Object.assign(lastRun, { at: new Date(), durationMs: Date.now() - t0, summary, error: failure });
   }
 }

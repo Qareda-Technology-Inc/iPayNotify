@@ -30,7 +30,7 @@ import { claimWireGuardPeerAsRouter } from '../services/wireguard/claimPeerAsRou
 import { buildWireGuardInstallScript } from '../services/wireguard/buildInstallScript.js';
 import { orgQuery } from '../utils/tenantScope.js';
 import { isWgTunnelHost } from '../mikrotik/wgJump.js';
-import { sendRouterAlert } from '../services/routerMonitorService.js';
+import { getRouterMonitorHealth, sendRouterAlert } from '../services/routerMonitorService.js';
 
 export const routersApi = express.Router();
 
@@ -346,6 +346,19 @@ routersApi.get(
     );
   })
 );
+
+routersApi.get('/monitor/health', (req, res) => {
+  const h = getRouterMonitorHealth();
+  res.json({
+    at: h.at,
+    durationMs: h.durationMs,
+    running: h.running,
+    failed: Boolean(h.error),
+    ...(req.admin?.role === 'super_admin'
+      ? { summary: h.summary, error: h.error, handshakeIssue: h.handshakeIssue }
+      : {}),
+  });
+});
 
 routersApi.get(
   '/active-sessions',

@@ -29,7 +29,7 @@ export function startBillingScheduler() {
       async () => {
         try {
           const summary = await runRouterMonitor();
-          if (summary.alerts > 0) {
+          if (summary.alerts > 0 || new Date().getMinutes() % 15 === 0) {
             console.log('[router.monitor] tick', new Date().toISOString(), summary);
           }
         } catch (e) {
