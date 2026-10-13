@@ -510,7 +510,7 @@ export async function checkTransactionStatusWithHubtel(clientReference, opts = {
 
   let applied = false;
   let applyResult = null;
-  if (apply && check.paid && tx.status === 'pending') {
+  if (apply && check.paid && (tx.status === 'pending' || tx.status === 'failed')) {
     const payload = check.body && typeof check.body === 'object' ? check.body : {};
     const enriched = {
       ...payload,
@@ -868,6 +868,36 @@ export async function retryPaidFulfillments({ maxAgeHours = 24, limit = 50 } = {
     if (ok) summary.renewalSyncs += 1;
     else summary.renewalSyncFailed += 1;
   }
+
+  /* Paid renewals never extended: fulfilment never ran, or crashed after claiming. */
+  const staleClaim = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const unapplied = await Transaction.find({
+    kind: 'renewal',
+    status: 'paid',
+    createdAt: { $gte: since },
+    updatedAt: { $lte: new Date(Date.now() - 60 * 1000) },
+    'meta.renewedUntil': { $exists: false },
+    'meta.fulfillment': { $ne: 'failed' },
+    $or: [{ 'meta.renewClaimedAt': { $exists: false } }, { 'meta.renewClaimedAt': { $lte: staleClaim } }],
+  })
+    .sort({ createdAt: 1 })
+    .limit(cap)
+    .select('_id')
+    .lean();
+  summary.renewalsApplied = 0;
+  for (const row of unapplied) {
+    await Transaction.updateOne(
+      { _id: row._id, 'meta.renewedUntil': { $exists: false } },
+      { $unset: { 'meta.renewClaimedAt': '' } }
+    );
+    try {
+      const r = await fulfillPaidTransaction({ _id: row._id });
+      if (r?.ok && !r.already) summary.renewalsApplied += 1;
+    } catch (e) {
+      console.error('[renewal.retry] failed', String(row._id), e?.message || e);
+    }
+  }
+  if (summary.renewalsApplied) console.log('[renewal.retry] applied stuck paid renewals', summary.renewalsApplied);
   return summary;
 }
 
@@ -1015,15 +1045,88 @@ export async function expireStalePendingPayments({ maxAgeHours = 24, limit = 200
     .lean();
 
   let expired = 0;
+  let rescued = 0;
   for (const row of stale) {
+    /* A paid-but-unconfirmed checkout must never be expired: ask Hubtel first. */
+    try {
+      const chk = await reconcilePaymentFromHubtelStatus(row.clientReference);
+      if (chk.status === 'paid') {
+        rescued += 1;
+        continue;
+      }
+    } catch (e) {
+      console.warn('[payments] stale status check failed', row.clientReference, e?.message || e);
+    }
     const r = await markTransactionFailedByReference(row.clientReference, {
       failedVia: 'stale_pending_expiry',
       Message: `Abandoned pending checkout (older than ${maxAgeHours}h)`,
     });
     if (r.ok) expired += 1;
   }
-  if (expired > 0) {
-    console.log('[payments] expired stale pending', { expired, cutoff: cutoff.toISOString() });
+  if (expired > 0 || rescued > 0) {
+    console.log('[payments] expired stale pending', { expired, rescued, cutoff: cutoff.toISOString() });
   }
-  return { scanned: stale.length, expired, cutoff: cutoff.toISOString() };
+  return { scanned: stale.length, expired, rescued, cutoff: cutoff.toISOString() };
+}
+
+const RECONCILE_WINDOW_MS = 24 * 60 * 60 * 1000;
+let lastStatusCheckBlockedLogAt = 0;
+
+/** How long to wait between Hubtel checks for one checkout, by its age. */
+function statusCheckIntervalMs(ageMs) {
+  if (ageMs < 15 * 60 * 1000) return 60 * 1000;
+  if (ageMs < 60 * 60 * 1000) return 3 * 60 * 1000;
+  if (ageMs < 6 * 60 * 60 * 1000) return 10 * 60 * 1000;
+  return 30 * 60 * 1000;
+}
+
+/**
+ * Background safety net for missing Hubtel callbacks: ask Hubtel about recent unconfirmed
+ * checkouts (pending, or failed by the browser SDK) and apply the ones that were paid.
+ */
+export async function reconcileRecentHubtelPayments({ limit = 25 } = {}) {
+  const now = Date.now();
+  const rows = await Transaction.find({
+    provider: 'hubtel',
+    'meta.hubtelCheckout': true,
+    createdAt: { $gte: new Date(now - RECONCILE_WINDOW_MS), $lte: new Date(now - 45 * 1000) },
+    $or: [
+      { status: 'pending' },
+      { status: 'failed', 'meta.callback.failedVia': { $in: ['client_failure', 'client_failed'] } },
+    ],
+  })
+    .sort({ createdAt: -1 })
+    .limit(200)
+    .select('clientReference createdAt meta.statusCheckAt')
+    .lean();
+
+  const summary = { candidates: rows.length, checked: 0, paid: 0, blocked: false };
+  for (const row of rows) {
+    if (summary.checked >= limit) break;
+    const age = now - new Date(row.createdAt).getTime();
+    const last = row.meta?.statusCheckAt ? new Date(row.meta.statusCheckAt).getTime() : 0;
+    if (last && now - last < statusCheckIntervalMs(age)) continue;
+    summary.checked += 1;
+    let out;
+    try {
+      out = await reconcilePaymentFromHubtelStatus(row.clientReference);
+    } catch (e) {
+      console.warn('[hubtel.reconcile] background check failed', row.clientReference, e?.message || e);
+      continue;
+    }
+    if (out.status === 'paid' && out.applied) summary.paid += 1;
+    if (out.reason === 'status_check_ip_blocked' || out.reason === 'hubtel_not_configured') {
+      summary.blocked = out.reason;
+      if (now - lastStatusCheckBlockedLogAt > 60 * 60 * 1000) {
+        lastStatusCheckBlockedLogAt = now;
+        console.error(
+          `[hubtel.reconcile] Status Check unavailable (${out.reason}) — paid checkouts rely on Hubtel callbacks only. ` +
+            'Ask Hubtel to whitelist the API server outbound IP.'
+        );
+      }
+      break;
+    }
+  }
+  if (summary.paid) console.log('[hubtel.reconcile] background', summary);
+  return summary;
 }

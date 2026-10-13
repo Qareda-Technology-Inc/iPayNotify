@@ -164,6 +164,8 @@ export function HotspotBuyPage() {
               }).catch(() => {});
             }
             setHubtelSession(null);
+            /* MoMo may already be approved on the phone; let the return page confirm with Hubtel. */
+            if (ref) navigate(`${returnPath(ref)}&closed=1`);
           }}
           onFailure={(payload) => {
             const ref = hubtelSession?.clientReference;
@@ -173,8 +175,9 @@ export function HotspotBuyPage() {
                 body: JSON.stringify({ clientReference: ref, event: 'failure', payload }),
               }).catch(() => {});
             }
-            setError('Payment was not completed. You can try again.');
             setHubtelSession(null);
+            if (ref) navigate(`${returnPath(ref)}&closed=1`);
+            else setError('Payment was not completed. You can try again.');
           }}
           onSuccess={(payload) => {
             const ref = hubtelSession?.clientReference;

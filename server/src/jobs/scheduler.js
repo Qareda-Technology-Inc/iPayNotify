@@ -7,6 +7,7 @@ import { enforceHotspotPlans } from '../services/hotspotService.js';
 import { runExpiryReminderSmsJob } from '../services/expiryReminderSmsService.js';
 import {
   expireStalePendingPayments,
+  reconcileRecentHubtelPayments,
   retryPaidFulfillments,
 } from '../services/paymentService.js';
 import { enforceRemoteAccessRouters } from '../services/remoteAccessService.js';
@@ -21,6 +22,7 @@ let expiryReminderSmsTask;
 let stalePaymentsTask;
 let voucherFulfillTask;
 let routerMonitorTask;
+let hubtelReconcileTask;
 
 export function startBillingScheduler() {
   if (!routerMonitorTask) {
@@ -161,6 +163,21 @@ export function startBillingScheduler() {
     );
   }
 
+  if (!hubtelReconcileTask) {
+    hubtelReconcileTask = cron.schedule(
+      '* * * * *',
+      async () => {
+        try {
+          await reconcileRecentHubtelPayments({ limit: 25 });
+        } catch (e) {
+          console.error('[hubtel.reconcile] background tick failed', e?.message || e);
+        }
+      },
+      { timezone: config.cronTz }
+    );
+    console.log(`[billing] Hubtel unconfirmed-payment check every minute (${config.cronTz})`);
+  }
+
   if (!stalePaymentsTask) {
     stalePaymentsTask = cron.schedule(
       '15 * * * *',
@@ -208,6 +225,10 @@ export function stopBillingScheduler() {
   if (voucherFulfillTask) {
     voucherFulfillTask.stop();
     voucherFulfillTask = null;
+  }
+  if (hubtelReconcileTask) {
+    hubtelReconcileTask.stop();
+    hubtelReconcileTask = null;
   }
   if (routerMonitorTask) {
     routerMonitorTask.stop();

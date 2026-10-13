@@ -2,8 +2,21 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { publicFetch } from '../api.js';
 
-const MAX_TRIES = 40;
+/** MoMo approvals can take minutes: poll fast at first, then slower, for up to ~10 minutes. */
+const FAST_TRIES = 20;
+const FAST_MS = 2000;
+const SLOW_MS = 5000;
+const MAX_WAIT_MS = 10 * 60 * 1000;
+/** After Hubtel was closed or reported failure, keep confirming a little longer before giving up. */
+const FAILED_RECHECK_MS = 3 * 60 * 1000;
 const MAX_ACTIVATE_TRIES = 60;
+const MAX_NETWORK_ERRORS = 6;
+
+function Spinner() {
+  return (
+    <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-700 border-t-emerald-400" aria-hidden />
+  );
+}
 
 function voucherActivating(data) {
   return data?.status === 'paid' && data?.kind === 'voucher' && data?.fulfillment !== 'done';
@@ -27,6 +40,9 @@ export function PayReturnPage() {
   const isHotspot = params.get('flow') === 'hotspot' || status?.kind === 'voucher';
   const homeHref = isHotspot ? hotspotHref : renewHref;
   const [copied, setCopied] = useState(false);
+  const closedEarly = params.get('closed') === '1';
+  const [stillChecking, setStillChecking] = useState(true);
+  const [netTrouble, setNetTrouble] = useState(false);
 
   const pollOnce = useCallback(async () => {
     const data = await publicFetch(`/api/public/payment/${encodeURIComponent(ref)}/status`);
@@ -37,34 +53,58 @@ export function PayReturnPage() {
   useEffect(() => {
     if (!ref) {
       setError('Missing payment reference');
-      return;
+      return undefined;
     }
     let cancelled = false;
+    let timer = null;
     let tries = 0;
     let activateTries = 0;
+    let netErrors = 0;
+    const startedAt = Date.now();
     setTimedOut(false);
-    const tick = async () => {
+    setStillChecking(true);
+    const later = (ms) => {
+      if (!cancelled) timer = setTimeout(tick, ms);
+    };
+    async function tick() {
+      const elapsed = Date.now() - startedAt;
       try {
         const data = await pollOnce();
         if (cancelled) return;
-        if (data.status === 'pending' && tries < MAX_TRIES) {
-          tries += 1;
-          setTimeout(tick, 1500);
-        } else if (data.status === 'pending') {
-          setTimedOut(true);
+        netErrors = 0;
+        setNetTrouble(false);
+        tries += 1;
+        if (data.status === 'pending') {
+          if (elapsed < MAX_WAIT_MS) later(tries < FAST_TRIES ? FAST_MS : SLOW_MS);
+          else {
+            setTimedOut(true);
+            setStillChecking(false);
+          }
+        } else if (data.status === 'failed' && closedEarly && elapsed < FAILED_RECHECK_MS) {
+          later(SLOW_MS);
         } else if (voucherActivating(data) && activateTries < MAX_ACTIVATE_TRIES) {
           activateTries += 1;
-          setTimeout(tick, 5000);
+          later(SLOW_MS);
+        } else {
+          setStillChecking(false);
         }
       } catch (e) {
-        if (!cancelled) setError(e.message);
+        if (cancelled) return;
+        netErrors += 1;
+        setNetTrouble(true);
+        if (netErrors >= MAX_NETWORK_ERRORS && elapsed >= MAX_WAIT_MS) {
+          setError(e.message || 'Could not reach the payment server');
+          return;
+        }
+        later(SLOW_MS);
       }
-    };
+    }
     tick();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
-  }, [ref, pollOnce]);
+  }, [ref, pollOnce, closedEarly]);
 
   async function checkAgain() {
     setChecking(true);
@@ -97,7 +137,11 @@ export function PayReturnPage() {
   if (!status) {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center text-slate-400">
-        Confirming payment…
+        <Spinner />
+        <p className="mt-4">Confirming payment…</p>
+        {netTrouble ? (
+          <p className="mt-2 text-xs text-amber-300">Connection is slow — still trying…</p>
+        ) : null}
       </div>
     );
   }
@@ -105,39 +149,62 @@ export function PayReturnPage() {
   if (status.status === 'pending') {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center">
-        <p className="text-slate-300">
+        {!timedOut ? <Spinner /> : null}
+        <p className="mt-4 text-slate-200">
           {timedOut ? 'Still waiting for confirmation' : 'Waiting for payment confirmation…'}
         </p>
         <p className="mt-2 text-sm text-slate-500">
           {timedOut
-            ? 'If you already paid, your service will activate when Hubtel confirms. You can check again or contact your ISP with this reference.'
-            : 'If you already paid, this can take a minute. You can keep this page open.'}
+            ? 'If you already paid, your service will activate automatically once Hubtel confirms — we keep checking in the background. You can check again or contact your ISP with this reference.'
+            : closedEarly
+              ? 'If you approved the MoMo prompt on your phone, keep this page open — we are confirming with Hubtel.'
+              : 'Approve the prompt on your phone if you have not yet. This can take a minute — keep this page open.'}
         </p>
-        {timedOut ? (
-          <>
-            <p className="mt-4 font-mono text-xs text-slate-500 break-all">{ref}</p>
-            <button
-              type="button"
-              disabled={checking}
-              onClick={checkAgain}
-              className="mt-6 rounded-lg border border-emerald-600/50 bg-emerald-950/40 px-4 py-2 text-sm text-emerald-200 disabled:opacity-50"
-            >
-              {checking ? 'Checking…' : 'Check again'}
-            </button>
-            <Link to={homeHref} className="mt-4 block text-sm text-slate-400 hover:text-emerald-400">
-              {isHotspot ? 'Back to Wi‑Fi plans' : 'Back to renew'}
-            </Link>
-          </>
+        {netTrouble ? (
+          <p className="mt-2 text-xs text-amber-300">Connection is slow — still trying…</p>
         ) : null}
+        <p className="mt-4 font-mono text-xs text-slate-500 break-all">{ref}</p>
+        {timedOut ? (
+          <button
+            type="button"
+            disabled={checking}
+            onClick={checkAgain}
+            className="mt-6 rounded-lg border border-emerald-600/50 bg-emerald-950/40 px-4 py-2 text-sm text-emerald-200 disabled:opacity-50"
+          >
+            {checking ? 'Checking…' : 'Check again'}
+          </button>
+        ) : null}
+        <Link to={homeHref} className="mt-5 block text-sm text-slate-400 hover:text-emerald-400">
+          Didn&apos;t pay? {isHotspot ? 'Back to Wi‑Fi plans' : 'Start again'}
+        </Link>
       </div>
     );
   }
 
   if (status.status === 'failed') {
     return (
-      <div className="mx-auto max-w-md px-4 py-16 text-center text-red-300">
-        Payment was not completed.
-        <Link to={homeHref} className="mt-6 block text-emerald-400">
+      <div className="mx-auto max-w-md px-4 py-16 text-center">
+        {stillChecking ? <Spinner /> : null}
+        <p className="mt-4 text-red-300">
+          {stillChecking ? 'Payment not confirmed yet' : 'Payment was not completed.'}
+        </p>
+        <p className="mt-2 text-sm text-slate-500">
+          {stillChecking
+            ? 'Checking with Hubtel in case the MoMo approval went through…'
+            : 'If money left your wallet, it will be applied automatically once Hubtel confirms. Keep this reference.'}
+        </p>
+        <p className="mt-4 font-mono text-xs text-slate-500 break-all">{ref}</p>
+        {!stillChecking ? (
+          <button
+            type="button"
+            disabled={checking}
+            onClick={checkAgain}
+            className="mt-6 rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 disabled:opacity-50"
+          >
+            {checking ? 'Checking…' : 'Check again'}
+          </button>
+        ) : null}
+        <Link to={homeHref} className="mt-5 block text-emerald-400">
           Try again
         </Link>
       </div>

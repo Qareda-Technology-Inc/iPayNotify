@@ -4,6 +4,7 @@ import { apiFetch } from '../api.js';
 import { routerDisplayName } from '../utils/routerDisplayName.js';
 import { downloadVouchersPdf, sheetOptions } from '../utils/exportVouchersPdf.js';
 import { VOUCHER_DESIGNS } from '../portal/designs.js';
+import { RouterTicketSyncModal } from '../components/RouterTicketSyncModal.jsx';
 
 const PAGE_SIZE = 50;
 
@@ -90,6 +91,7 @@ export function TicketsPage() {
 
   const [view, setView] = useState(/** @type {'tickets' | 'batches'} */ ('tickets'));
   const [showGenerate, setShowGenerate] = useState(false);
+  const [showRouterSync, setShowRouterSync] = useState(false);
 
   const [status, setStatus] = useState('unused');
   const [filterRouter, setFilterRouter] = useState('');
@@ -350,6 +352,14 @@ export function TicketsPage() {
           </button>
           <button
             type="button"
+            disabled={!routers.length}
+            onClick={() => setShowRouterSync(true)}
+            className="rounded-lg border border-slate-600 px-4 py-2.5 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+          >
+            Sync to router
+          </button>
+          <button
+            type="button"
             onClick={() => setShowGenerate((v) => !v)}
             className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-900/30 hover:bg-emerald-500"
           >
@@ -368,6 +378,14 @@ export function TicketsPage() {
           {info}
         </p>
       )}
+
+      <RouterTicketSyncModal
+        open={showRouterSync}
+        onClose={() => setShowRouterSync(false)}
+        routers={routers}
+        initialRouterId={filterRouter}
+        onSynced={refreshAll}
+      />
 
       {showGenerate && (
         <GeneratePanel
@@ -895,6 +913,13 @@ function GeneratePanel({ routers, packages, onError, onInfo, onCreated, onPrint,
       onInfo(
         `Created ${rows.length} ticket${rows.length === 1 ? '' : 's'} for ${selectedPkg?.name || 'the plan'} on “${hotspotServer}”.`
       );
+      const notPushed = rows.filter((r) => r.pushedToRouter === false);
+      if (notPushed.length) {
+        onError(
+          `${notPushed.length} of ${rows.length} ticket${rows.length === 1 ? ' was' : 's were'} saved but not added to the router` +
+            `${notPushed[0].routerError ? ` (${notPushed[0].routerError})` : ''}. Use “Sync to router” to add them.`
+        );
+      }
       await onCreated(rows);
     } catch (err) {
       onError(err.message);

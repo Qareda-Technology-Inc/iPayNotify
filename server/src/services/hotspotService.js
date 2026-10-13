@@ -378,7 +378,8 @@ export async function syncVoucherToRouter(voucher) {
  * One SSH session: ensure profile once, then add all voucher users (fast path).
  */
 async function pushVoucherBatchToRouter(vouchers, router, pkg) {
-  if (!vouchers.length) return;
+  const result = { pushed: 0, failed: [] };
+  if (!vouchers.length) return result;
   const profileName = hotspotProfileNameForPackage(pkg);
   const onLogin = await hotspotOnLoginForRouter(router);
 
@@ -398,38 +399,47 @@ async function pushVoucherBatchToRouter(vouchers, router, pkg) {
         usersPerTicket: voucher.usersPerTicket ?? pkg.usersPerTicket,
         validUntil: voucher.validUntil,
       });
-      if (typeof api.execCli === 'function') {
-        await api
-          .execCli(`/ip hotspot user remove [find where name=${rosFindLit(voucher.code)}]`)
-          .catch(() => {});
+      try {
+        if (typeof api.execCli === 'function') {
+          await api
+            .execCli(`/ip hotspot user remove [find where name=${rosFindLit(voucher.code)}]`)
+            .catch(() => {});
+        }
+        await hs.addHotspotUser(api, {
+          name: voucher.code,
+          password: '',
+          profile: profileName,
+          server: voucher.hotspotServer || undefined,
+          comment,
+          timeLimitSeconds: voucher.timeLimitSeconds,
+          dataLimitBytes: voucher.dataLimitBytes,
+          sharedUsers: voucher.usersPerTicket,
+          speedDownMbps: voucher.speedDownMbps,
+          speedUpMbps: voucher.speedUpMbps,
+          skipProfileUpsert: true,
+          skipVerify: true,
+        });
+        voucher.password = '';
+        voucher.mikrotikInternalId = undefined;
+        result.pushed += 1;
+      } catch (e) {
+        result.failed.push({ id: String(voucher._id), code: voucher.code, error: String(e?.message || e).slice(0, 300) });
       }
-      await hs.addHotspotUser(api, {
-        name: voucher.code,
-        password: '',
-        profile: profileName,
-        server: voucher.hotspotServer || undefined,
-        comment,
-        timeLimitSeconds: voucher.timeLimitSeconds,
-        dataLimitBytes: voucher.dataLimitBytes,
-        sharedUsers: voucher.usersPerTicket,
-        speedDownMbps: voucher.speedDownMbps,
-        speedUpMbps: voucher.speedUpMbps,
-        skipProfileUpsert: true,
-        skipVerify: true,
-      });
-      voucher.password = '';
-      voucher.mikrotikInternalId = undefined;
     }
   });
 
-  await HotspotVoucher.bulkWrite(
-    vouchers.map((v) => ({
-      updateOne: {
-        filter: { _id: v._id },
-        update: { $set: { password: '' } },
-      },
-    }))
-  );
+  const ok = vouchers.filter((v) => !result.failed.some((f) => f.id === String(v._id)));
+  if (ok.length) {
+    await HotspotVoucher.bulkWrite(
+      ok.map((v) => ({
+        updateOne: {
+          filter: { _id: v._id },
+          update: { $set: { password: '' } },
+        },
+      }))
+    );
+  }
+  return result;
 }
 
 /** Push vouchers already saved in the DB (one router, one plan) to MikroTik. */
@@ -442,7 +452,10 @@ export async function pushSavedVouchersToRouter(vouchers) {
     err.status = 400;
     throw err;
   }
-  await pushVoucherBatchToRouter(vouchers, router, pkg);
+  const res = await pushVoucherBatchToRouter(vouchers, router, pkg);
+  if (res.failed.length) {
+    throw new Error(`Router rejected ${res.failed[0].code}: ${res.failed[0].error}`);
+  }
   try {
     await syncHotspotExpiryScheduler(router._id, await organizationIdForRouter(router));
   } catch (e) {
@@ -573,15 +586,101 @@ export async function generateVouchers({
   const vouchers = await HotspotVoucher.insertMany(docs, { ordered: true });
 
   if (pushToRouter) {
-    await pushVoucherBatchToRouter(vouchers, router, pkg);
+    /* Codes are already saved; a router problem must not hide them from the caller. */
+    let push;
     try {
-      await syncHotspotExpiryScheduler(router._id, orgId);
+      push = await pushVoucherBatchToRouter(vouchers, router, pkg);
     } catch (e) {
-      console.error('[hotspot] expiry scheduler sync failed', e?.message || e);
+      const error = String(e?.message || e).slice(0, 300);
+      push = { pushed: 0, failed: vouchers.map((v) => ({ id: String(v._id), code: v.code, error })), error };
+    }
+    vouchers.routerPush = push;
+    if (push.failed.length) {
+      console.warn(`[hotspot] ${push.failed.length}/${vouchers.length} vouchers not added to router ${router._id}:`, push.failed[0].error);
+    }
+    if (push.pushed) {
+      try {
+        await syncHotspotExpiryScheduler(router._id, orgId);
+      } catch (e) {
+        console.error('[hotspot] expiry scheduler sync failed', e?.message || e);
+      }
     }
   }
 
   return vouchers;
+}
+
+const SYNC_MAX_PER_RUN = 200;
+
+/**
+ * Re-add unused, unexpired tickets that exist in the DB but not on the router.
+ * Used tickets are left alone: re-adding them would reset their remaining time.
+ */
+export async function syncRouterVouchers({ routerId, organizationId, dryRun = false, limit = SYNC_MAX_PER_RUN }) {
+  const router = await resolveRouter(routerId, {
+    organizationId:
+      organizationId && mongoose.isValidObjectId(String(organizationId).trim())
+        ? String(organizationId).trim()
+        : undefined,
+  });
+  const now = new Date();
+  const candidates = await HotspotVoucher.find({
+    routerId: router._id,
+    usedAt: null,
+    $or: [{ validUntil: null }, { validUntil: { $gt: now } }],
+  }).sort({ createdAt: 1 });
+
+  const onRouter = new Set();
+  await withRouterMikrotik(router, async (api) => {
+    for (const row of await hs.printHotspotUsers(api)) {
+      const name = String(row.name || '').trim().toUpperCase();
+      if (name) onRouter.add(name);
+    }
+  });
+  const missing = candidates.filter((v) => !onRouter.has(String(v.code).toUpperCase()));
+  const summary = {
+    routerId: String(router._id),
+    unusedInSystem: candidates.length,
+    onRouter: candidates.length - missing.length,
+    missing: missing.length,
+    pushed: 0,
+    failed: [],
+    skippedNoPlan: 0,
+    remaining: missing.length,
+  };
+  if (dryRun || !missing.length) return summary;
+
+  const batch = missing.slice(0, Math.max(1, Math.min(SYNC_MAX_PER_RUN, Number(limit) || SYNC_MAX_PER_RUN)));
+  const byPkg = new Map();
+  for (const v of batch) {
+    const k = String(v.packageId || '');
+    if (!byPkg.has(k)) byPkg.set(k, []);
+    byPkg.get(k).push(v);
+  }
+  for (const [pkgId, group] of byPkg) {
+    const pkg = pkgId && mongoose.isValidObjectId(pkgId) ? await PlanPackage.findById(pkgId) : null;
+    if (!pkg) {
+      summary.skippedNoPlan += group.length;
+      continue;
+    }
+    const r = await pushVoucherBatchToRouter(group, router, pkg);
+    summary.pushed += r.pushed;
+    summary.failed.push(...r.failed);
+  }
+  summary.remaining = missing.length - summary.pushed;
+  if (summary.pushed) {
+    try {
+      await syncHotspotExpiryScheduler(router._id, await organizationIdForRouter(router));
+    } catch (e) {
+      console.error('[hotspot] expiry scheduler sync failed', e?.message || e);
+    }
+  }
+  console.log('[hotspot] router ticket sync', summary.routerId, {
+    missing: summary.missing,
+    pushed: summary.pushed,
+    failed: summary.failed.length,
+  });
+  return summary;
 }
 
 export async function listVouchers(query = {}) {

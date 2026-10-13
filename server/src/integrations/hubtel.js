@@ -60,6 +60,7 @@ export async function fetchHubtelTransactionStatus(clientReference, hubtel = con
         Authorization: `Basic ${auth}`,
         Accept: 'application/json',
       },
+      signal: AbortSignal.timeout(12_000),
     });
     const text = await res.text();
     let body = null;
@@ -69,15 +70,15 @@ export async function fetchHubtelTransactionStatus(clientReference, hubtel = con
       body = { raw: text?.slice?.(0, 800) || text };
     }
     const interpreted = interpretHubtelStatusCheckBody(body);
-    console.log('========== HUBTEL STATUS CHECK ==========');
     console.log('[hubtel.statusCheck]', {
       clientReference: ref,
       httpStatus: res.status,
       hubtelStatus: interpreted.hubtelStatus,
       transactionId: interpreted.transactionId || null,
     });
-    console.log('[hubtel.statusCheck] body=\n' + JSON.stringify(body, null, 2));
-    console.log('========================================');
+    if (!res.ok || interpreted.paid) {
+      console.log('[hubtel.statusCheck] body=\n' + JSON.stringify(body, null, 2));
+    }
     return {
       ok: res.ok,
       httpStatus: res.status,

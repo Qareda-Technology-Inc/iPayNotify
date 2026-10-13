@@ -289,7 +289,11 @@ publicPortalRouter.get(
      * If merchant callback never arrived, try Hubtel Status Check while the customer waits.
      * Throttle: at most once per 12s per tx (PayReturn polls every 1.5s).
      */
-    if (tx.status === 'pending') {
+    const recentClientFailure =
+      tx.status === 'failed' &&
+      /^client_/.test(String(tx.meta?.callback?.failedVia || '')) &&
+      Date.now() - new Date(tx.createdAt || 0).getTime() < 6 * 60 * 60 * 1000;
+    if (tx.status === 'pending' || recentClientFailure) {
       const lastCheck = tx.meta?.statusCheckAt ? new Date(tx.meta.statusCheckAt).getTime() : 0;
       const due = !lastCheck || Date.now() - lastCheck >= 12_000;
       if (due) {

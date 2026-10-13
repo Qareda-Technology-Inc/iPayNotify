@@ -12,6 +12,7 @@ import {
   ticketStats,
   reconcileHotspotVoucherUsage,
   removeVoucherFromRouter,
+  syncRouterVouchers,
   syncVoucherToRouter,
 } from '../services/hotspotService.js';
 import { syncHotspotExpiryScheduler } from '../services/hotspotExpirySchedulerService.js';
@@ -38,6 +39,21 @@ hotspotRouter.post(
   asyncHandler(async (req, res) => {
     const result = await syncHotspotExpiryScheduler(req.params.id, req.organizationId);
     res.json(result);
+  })
+);
+
+/** Body: { dryRun?: boolean } — re-add unused tickets missing from the router (max 200 per call). */
+hotspotRouter.post(
+  '/routers/:id/sync-tickets',
+  requireRoles('super_admin', 'org_admin', 'org_staff'),
+  asyncHandler(async (req, res) => {
+    res.json(
+      await syncRouterVouchers({
+        routerId: req.params.id,
+        organizationId: req.organizationId,
+        dryRun: Boolean(req.body?.dryRun),
+      })
+    );
   })
 );
 
@@ -174,6 +190,7 @@ hotspotRouter.post(
       organizationId: req.organizationId,
     });
     const pushed = pushToRouter !== false;
+    const failedById = new Map((vouchers.routerPush?.failed || []).map((f) => [f.id, f.error]));
     res.status(201).json(
       vouchers.map((v) => ({
         id: v._id,
@@ -192,7 +209,8 @@ hotspotRouter.post(
         speedDownMbps: v.speedDownMbps,
         packageId: v.packageId,
         mikrotikInternalId: v.mikrotikInternalId || null,
-        pushedToRouter: pushed,
+        pushedToRouter: pushed && !failedById.has(String(v._id)),
+        routerError: failedById.get(String(v._id)) || undefined,
       }))
     );
   })
