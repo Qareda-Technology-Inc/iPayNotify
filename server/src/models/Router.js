@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { encryptSecret } from '../utils/secretBox.js';
 
 const routerSchema = new mongoose.Schema(
   {
@@ -17,9 +18,10 @@ const routerSchema = new mongoose.Schema(
     sshPort: { type: Number, default: 22 },
     /** If empty, SSH uses apiUser / apiPassword. */
     sshUser: { type: String, default: '' },
-    sshPassword: { type: String, default: '', select: false },
+    /** Stored encrypted (see utils/secretBox.js); decrypt only where a connection is opened. */
+    sshPassword: { type: String, default: '', select: false, set: encryptSecret },
     apiUser: { type: String, required: true },
-    apiPassword: { type: String, required: true },
+    apiPassword: { type: String, required: true, set: encryptSecret },
     defaultPppProfile: { type: String, default: 'default' },
     expiredPppProfile: { type: String, default: 'nonpayment' },
     /**

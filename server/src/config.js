@@ -10,6 +10,8 @@ export const config = {
   mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/qarefi_billing',
   /** After `npm run db:backfill-organization`, set this to the printed id (optional if slug fallback is enough). */
   defaultOrganizationId: (process.env.DEFAULT_ORGANIZATION_ID || '').trim(),
+  /** 32-byte key (hex or base64) that encrypts router API/SSH passwords at rest. */
+  routerSecretKey: (process.env.ROUTER_SECRET_KEY || '').trim(),
   /**
    * Only this organisation slug gets Ticket operations (all roles in that org).
    * Default matches the platform / Qaretech Innovative tenant.
@@ -78,16 +80,6 @@ export const config = {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
-  },
-  /** @deprecated Prefer `hubtel` — kept empty so older walled-garden helpers do not crash. */
-  mtnMomo: {
-    subscriptionKey: '',
-    apiUser: '',
-    apiKey: '',
-    targetEnvironment: '',
-    baseUrl: '',
-    callbackUrl: '',
-    mockRequest: false,
   },
   /**
    * Hotspot walled garden: allow billing + payment hosts before login.

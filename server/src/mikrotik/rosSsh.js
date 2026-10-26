@@ -1,5 +1,6 @@
 import { createRequire } from 'module';
 import { parseRouterConnectString } from '../utils/routerConnect.js';
+import { decryptSecret } from '../utils/secretBox.js';
 
 const require = createRequire(import.meta.url);
 const { Client } = require('ssh2');
@@ -17,8 +18,8 @@ export function normalizeRouterForSsh(router) {
   const port = parsed.port;
   const username =
     String(src.sshUser ?? '').trim() || String(src.apiUser ?? '').trim();
-  const sshPass = src.sshPassword;
-  const apiPass = src.apiPassword;
+  const sshPass = decryptSecret(src.sshPassword);
+  const apiPass = decryptSecret(src.apiPassword);
   const password =
     sshPass != null && String(sshPass).length > 0
       ? String(sshPass)

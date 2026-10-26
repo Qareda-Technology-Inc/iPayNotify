@@ -9,7 +9,7 @@ function maskMsisdn(raw) {
 }
 
 /**
- * Test-only sheet: shown when checkout returns `mode: draft_hubtel` (or legacy draft_momo).
+ * Test-only sheet: shown when checkout returns `mode: draft_hubtel`.
  */
 export function DraftCheckoutPrompt({ open, payload, onClose, onComplete }) {
   const [busy, setBusy] = useState(false);
@@ -110,6 +110,3 @@ export function DraftCheckoutPrompt({ open, payload, onClose, onComplete }) {
     </div>
   );
 }
-
-/** @deprecated use DraftCheckoutPrompt */
-export const DraftMomoPrompt = DraftCheckoutPrompt;

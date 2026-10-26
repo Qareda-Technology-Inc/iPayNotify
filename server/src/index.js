@@ -12,6 +12,7 @@ import { wireguardRegisterRouter } from './routes/wireguardRegister.js';
 import { protectedApiRouter } from './routes/protectedApi.js';
 import { superAdminApiRouter } from './routes/superAdminApi.js';
 import { startBillingScheduler } from './jobs/scheduler.js';
+import { secretEncryptionEnabled } from './utils/secretBox.js';
 
 const app = express();
 /** Behind nginx/Cloudflare so req.ip / X-Forwarded-For reflect the customer (for sitePublicIp matching). */
@@ -127,6 +128,9 @@ await connectDb();
 await seedDefaultAdmin();
 if (process.env.NODE_ENV === 'production' && config.jwtSecret === 'change-me-in-production') {
   console.warn('[auth] Set JWT_SECRET in production — using default is insecure.');
+}
+if (!secretEncryptionEnabled()) {
+  console.warn('[routers] ROUTER_SECRET_KEY not set — router passwords are stored in plaintext.');
 }
 startBillingScheduler();
 

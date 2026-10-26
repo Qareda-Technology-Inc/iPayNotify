@@ -6,7 +6,6 @@ function isSensitiveKey(key) {
   if (/password$/i.test(k)) return true;
   if (/apikey$/i.test(k) || /api_key$/i.test(k)) return true;
   if (/sshPassword/i.test(k) || /apiPassword/i.test(k)) return true;
-  if (/mtnMomoSubscriptionKey/i.test(k) || /mtnMomoApiKey/i.test(k)) return true;
   if (/subscriptionkey/i.test(k) || /subscription_key/i.test(k)) return true;
   if (/refreshToken$/i.test(k) || /accessToken$/i.test(k)) return true;
   if (/authorization$/i.test(k)) return true;

@@ -3,6 +3,7 @@ import { parseRouterConnectString } from '../utils/routerConnect.js';
 import { withRouterSsh } from './rosSshAdapter.js';
 import { canUseWgJump, isWgTunnelHost, wgMikrotikJumpMode } from './wgJump.js';
 import { tagRouterError } from '../utils/routerErrors.js';
+import { decryptSecret } from '../utils/secretBox.js';
 
 const require = createRequire(import.meta.url);
 const { RouterOSAPI } = require('node-routeros');
@@ -154,10 +155,11 @@ export function normalizeRouterForApi(router) {
   const parsed = parseRouterConnectString(rawHost, storedApiPort);
   const host = parsed.host;
   const apiUser = String(src?.apiUser ?? src?.sshUser ?? '').trim();
-  const apiPassword =
+  const apiPassword = decryptSecret(
     src?.apiPassword != null && String(src.apiPassword).length > 0
       ? src.apiPassword
-      : src?.sshPassword;
+      : src?.sshPassword
+  );
   const apiPort = parsed.port;
 
   if (!host) {

@@ -127,7 +127,7 @@ export function RenewPage() {
           customerName: quote?.customerName || undefined,
         }),
       });
-      if (data.mode === 'draft_hubtel' || data.mode === 'draft_momo') {
+      if (data.mode === 'draft_hubtel') {
         setDraftCheckout(data);
         return;
       }

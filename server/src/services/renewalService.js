@@ -69,7 +69,7 @@ export async function refreshPppoeSyncNearExpiry() {
 
 /**
  * Auto-renew: users with autoRenewalEnabled, active paid window ending within `withinMs`,
- * deduct in-app balance when sufficient (MTN MoMo request-to-pay is not used for auto-renewal); on success extend paidUntil and re-enable secret.
+ * deduct in-app balance when sufficient (Hubtel checkout cannot charge silently, so wallet top-ups are the only auto-renew source); on success extend paidUntil and re-enable secret.
  */
 export async function attemptAutoRenewals({ withinMs = 86400000, organizationId } = {}) {
   const now = new Date();
