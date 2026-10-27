@@ -75,7 +75,15 @@ Multi-tenant billing platform for ISPs running **MikroTik**: PPPoE subscribers, 
    - API: `http://localhost:4000`
    - Web: `http://localhost:5173` (Vite proxies `/api` to the API)
 
-5. **Production** — the client is a static build (Vercel, see `client/vercel.json`); the API runs with `npm start --prefix server` (e.g. on Render). Point `HUBTEL_CALLBACK_URL` at the **API** host, not the frontend.
+5. **Tests** (server) — Vitest against an in-memory MongoDB; nothing reaches Hubtel, Arkesel, SMTP or routers:
+
+   ```bash
+   npm test --prefix server
+   ```
+
+   The first run downloads a MongoDB binary (cached afterwards). Tests live in `server/test/`.
+
+6. **Production** — the client is a static build (Vercel, see `client/vercel.json`); the API runs with `npm start --prefix server` (e.g. on Render). Point `HUBTEL_CALLBACK_URL` at the **API** host, not the frontend.
 
 ## How it works
 

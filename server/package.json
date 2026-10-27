@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:sync-indexes": "node src/db/syncIndexes.js",
     "db:backfill-organization": "node scripts/backfillOrganization.mjs",
     "db:backfill-admin-roles": "node scripts/backfillAdminRoles.mjs",
@@ -27,5 +29,9 @@
     "nodemailer": "^6.10.1",
     "qrcode": "^1.5.4",
     "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.2.3",
+    "vitest": "^3.2.4"
   }
 }
