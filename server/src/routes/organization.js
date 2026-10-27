@@ -161,9 +161,6 @@ function applyBillingPatch(doc, billingBody, { isSuperAdmin = false } = {}) {
     }
   }
 
-  /** Hubtel always settles on platform — ignore legacy custom Hubtel patches. */
-  doc.billing.useCustomHubtel = false;
-
   doc.markModified('billing');
 }
 

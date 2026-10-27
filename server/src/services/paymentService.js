@@ -10,6 +10,7 @@ import { generateVouchers, pushSavedVouchersToRouter } from './hotspotService.js
 import {
   buildHubtelCheckoutSession,
   fetchHubtelTransactionStatus,
+  hubtelAmountMatchesTx,
   hubtelProviderReference,
   resolveHubtelCallbackUrl,
 } from '../integrations/hubtel.js';
@@ -323,6 +324,12 @@ export async function createHotspotPurchaseCheckout({
     err.status = 400;
     throw err;
   }
+  /* The portal only lists active plans; refuse a deactivated one posted by id. */
+  if (pkg.isActive === false) {
+    const err = new Error('This package is no longer available');
+    err.status = 400;
+    throw err;
+  }
   const amountCents = pkg.priceCents ?? 0;
   if (amountCents <= 0) {
     const err = new Error('Package has no price set');
@@ -510,6 +517,25 @@ export async function checkTransactionStatusWithHubtel(clientReference, opts = {
 
   let applied = false;
   let applyResult = null;
+  /* Status Check is authenticated server-to-server, but still refuse a Paid for the wrong amount. */
+  const amountCheck =
+    check.amount != null ? hubtelAmountMatchesTx({ Amount: check.amount }, tx.amountCents) : { ok: true };
+  if (check.paid && !amountCheck.ok) {
+    console.error('[hubtel.reconcile] Paid at Hubtel but amount mismatch — not applying', {
+      clientReference: ref,
+      expectedCents: amountCheck.expectedCents,
+      gotCents: amountCheck.gotCents,
+    });
+    return {
+      ...base,
+      ok: true,
+      applied: false,
+      reason: 'amount_mismatch',
+      expectedCents: amountCheck.expectedCents,
+      gotCents: amountCheck.gotCents,
+      message: 'Hubtel: Paid, but the amount does not match this transaction — not applied.',
+    };
+  }
   if (apply && check.paid && (tx.status === 'pending' || tx.status === 'failed')) {
     const payload = check.body && typeof check.body === 'object' ? check.body : {};
     const enriched = {
@@ -574,6 +600,85 @@ export async function reconcilePaymentFromHubtelStatus(clientReference) {
     status: out.localStatus,
     ...out,
   };
+}
+
+/**
+ * Hubtel success callback. The callback URL is public and the clientReference is known to the
+ * buyer's browser, so the body alone is never proof of payment: it must carry a matching amount,
+ * and Hubtel Status Check must confirm Paid. When Status Check is unavailable (IP not whitelisted,
+ * network), the tx stays pending with `callbackUnverified` and the reconcile jobs apply it once
+ * Status Check answers — unless HUBTEL_TRUST_UNVERIFIED_CALLBACKS=true.
+ */
+export async function confirmHubtelCallbackPayment(clientReference, payload = {}) {
+  const ref = String(clientReference || '').trim();
+  const tx = await Transaction.findOne({ clientReference: ref });
+  if (!tx) return { ok: false, reason: 'not_found' };
+  if (tx.status === 'paid') return markTransactionPaidByReference(ref, payload);
+
+  const amt = hubtelAmountMatchesTx(payload, tx.amountCents);
+  if (amt.skipped || !amt.ok) {
+    const reason = amt.skipped ? 'amount_missing' : 'amount_mismatch';
+    console.error(`[hubtel.callback] ${reason} — refusing to mark paid`, {
+      clientReference: ref,
+      expectedCents: tx.amountCents,
+      gotCents: amt.gotCents ?? null,
+    });
+    mergeTxMeta(tx, {
+      callbackRejected: { at: new Date().toISOString(), reason, payload },
+    });
+    await tx.save();
+    return { ok: false, reason, expectedCents: tx.amountCents, gotCents: amt.gotCents ?? null };
+  }
+
+  const verified = await checkTransactionStatusWithHubtel(ref, { apply: false });
+  const enriched = {
+    ...payload,
+    TransactionId: hubtelProviderReference(payload) || verified.transactionId || undefined,
+  };
+
+  if (verified.ok && verified.hubtelPaid) {
+    if (verified.reason === 'amount_mismatch') return { ok: false, reason: 'amount_mismatch' };
+    return markTransactionPaidByReference(ref, { ...enriched, verifiedVia: 'hubtel_status_check' });
+  }
+
+  if (verified.ok) {
+    /* Hubtel answered and says it is not paid: the callback was forged or premature. */
+    console.error('[hubtel.callback] Status Check says not paid — ignoring success callback', {
+      clientReference: ref,
+      hubtelStatus: verified.hubtelStatus,
+    });
+    const fresh = await Transaction.findById(tx._id);
+    mergeTxMeta(fresh, {
+      callbackRejected: {
+        at: new Date().toISOString(),
+        reason: 'not_paid_at_hubtel',
+        hubtelStatus: verified.hubtelStatus,
+        payload,
+      },
+    });
+    await fresh.save();
+    return { ok: false, reason: 'not_paid_at_hubtel', hubtelStatus: verified.hubtelStatus };
+  }
+
+  if (config.hubtel.trustUnverifiedCallbacks) {
+    console.warn('[hubtel.callback] Status Check unavailable — trusting callback (HUBTEL_TRUST_UNVERIFIED_CALLBACKS)', {
+      clientReference: ref,
+      reason: verified.reason,
+    });
+    return markTransactionPaidByReference(ref, { ...enriched, paidUnverified: true });
+  }
+
+  console.warn('[hubtel.callback] Status Check unavailable — holding as pending until verified', {
+    clientReference: ref,
+    reason: verified.reason,
+  });
+  const fresh = await Transaction.findById(tx._id);
+  mergeTxMeta(fresh, {
+    callback: enriched,
+    callbackUnverified: { at: new Date().toISOString(), reason: verified.reason },
+  });
+  await fresh.save();
+  return { ok: true, pendingVerification: true, reason: verified.reason };
 }
 
 /**
@@ -1041,21 +1146,30 @@ export async function expireStalePendingPayments({ maxAgeHours = 24, limit = 200
   })
     .sort({ createdAt: 1 })
     .limit(Math.min(500, Math.max(1, Number(limit) || 200)))
-    .select('clientReference')
+    .select('clientReference meta.callbackUnverified')
     .lean();
 
   let expired = 0;
   let rescued = 0;
+  let held = 0;
   for (const row of stale) {
     /* A paid-but-unconfirmed checkout must never be expired: ask Hubtel first. */
+    let checked = false;
     try {
       const chk = await reconcilePaymentFromHubtelStatus(row.clientReference);
       if (chk.status === 'paid') {
         rescued += 1;
         continue;
       }
+      /* `ok` comes from the Status Check result: true means Hubtel answered. */
+      checked = chk.ok === true;
     } catch (e) {
       console.warn('[payments] stale status check failed', row.clientReference, e?.message || e);
+    }
+    /* Hubtel sent a success callback we could not verify yet: keep it until Status Check answers. */
+    if (row.meta?.callbackUnverified && !checked) {
+      held += 1;
+      continue;
     }
     const r = await markTransactionFailedByReference(row.clientReference, {
       failedVia: 'stale_pending_expiry',
@@ -1063,10 +1177,10 @@ export async function expireStalePendingPayments({ maxAgeHours = 24, limit = 200
     });
     if (r.ok) expired += 1;
   }
-  if (expired > 0 || rescued > 0) {
-    console.log('[payments] expired stale pending', { expired, rescued, cutoff: cutoff.toISOString() });
+  if (expired > 0 || rescued > 0 || held > 0) {
+    console.log('[payments] expired stale pending', { expired, rescued, held, cutoff: cutoff.toISOString() });
   }
-  return { scanned: stale.length, expired, rescued, cutoff: cutoff.toISOString() };
+  return { scanned: stale.length, expired, rescued, held, cutoff: cutoff.toISOString() };
 }
 
 const RECONCILE_WINDOW_MS = 24 * 60 * 60 * 1000;

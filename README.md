@@ -58,6 +58,7 @@ Multi-tenant billing platform for ISPs running **MikroTik**: PPPoE subscribers, 
    npm run db:backfill-pppoe-renew-codes
    npm run db:backfill-wallet-settlements
    npm run db:encrypt-router-secrets   # after setting ROUTER_SECRET_KEY
+   npm run db:purge-org-hubtel-credentials -- --apply   # one-off: drop legacy per-org Hubtel keys
    npm run db:sync-indexes
    ```
 

@@ -42,7 +42,6 @@ export async function resolveOrgBilling(organizationId) {
     merchantDisplayName,
     smsBrandName,
     hubtel,
-    useOrgHubtelCredentials: false,
     platformFeeBps: feeBps,
   };
 }

@@ -76,6 +76,11 @@ export const config = {
       .trim()
       .replace(/\/$/, ''),
     mock: process.env.HUBTEL_MOCK === 'true',
+    /**
+     * Success callbacks are only applied after Status Check confirms Paid. When Status Check is
+     * unavailable (IP not whitelisted), true marks them paid anyway (amount still required).
+     */
+    trustUnverifiedCallbacks: process.env.HUBTEL_TRUST_UNVERIFIED_CALLBACKS === 'true',
     allowedChannels: String(process.env.HUBTEL_ALLOWED_CHANNELS || 'mobileMoney,bankCard')
       .split(',')
       .map((s) => s.trim())

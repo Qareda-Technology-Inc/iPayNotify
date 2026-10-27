@@ -4,12 +4,10 @@ import {
   hubtelPaymentSucceeded,
   hubtelPaymentExplicitlyFailed,
   hubtelProviderReference,
-  hubtelAmountMatchesTx,
 } from '../integrations/hubtel.js';
 import {
-  markTransactionPaidByReference,
+  confirmHubtelCallbackPayment,
   markTransactionFailedByReference,
-  getTransactionByReference,
 } from '../services/paymentService.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 
@@ -75,29 +73,8 @@ async function handleCallback(req, res) {
   }
 
   if (hubtelPaymentSucceeded(payload)) {
-    const tx = await getTransactionByReference(clientReference);
-    if (tx) {
-      const amt = hubtelAmountMatchesTx(payload, tx.amountCents);
-      if (!amt.ok) {
-        console.error('[hubtel.callback] amount mismatch — refusing to mark paid', {
-          clientReference,
-          expectedCents: amt.expectedCents,
-          gotCents: amt.gotCents,
-        });
-        return res.status(200).json({
-          received: true,
-          paid: false,
-          error: 'amount_mismatch',
-          expectedCents: amt.expectedCents,
-          gotCents: amt.gotCents,
-        });
-      }
-    }
-    const enriched = {
-      ...payload,
-      TransactionId: hubtelProviderReference(payload) || undefined,
-    };
-    const result = await markTransactionPaidByReference(clientReference, enriched);
+    /* Verified against Hubtel Status Check — the body alone is never trusted. */
+    const result = await confirmHubtelCallbackPayment(clientReference, payload);
     console.log('========== HUBTEL CALLBACK SUCCESS ==========');
     console.log('[hubtel.callback.SUCCESS]', {
       clientReference,
@@ -108,13 +85,14 @@ async function handleCallback(req, res) {
         ok: result.ok,
         duplicate: result.duplicate,
         reason: result.reason,
-        paid: result.ok !== false && result.reason !== 'not_found',
+        paid: result.ok === true && !result.pendingVerification,
+        pendingVerification: Boolean(result.pendingVerification),
       },
     });
     console.log('=============================================');
     return res.status(200).json({
       received: true,
-      paid: result.ok !== false && result.reason !== 'not_found',
+      paid: result.ok === true && !result.pendingVerification,
       ...result,
     });
   }
@@ -151,13 +129,6 @@ hubtelPaymentsRouter.get('/callback/ping', (_req, res) => {
 });
 
 hubtelPaymentsRouter.post(
-  '/callback',
-  asyncHandler(async (req, res) => {
-    await handleCallback(req, res);
-  })
-);
-
-hubtelPaymentsRouter.get(
   '/callback',
   asyncHandler(async (req, res) => {
     await handleCallback(req, res);

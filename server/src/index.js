@@ -165,6 +165,11 @@ app.listen(config.port, () => {
   } else {
     console.log(`[hubtel] Callback URL: ${cb}`);
   }
+  if (config.hubtel?.trustUnverifiedCallbacks) {
+    console.warn(
+      '[hubtel] HUBTEL_TRUST_UNVERIFIED_CALLBACKS=true — success callbacks are applied without Status Check when it is unavailable. Turn off once Hubtel whitelists this server.'
+    );
+  }
   if (config.allowPaymentSimulation) {
     console.warn(
       '[hubtel] ALLOW_PAYMENT_SIMULATION (or draft/mock in non-prod) — POST /api/public/payment/mock-complete can mark txs paid without Hubtel.'

@@ -11,7 +11,8 @@
     "db:backfill-admin-roles": "node scripts/backfillAdminRoles.mjs",
     "db:backfill-pppoe-renew-codes": "node scripts/backfillPppoeRenewCodes.mjs",
     "db:backfill-wallet-settlements": "node scripts/backfillWalletSettlements.mjs",
-    "db:encrypt-router-secrets": "node scripts/encryptRouterSecrets.mjs"
+    "db:encrypt-router-secrets": "node scripts/encryptRouterSecrets.mjs",
+    "db:purge-org-hubtel-credentials": "node scripts/purgeOrgHubtelCredentials.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

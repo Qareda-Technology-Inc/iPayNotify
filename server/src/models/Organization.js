@@ -7,14 +7,6 @@ const organizationBillingSchema = new mongoose.Schema(
     /** Default SMS "brand" line when a router has no `smsBrandName`. */
     smsBrandName: { type: String, trim: true, default: '' },
     /**
-     * @deprecated Platform Hubtel always collects. Kept for legacy docs only.
-     */
-    useCustomHubtel: { type: Boolean, default: false },
-    hubtelMerchantAccount: { type: String, default: '' },
-    hubtelClientId: { type: String, default: '' },
-    hubtelClientSecret: { type: String, default: '' },
-    hubtelCallbackUrl: { type: String, default: '' },
-    /**
      * Optional per-org take-rate in basis points (500 = 5%).
      * Null → platform default from PlatformSettings in the database.
      */
