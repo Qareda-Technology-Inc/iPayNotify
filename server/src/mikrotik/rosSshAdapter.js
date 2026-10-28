@@ -241,7 +241,8 @@ export async function withRouterSsh(router, fn, opts = {}) {
     } catch {
       /* ignore */
     }
-    if (isSshAuthFailure(e)) throw sshLoginRejectedError(creds);
+    console.warn('[ssh] connect failed', `${creds.username}@${creds.host}:${creds.port}`, e?.cause?.message || e?.message || e);
+    if (isSshAuthFailure(e)) throw sshLoginRejectedError(creds, e);
     if (!e.status) e.status = 502;
     throw e;
   }

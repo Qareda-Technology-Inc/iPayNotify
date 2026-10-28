@@ -51,6 +51,7 @@ export function normalizeRouterForSsh(router) {
 /** Algorithms many RouterOS builds still negotiate (ssh2 defaults dropped some). */
 const MIKROTIK_SSH_ALGORITHMS = {
   serverHostKey: [
+    'ssh-ed25519',
     'ssh-rsa',
     'ssh-dss',
     'ecdsa-sha2-nistp256',
@@ -717,20 +718,26 @@ export async function execRos(conn, command) {
   });
 }
 
+/**
+ * Only a real credential rejection. Handshake / algorithm mismatches ("no matching …",
+ * "handshake failed") are not password problems and keep their own message.
+ */
 export function isSshAuthFailure(err) {
-  const m = String(err?.message ?? err);
+  const m = String(err?.cause?.message ?? err?.message ?? err);
   if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|connection timed out|timed out/i.test(m)) return false;
-  return /authentication|password|denied|All configured|Unable to|no matching|handshake failed/i.test(
-    m
-  );
+  if (/no matching|handshake failed/i.test(m)) return false;
+  return /All configured authentication methods failed|authentication failed|permission denied/i.test(m);
 }
 
-export function sshLoginRejectedError(creds) {
+export function sshLoginRejectedError(creds, cause) {
+  const reason = String(cause?.cause?.message ?? cause?.message ?? '').trim();
   const err = new Error(
-    `SSH login failed for "${creds.username}" at ${creds.host}:${creds.port}. ` +
-      `Use System → Users credentials (same as terminal SSH). Enable SSH service (IP → Services → ssh). ` +
+    `SSH login failed for "${creds.username}" at ${creds.host}:${creds.port}` +
+      (reason ? ` (router said: ${reason})` : '') +
+      `. Use System → Users credentials (same as terminal SSH). Enable SSH service (IP → Services → ssh). ` +
       `If using transport SSH, optional SSH user/password fields override API user/password.`
   );
   err.status = 502;
+  err.cause = cause;
   return err;
 }
