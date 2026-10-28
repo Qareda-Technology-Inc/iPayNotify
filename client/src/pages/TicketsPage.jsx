@@ -1008,12 +1008,12 @@ function GeneratePanel({ routers, packages, onError, onInfo, onCreated, onPrint,
             <input
               type="number"
               min={1}
-              max={100}
+              max={500}
               value={count}
               onChange={(e) => setCount(e.target.value)}
               className={inputCls}
             />
-            <span className="mt-1.5 block text-xs text-slate-500">Up to 100 unique 6-digit codes</span>
+            <span className="mt-1.5 block text-xs text-slate-500">Up to 500 unique 6-digit codes per batch</span>
           </label>
         </div>
 

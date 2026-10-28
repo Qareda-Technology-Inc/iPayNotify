@@ -16,6 +16,9 @@ import { normalizePrintRows } from '../mikrotik/helpers.js';
 import { archiveLinkedUsage } from './ticketLedgerService.js';
 import { configuredHtmlDirectory } from './captivePortalPushService.js';
 
+/** Tickets per generate request (preview + create). */
+export const MAX_TICKETS_PER_BATCH = 500;
+
 /** Per-router secret the on-login script sends home (created on first profile sync). */
 export async function ensureRouterHookKey(router) {
   const id = router?._id;
@@ -284,7 +287,7 @@ export async function previewVouchers({
         ? String(organizationId).trim()
         : undefined,
   });
-  const n = Math.min(100, Math.max(1, Number(count) || 1));
+  const n = Math.min(MAX_TICKETS_PER_BATCH, Math.max(1, Number(count) || 1));
   const existing = await HotspotVoucher.find({ routerId: router._id }).select('code').lean();
   const taken = new Set(existing.map((r) => String(r.code)));
   const codes = [];
@@ -377,6 +380,20 @@ export async function syncVoucherToRouter(voucher) {
 /**
  * One SSH session: ensure profile once, then add all voucher users (fast path).
  */
+const API_PUSH_CONCURRENCY = 8;
+
+/** Run `fn` over items with at most `limit` in flight. */
+async function runPool(items, limit, fn) {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const item = items[next++];
+      await fn(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 async function pushVoucherBatchToRouter(vouchers, router, pkg) {
   const result = { pushed: 0, failed: [] };
   if (!vouchers.length) return result;
@@ -392,35 +409,54 @@ async function pushVoucherBatchToRouter(vouchers, router, pkg) {
       onLogin,
     });
 
-    for (const voucher of vouchers) {
-      const comment = formatMikroTicketComment({
+    const userFor = (voucher) => ({
+      name: voucher.code,
+      password: '',
+      profile: profileName,
+      server: voucher.hotspotServer || undefined,
+      comment: formatMikroTicketComment({
         createdAt: voucher.createdAt || new Date(),
         voucherId: voucher._id,
         usersPerTicket: voucher.usersPerTicket ?? pkg.usersPerTicket,
         validUntil: voucher.validUntil,
+      }),
+      timeLimitSeconds: voucher.timeLimitSeconds,
+      dataLimitBytes: voucher.dataLimitBytes,
+      sharedUsers: voucher.usersPerTicket,
+      speedDownMbps: voucher.speedDownMbps,
+      speedUpMbps: voucher.speedUpMbps,
+      skipProfileUpsert: true,
+      skipVerify: true,
+    });
+
+    /* Fast path: SSH sends many users per command; API transport runs adds concurrently. */
+    let slow = vouchers;
+    if (typeof api.execCli === 'function') {
+      const { retry } = await hs.addHotspotUsersBulk(api, vouchers.map(userFor));
+      result.pushed += vouchers.length - retry.size;
+      slow = vouchers.filter((v) => retry.has(String(v.code)));
+    } else {
+      const failedFast = [];
+      await runPool(vouchers, API_PUSH_CONCURRENCY, async (voucher) => {
+        try {
+          await hs.addHotspotUser(api, userFor(voucher));
+          result.pushed += 1;
+        } catch {
+          failedFast.push(voucher);
+        }
       });
+      slow = failedFast;
+    }
+
+    /* Slow path, one at a time with the per-user fallbacks (e.g. retry without server). */
+    for (const voucher of slow) {
       try {
         if (typeof api.execCli === 'function') {
           await api
             .execCli(`/ip hotspot user remove [find where name=${rosFindLit(voucher.code)}]`)
             .catch(() => {});
         }
-        await hs.addHotspotUser(api, {
-          name: voucher.code,
-          password: '',
-          profile: profileName,
-          server: voucher.hotspotServer || undefined,
-          comment,
-          timeLimitSeconds: voucher.timeLimitSeconds,
-          dataLimitBytes: voucher.dataLimitBytes,
-          sharedUsers: voucher.usersPerTicket,
-          speedDownMbps: voucher.speedDownMbps,
-          speedUpMbps: voucher.speedUpMbps,
-          skipProfileUpsert: true,
-          skipVerify: true,
-        });
-        voucher.password = '';
-        voucher.mikrotikInternalId = undefined;
+        await hs.addHotspotUser(api, userFor(voucher));
         result.pushed += 1;
       } catch (e) {
         result.failed.push({ id: String(voucher._id), code: voucher.code, error: String(e?.message || e).slice(0, 300) });
@@ -429,6 +465,10 @@ async function pushVoucherBatchToRouter(vouchers, router, pkg) {
   });
 
   const ok = vouchers.filter((v) => !result.failed.some((f) => f.id === String(v._id)));
+  for (const v of ok) {
+    v.password = '';
+    v.mikrotikInternalId = undefined;
+  }
   if (ok.length) {
     await HotspotVoucher.bulkWrite(
       ok.map((v) => ({
@@ -515,8 +555,8 @@ export async function generateVouchers({
     : [];
   const n =
     fromPreview.length > 0
-      ? Math.min(100, fromPreview.length)
-      : Math.min(100, Math.max(1, Number(count) || 1));
+      ? Math.min(MAX_TICKETS_PER_BATCH, fromPreview.length)
+      : Math.min(MAX_TICKETS_PER_BATCH, Math.max(1, Number(count) || 1));
 
   const paused = pausedSecondsFromPackage(pkg);
   const elapsed = elapsedSecondsFromPackage(pkg);

@@ -8,6 +8,7 @@ import {
   listHotspotServersForRouter,
   listTicketBatches,
   listTickets,
+  MAX_TICKETS_PER_BATCH,
   previewVouchers,
   ticketStats,
   reconcileHotspotVoucherUsage,
@@ -179,7 +180,7 @@ hotspotRouter.post(
     if (!routerId) {
       return res.status(400).json({ error: 'routerId is required' });
     }
-    const n = Math.min(100, Math.max(1, Number(count) || 1));
+    const n = Math.min(MAX_TICKETS_PER_BATCH, Math.max(1, Number(count) || 1));
     const vouchers = await generateVouchers({
       count: n,
       packageId,

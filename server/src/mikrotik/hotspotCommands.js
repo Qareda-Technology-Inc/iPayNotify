@@ -336,6 +336,80 @@ export async function ensureHotspotUserProfile(api, profileName, opts = {}) {
   return upsertHotspotUserProfile(api, profileName, opts);
 }
 
+/** Hotspot users per SSH exec in addHotspotUsersBulk (keeps each command around 20 KB). */
+export const HOTSPOT_BULK_CHUNK = 40;
+
+function hotspotUserAddCli(u) {
+  const limitUptime = formatLimitUptime(u.timeLimitSeconds);
+  const pass = u.password == null ? '' : String(u.password);
+  const serverName = String(u.server || '').trim();
+  let line =
+    `/ip hotspot user add name=${cliEscapeValue(u.name)} ` +
+    `password=${pass === '' ? '""' : cliEscapeValue(pass)} profile=${cliEscapeValue(u.profile || 'default')}`;
+  if (serverName) line += ` server=${cliEscapeValue(serverName)}`;
+  if (u.comment) line += ` comment=${cliEscapeValue(u.comment)}`;
+  if (limitUptime) line += ` limit-uptime=${cliEscapeValue(limitUptime)}`;
+  if (u.dataLimitBytes != null && u.dataLimitBytes > 0) {
+    line += ` limit-bytes-total=${cliEscapeValue(String(u.dataLimitBytes))}`;
+  }
+  return line;
+}
+
+/**
+ * One RouterOS script line that adds many hotspot users: each add replaces a same-named user
+ * on conflict, and any user that still fails prints `QFERR <name>`. Ends with `QFDONE`.
+ */
+export function buildHotspotUsersBulkScript(users) {
+  const parts = users.map((u) => {
+    const add = hotspotUserAddCli(u);
+    const name = rosFindLit(u.name);
+    return (
+      `:do {${add}} on-error={:do {/ip hotspot user remove [find where name=${name}]; ${add}} ` +
+      `on-error={:put ("QFERR " . ${name})}}`
+    );
+  });
+  parts.push(':put "QFDONE"');
+  return parts.join('; ');
+}
+
+/**
+ * Add many hotspot users over SSH in a few round trips instead of two per user.
+ * Users are already-resolved add options (profile upserted by the caller).
+ * Returns the names that need the slow per-user path: those the router rejected, plus every
+ * user of a chunk whose script did not run to the end.
+ * @returns {Promise<{ added: number, retry: Set<string> }>}
+ */
+export async function addHotspotUsersBulk(api, users, { chunkSize = HOTSPOT_BULK_CHUNK } = {}) {
+  const retry = new Set();
+  let added = 0;
+  for (let i = 0; i < users.length; i += chunkSize) {
+    const chunk = users.slice(i, i + chunkSize);
+    let out = '';
+    try {
+      out = String((await api.execCli(buildHotspotUsersBulkScript(chunk))) || '');
+    } catch (e) {
+      console.warn('[hotspot] bulk add chunk failed, falling back per user:', String(e?.message || e).slice(0, 200));
+      out = '';
+    }
+    if (!out.includes('QFDONE')) {
+      chunk.forEach((u) => retry.add(String(u.name)));
+      continue;
+    }
+    const failed = new Set(
+      out
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.startsWith('QFERR '))
+        .map((l) => l.slice(6).trim())
+    );
+    for (const u of chunk) {
+      if (failed.has(String(u.name))) retry.add(String(u.name));
+      else added += 1;
+    }
+  }
+  return { added, retry };
+}
+
 /**
  * Add hotspot user. Username-only login → empty password.
  * Profile is upserted first unless skipProfileUpsert. Verify unless skipVerify.
