@@ -8,14 +8,12 @@ function clampFeeBps(n) {
 
 /** Ensure the singleton settings row exists. */
 export async function ensurePlatformSettings() {
-  let doc = await PlatformSettings.findOne({ key: 'default' });
-  if (!doc) {
-    doc = await PlatformSettings.create({
-      key: 'default',
-      defaultPlatformFeeBps: FALLBACK_FEE_BPS,
-    });
-  }
-  return doc;
+  /* Upsert: concurrent first requests on a fresh database must not race to insert the row. */
+  return PlatformSettings.findOneAndUpdate(
+    { key: 'default' },
+    { $setOnInsert: { key: 'default', defaultPlatformFeeBps: FALLBACK_FEE_BPS } },
+    { upsert: true, new: true }
+  );
 }
 
 export async function getDefaultPlatformFeeBps() {

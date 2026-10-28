@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../api.js';
 import { routerDisplayName } from '../utils/routerDisplayName.js';
+import { Modal, btnPrimary, btnSecondary } from '../components/Modal.jsx';
 import {
   SHEET_PRESETS,
   downloadVouchersPdf,
@@ -62,7 +63,7 @@ function Selectable({ selected, onSelect, children, className = '' }) {
   );
 }
 
-function LoginPreviewCard({ design, selected, onSelect }) {
+function LoginPreviewCard({ design, selected, onSelect, onView }) {
   return (
     <Selectable selected={selected} onSelect={onSelect}>
       <div className="relative h-[360px] overflow-hidden bg-slate-950">
@@ -73,6 +74,17 @@ function LoginPreviewCard({ design, selected, onSelect }) {
           tabIndex={-1}
           className="pointer-events-none absolute left-0 top-0 h-[600px] w-[390px] origin-top-left scale-[0.6] border-0"
         />
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onView();
+          }}
+          onKeyDown={(e) => e.stopPropagation()}
+          className="absolute bottom-3 right-3 rounded-lg bg-slate-950/85 px-3 py-1.5 text-xs font-semibold text-white shadow-lg ring-1 ring-white/15 backdrop-blur hover:bg-slate-900"
+        >
+          View full page
+        </button>
       </div>
       <div className="border-t border-slate-800 bg-slate-900/80 px-3 py-2.5">
         <p className="text-sm font-medium text-white">
@@ -82,6 +94,128 @@ function LoginPreviewCard({ design, selected, onSelect }) {
         <p className="mt-0.5 text-xs text-slate-400">{design.blurb}</p>
       </div>
     </Selectable>
+  );
+}
+
+const PREVIEW_DEVICES = [
+  { id: 'phone', label: 'Phone', width: 375 },
+  { id: 'tablet', label: 'Tablet', width: 768 },
+  { id: 'desktop', label: 'Desktop', width: 1180 },
+];
+
+/** Full-size login page preview with device sizes and prev/next through the designs. */
+function LoginPreviewModal({ designs, index, selectedId, onIndex, onUse, onClose }) {
+  const [device, setDevice] = useState('phone');
+  const frameBox = useRef(null);
+  const [boxWidth, setBoxWidth] = useState(0);
+  const design = designs[index];
+
+  useEffect(() => {
+    const el = frameBox.current;
+    if (!el) return undefined;
+    const ro = new ResizeObserver(([entry]) => setBoxWidth(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [design]);
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'ArrowLeft') onIndex((index - 1 + designs.length) % designs.length);
+      if (e.key === 'ArrowRight') onIndex((index + 1) % designs.length);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [index, designs.length, onIndex]);
+
+  if (!design) return null;
+  const width = PREVIEW_DEVICES.find((d) => d.id === device)?.width || 375;
+  /* Render at the real device width, then shrink to fit the dialog when it is narrower. */
+  const scale = boxWidth && width > boxWidth ? boxWidth / width : 1;
+  const height = 720;
+  const isSelected = design.id === selectedId;
+
+  return (
+    <Modal
+      open
+      size="xl"
+      title={`${design.name} — login page preview`}
+      subtitle={`${design.blurb} Shown with your branding, wording and plans.`}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className={btnSecondary} onClick={onClose}>
+            Close
+          </button>
+          <button
+            type="button"
+            className={btnPrimary}
+            disabled={isSelected}
+            onClick={() => {
+              onUse(design.id);
+              onClose();
+            }}
+          >
+            {isSelected ? 'Selected design' : 'Use this design'}
+          </button>
+        </>
+      }
+    >
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex rounded-lg border border-slate-700 p-0.5" role="group" aria-label="Preview size">
+          {PREVIEW_DEVICES.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              aria-pressed={device === d.id}
+              onClick={() => setDevice(d.id)}
+              className={`rounded-md px-3 py-1 text-xs font-medium ${
+                device === d.id ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <button
+            type="button"
+            aria-label="Previous design"
+            onClick={() => onIndex((index - 1 + designs.length) % designs.length)}
+            className="rounded-lg border border-slate-700 px-2.5 py-1 text-slate-200 hover:border-slate-500"
+          >
+            ‹
+          </button>
+          <span>
+            {index + 1} / {designs.length}
+          </span>
+          <button
+            type="button"
+            aria-label="Next design"
+            onClick={() => onIndex((index + 1) % designs.length)}
+            className="rounded-lg border border-slate-700 px-2.5 py-1 text-slate-200 hover:border-slate-500"
+          >
+            ›
+          </button>
+        </div>
+      </div>
+      <div ref={frameBox} className="flex justify-center overflow-hidden rounded-xl bg-slate-950/60 p-0">
+        <div style={{ width: width * scale, height: height * scale }} className="relative">
+          <iframe
+            key={`${design.id}-${device}`}
+            title={`${design.name} full preview`}
+            srcDoc={design.html}
+            sandbox=""
+            style={{ width, height, transform: `scale(${scale})` }}
+            className={`absolute left-0 top-0 origin-top-left border-0 bg-white ${
+              device === 'phone' ? 'rounded-[28px] ring-8 ring-slate-800' : 'rounded-lg'
+            }`}
+          />
+        </div>
+      </div>
+      <p className="mt-2 text-center text-[11px] text-slate-500">
+        Scroll inside the page to see plans and the footer. Use ← → to switch designs. Buttons here do not log in.
+      </p>
+    </Modal>
   );
 }
 
@@ -367,6 +501,7 @@ export function TemplatesPage() {
   const [previews, setPreviews] = useState([]);
   const [samplePlans, setSamplePlans] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [viewIndex, setViewIndex] = useState(/** @type {number | null} */ (null));
   const [plansVersion, setPlansVersion] = useState(0);
   const [routers, setRouters] = useState([]);
   const [routerId, setRouterId] = useState('');
@@ -830,15 +965,26 @@ export function TemplatesPage() {
               ) : null}
             </div>
             <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(234px,1fr))]">
-              {previews.map((d) => (
+              {previews.map((d, i) => (
                 <LoginPreviewCard
                   key={d.id}
                   design={d}
                   selected={portalDesign === d.id}
                   onSelect={() => setPortalDesign(d.id)}
+                  onView={() => setViewIndex(i)}
                 />
               ))}
             </div>
+            {viewIndex != null && previews[viewIndex] ? (
+              <LoginPreviewModal
+                designs={previews}
+                index={viewIndex}
+                selectedId={portalDesign}
+                onIndex={setViewIndex}
+                onUse={setPortalDesign}
+                onClose={() => setViewIndex(null)}
+              />
+            ) : null}
           </section>
         </div>
       ) : (

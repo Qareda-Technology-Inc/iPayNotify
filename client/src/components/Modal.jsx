@@ -18,7 +18,8 @@ export function Modal({ open, title, subtitle, onClose, children, footer, size =
   }, [open, onClose]);
 
   if (!open) return null;
-  const width = size === 'lg' ? 'max-w-2xl' : size === 'sm' ? 'max-w-sm' : 'max-w-lg';
+  const width =
+    size === 'xl' ? 'max-w-6xl' : size === 'lg' ? 'max-w-2xl' : size === 'sm' ? 'max-w-sm' : 'max-w-lg';
 
   return (
     <div

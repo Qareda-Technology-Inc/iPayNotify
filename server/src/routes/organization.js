@@ -239,6 +239,10 @@ organizationRouter.post(
     const b = { ...saved, ...overrides };
     const showPlans = b.portalShowPlans !== false;
     const siteRouterId = routerId && mongoose.isValidObjectId(String(routerId)) ? String(routerId) : null;
+    const siteRouter =
+      siteRouterId && org
+        ? await MikrotikRouter.findOne({ _id: siteRouterId, organizationId: org._id }).select('name comment host').lean()
+        : null;
     let plans = [];
     let samplePlans = false;
     if (showPlans) {
@@ -262,7 +266,7 @@ organizationRouter.post(
         mode: 'preview',
         brandName,
         logoUrl: String(saved.logoUrl || '').trim(),
-        siteName: 'Main hall',
+        siteName: siteRouter ? routerDisplayName(siteRouter) : 'Main hall',
         headline: clipPortalCopy('portalHeadline', b.portalHeadline),
         subtitle: clipPortalCopy('portalSubtitle', b.portalSubtitle),
         buttonLabel: clipPortalCopy('portalButtonLabel', b.portalButtonLabel),
