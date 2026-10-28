@@ -13,6 +13,7 @@ import {
 import { enforceRemoteAccessRouters } from '../services/remoteAccessService.js';
 import { runRouterMonitor } from '../services/routerMonitorService.js';
 import { runStuckPaymentAlerts } from '../services/stuckPaymentService.js';
+import { runOrgBillingJob } from '../services/orgPlatformBillingService.js';
 import { config } from '../config.js';
 
 let task;
@@ -25,6 +26,7 @@ let voucherFulfillTask;
 let routerMonitorTask;
 let hubtelReconcileTask;
 let stuckPaymentTask;
+let orgBillingTask;
 
 export function startBillingScheduler() {
   if (!routerMonitorTask) {
@@ -196,6 +198,22 @@ export function startBillingScheduler() {
     console.log(`[billing] stuck payment alerts every 5 minutes (${config.cronTz})`);
   }
 
+  if (!orgBillingTask) {
+    orgBillingTask = cron.schedule(
+      '*/30 * * * *',
+      async () => {
+        try {
+          const summary = await runOrgBillingJob();
+          if (summary.changed > 0 || summary.notices > 0) console.log('[org-billing] tick', new Date().toISOString(), summary);
+        } catch (e) {
+          console.error('[org-billing] tick failed', e?.message || e);
+        }
+      },
+      { timezone: config.cronTz }
+    );
+    console.log(`[billing] organisation platform billing every 30 minutes (${config.cronTz})`);
+  }
+
   if (!stalePaymentsTask) {
     stalePaymentsTask = cron.schedule(
       '15 * * * *',
@@ -255,5 +273,9 @@ export function stopBillingScheduler() {
   if (stuckPaymentTask) {
     stuckPaymentTask.stop();
     stuckPaymentTask = null;
+  }
+  if (orgBillingTask) {
+    orgBillingTask.stop();
+    orgBillingTask = null;
   }
 }

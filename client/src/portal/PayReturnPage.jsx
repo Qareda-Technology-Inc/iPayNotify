@@ -287,6 +287,19 @@ export function PayReturnPage() {
     );
   }
 
+  if (status.status === 'paid' && status.kind === 'org_subscription') {
+    return (
+      <div className="mx-auto max-w-md px-4 py-16 text-center">
+        <h1 className="text-lg font-semibold text-white">Bill paid</h1>
+        <p className="mt-4 text-slate-400">Thank you. Your organisation account is up to date.</p>
+        {/* Admin app route, not the portal: a full load so the dashboard picks up the new status. */}
+        <a href="/org/billing" className="mt-8 inline-block text-emerald-400">
+          Back to Billing
+        </a>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-md px-4 py-16 text-center text-slate-400">
       Status: {status.status}

@@ -15,6 +15,7 @@ import { requireRoles } from '../middleware/requireRoles.js';
 import { PORTAL_DESIGN_IDS, VOUCHER_DESIGN_IDS, clipPortalCopy, normalizeVoucherSheet } from '../utils/portalDesigns.js';
 import { LOGIN_THEMES, SAMPLE_PLANS, renderLoginPage } from '../services/captiveTemplates.js';
 import { loadPortalPlans } from '../services/portalContextService.js';
+import { createOrgBillCheckout, orgBillingSummary } from '../services/orgPlatformBillingService.js';
 import {
   listOrgTeam,
   inviteOrgTeamMember,
@@ -163,6 +164,31 @@ function applyBillingPatch(doc, billingBody, { isSuperAdmin = false } = {}) {
 
   doc.markModified('billing');
 }
+
+/** GET /api/organization/platform-billing — this organisation's bill (stays open while suspended). */
+organizationRouter.get(
+  '/platform-billing',
+  asyncHandler(async (req, res) => {
+    const summary = await orgBillingSummary(req.organizationId);
+    if (!summary) return res.status(404).json({ error: 'Organisation not found' });
+    res.json(summary);
+  })
+);
+
+/** POST /api/organization/platform-billing/checkout { months, customerMsisdn } — pay by Hubtel. */
+organizationRouter.post(
+  '/platform-billing/checkout',
+  requireRoles('super_admin', 'org_admin'),
+  asyncHandler(async (req, res) => {
+    res.json(
+      await createOrgBillCheckout({
+        organizationId: req.organizationId,
+        months: req.body?.months,
+        customerMsisdn: req.body?.customerMsisdn,
+      })
+    );
+  })
+);
 
 organizationRouter.get(
   '/audit-log',

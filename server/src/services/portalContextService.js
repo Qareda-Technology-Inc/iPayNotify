@@ -92,12 +92,13 @@ async function withOrgGate(routerDoc, match) {
     return { resolved: false, reason: 'router_missing_org' };
   }
   const org = await Organization.findById(organizationId)
-    .select('name slug status billing')
+    .select('name slug status statusReason billing')
     .lean();
   if (!org) {
     return { resolved: false, reason: 'org_missing' };
   }
-  if (org.status === 'suspended') {
+  /* An unpaid platform bill locks the admin dashboard only; customers keep buying. */
+  if (org.status === 'suspended' && org.statusReason !== 'unpaid') {
     return { resolved: false, reason: 'org_suspended' };
   }
   const brandName =

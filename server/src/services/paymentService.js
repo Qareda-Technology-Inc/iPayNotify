@@ -20,6 +20,7 @@ import { notifyTransactionPaidAdminEmail } from './paymentAdminNotifyService.js'
 import { resolveOrgBilling } from './orgBillingService.js';
 import { settlePaidTransactionToWallet } from './orgWalletService.js';
 import { sitePlanQuery } from './portalContextService.js';
+import { applyOrgBillPayment } from './orgPlatformBillingService.js';
 
 function newClientReference() {
   return `QF-${crypto.randomBytes(12).toString('hex')}`;
@@ -1019,6 +1020,9 @@ export async function fulfillPaidTransaction(txDoc) {
   const tx =
     txDoc instanceof Transaction ? txDoc : await Transaction.findById(txDoc._id || txDoc);
   if (!tx || tx.status !== 'paid') return { ok: false, reason: 'not_paid' };
+
+  /* Organisation paying its platform bill: no customer SMS, no wallet credit. */
+  if (tx.kind === 'org_subscription') return applyOrgBillPayment(tx);
 
   /** Already fulfilled: still retry SMS / admin email if they never succeeded. */
   if (tx.meta?.fulfillment === 'done') {

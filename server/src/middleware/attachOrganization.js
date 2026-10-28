@@ -6,9 +6,16 @@ const PLATFORM_MODULES = { tickets: true, remoteAccess: true };
 
 async function attachOrganizationMeta(req) {
   if (req.organizationId && mongoose.isValidObjectId(String(req.organizationId))) {
-    const o = await Organization.findById(req.organizationId).select('name slug modules').lean();
+    const o = await Organization.findById(req.organizationId)
+      .select('name slug modules status statusReason platformBilling.enabled')
+      .lean();
     req.organizationName = o?.name || null;
     req.organizationSlug = o?.slug || null;
+    req.organizationBilling = {
+      status: o?.status || 'active',
+      statusReason: o?.statusReason || '',
+      enabled: Boolean(o?.platformBilling?.enabled),
+    };
     req.organizationModules = normalizeOrgModules(o?.modules, o?.slug);
     req.platformScope = false;
   } else if (req.admin?.role === 'super_admin') {

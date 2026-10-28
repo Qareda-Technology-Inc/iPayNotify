@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import express from 'express';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
@@ -32,6 +33,7 @@ function mapPeer(p) {
     kind: p.kind === 'client' ? 'client' : 'router',
     status: p.status,
     disabledReason: p.disabledReason || '',
+    organizationId: p.organizationId ? String(p.organizationId) : null,
     lastSeen: p.lastSeen,
     lastSyncError: p.lastSyncError || '',
     createdAt: p.createdAt,
@@ -216,8 +218,13 @@ wireguardAdminRouter.post(
   '/phone-clients',
   asyncHandler(async (req, res) => {
     try {
+      const orgId = String(req.body?.organizationId || '').trim();
+      if (orgId && !mongoose.isValidObjectId(orgId)) {
+        return res.status(400).json({ error: 'Invalid organizationId' });
+      }
       const result = await createPhoneClientPeer({
         label: req.body?.label,
+        organizationId: orgId || null,
         includeLan: req.body?.includeLan !== false,
       });
       res.status(201).json({

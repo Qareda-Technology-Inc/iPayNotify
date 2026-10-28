@@ -256,6 +256,8 @@ authRouter.get(
       organizationSlug: req.organizationSlug || null,
       platformScope: Boolean(req.platformScope),
       modules: req.organizationModules || { tickets: false, remoteAccess: false },
+      /** Drives the Billing link, the overdue banner and the suspended-for-unpaid lock. */
+      organizationBilling: req.organizationBilling || null,
     });
   })
 );

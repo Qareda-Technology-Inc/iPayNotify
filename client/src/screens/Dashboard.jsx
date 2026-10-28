@@ -18,6 +18,7 @@ import { SuperAdminOrgAdminsPage } from '../pages/SuperAdminOrgAdminsPage.jsx';
 import { SuperAdminEmailTemplatesPage } from '../pages/SuperAdminEmailTemplatesPage.jsx';
 import { WireGuardRoutersPage } from '../pages/WireGuardRoutersPage.jsx';
 import { OrganizationSettingsPage } from '../pages/OrganizationSettingsPage.jsx';
+import { OrgBillingPage } from '../pages/OrgBillingPage.jsx';
 import { AccountPage } from '../pages/AccountPage.jsx';
 import { SuperAdminGate } from '../components/SuperAdminGate.jsx';
 import { RoleGate } from '../components/RoleGate.jsx';
@@ -47,6 +48,14 @@ export function Dashboard({ onSignOut }) {
           element={
             <RoleGate allow={['super_admin', 'org_admin', 'org_staff', 'ticket_manager']}>
               <OrganizationSettingsPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="org/billing"
+          element={
+            <RoleGate allow={['super_admin', 'org_admin', 'org_staff', 'ticket_manager']}>
+              <OrgBillingPage />
             </RoleGate>
           }
         />

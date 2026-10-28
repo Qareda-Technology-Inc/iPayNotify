@@ -100,7 +100,21 @@ const EMPTY_EDIT = {
   maxAdmins: '',
   maxSmsPerMonth: '',
   remoteAccess: false,
+  billingEnabled: false,
+  orgFee: '',
+  routerFee: '',
+  graceDays: '7',
+  paidUntil: '',
 };
+
+/** GHS text → cents (blank = 0). */
+function toCents(v, label) {
+  const t = String(v ?? '').trim();
+  if (!t) return 0;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${label} must be 0 or more`);
+  return Math.round(n * 100);
+}
 
 export function SuperAdminOrganizationsPage() {
   const navigate = useNavigate();
@@ -221,6 +235,11 @@ export function SuperAdminOrganizationsPage() {
       maxAdmins: limitInput(o.limits?.maxAdmins),
       maxSmsPerMonth: limitInput(o.limits?.maxSmsPerMonth),
       remoteAccess: Boolean(o.modules?.remoteAccess),
+      billingEnabled: Boolean(o.platformBilling?.enabled),
+      orgFee: o.platformBilling?.orgFeeCents ? String(o.platformBilling.orgFeeCents / 100) : '',
+      routerFee: o.platformBilling?.routerFeeCents ? String(o.platformBilling.routerFeeCents / 100) : '',
+      graceDays: String(o.platformBilling?.graceDays ?? 7),
+      paidUntil: o.platformBilling?.paidUntil ? String(o.platformBilling.paidUntil).slice(0, 10) : '',
     });
     setEditErr('');
   }
@@ -244,14 +263,27 @@ export function SuperAdminOrganizationsPage() {
         feeBps = Math.round(pct * 100);
       }
 
+      const graceDays = Number(editForm.graceDays);
+      if (!Number.isInteger(graceDays) || graceDays < 0 || graceDays > 90) throw new Error('Grace days must be 0–90');
+      const platformBilling = {
+        enabled: editForm.billingEnabled,
+        orgFeeCents: toCents(editForm.orgFee, 'Organisation price'),
+        routerFeeCents: toCents(editForm.routerFee, 'Router price'),
+        graceDays,
+        /* End of the chosen day, so "paid until 30 Nov" covers all of 30 Nov. */
+        paidUntil: editForm.paidUntil ? new Date(`${editForm.paidUntil}T23:59:59`).toISOString() : null,
+      };
+
       await apiFetch(`/api/super-admin/organizations/${editing._id}`, {
         method: 'PATCH',
         body: JSON.stringify({
           name: editForm.name.trim(),
           slug: slugify(editForm.slug),
-          status: editForm.status,
+          /* Only a status you change here counts as set by hand (billing leaves those alone). */
+          ...(editForm.status !== (editing.status || 'active') ? { status: editForm.status } : {}),
           limits,
           modules: { remoteAccess: editForm.remoteAccess },
+          platformBilling,
         }),
       });
       const prevBps = editing.billing?.platformFeeBps ?? null;
@@ -681,6 +713,50 @@ export function SuperAdminOrganizationsPage() {
                 />
               </label>
               <p className="text-[11px] text-slate-500">Leave blank to use the platform default.</p>
+
+              <label className="mt-2 flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2.5">
+                <span>
+                  <span className="block text-sm text-white">Monthly platform charge</span>
+                  <span className="block text-[11px] text-slate-500">
+                    Organisation price + price per router each month, paid by the org admin with Hubtel. Unpaid past the
+                    grace period → dashboard locked to Billing and their VPN profiles switched off. Customer sales continue.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={editForm.billingEnabled}
+                  onChange={(e) => setEditForm((f) => ({ ...f, billingEnabled: e.target.checked }))}
+                  className="mt-1 h-4 w-4 rounded border-slate-600"
+                />
+              </label>
+              {editForm.billingEnabled ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className={labelCls}>
+                    Organisation price / month (GHS)
+                    <input type="number" min="0" step="0.01" value={editForm.orgFee} onChange={(e) => setEditForm((f) => ({ ...f, orgFee: e.target.value }))} placeholder="0.00" className={inputCls} />
+                  </label>
+                  <label className={labelCls}>
+                    Price per router / month (GHS)
+                    <input type="number" min="0" step="0.01" value={editForm.routerFee} onChange={(e) => setEditForm((f) => ({ ...f, routerFee: e.target.value }))} placeholder="0.00" className={inputCls} />
+                    <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                      {editing.usage?.routers ?? 0} routers now → {(
+                        (Number(editForm.orgFee) || 0) + (Number(editForm.routerFee) || 0) * (editing.usage?.routers ?? 0)
+                      ).toFixed(2)} GHS / month
+                    </span>
+                  </label>
+                  <label className={labelCls}>
+                    Grace period (days)
+                    <input type="number" min="0" max="90" step="1" value={editForm.graceDays} onChange={(e) => setEditForm((f) => ({ ...f, graceDays: e.target.value }))} className={inputCls} />
+                  </label>
+                  <label className={labelCls}>
+                    Paid until
+                    <input type="date" value={editForm.paidUntil} onChange={(e) => setEditForm((f) => ({ ...f, paidUntil: e.target.value }))} className={inputCls} />
+                    <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                      Blank = first bill due today. Moves forward automatically when they pay.
+                    </span>
+                  </label>
+                </div>
+              ) : null}
             </fieldset>
 
             <fieldset className="space-y-3 border-t border-slate-800 pt-5">

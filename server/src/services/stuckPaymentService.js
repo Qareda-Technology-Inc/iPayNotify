@@ -26,6 +26,7 @@ export const STUCK_REASONS = {
   renewal_not_applied: 'Paid, but the renewal was not applied to the account',
   renewal_router_sync: 'Paid and renewed, but the router was not updated',
   wallet_not_credited: 'Paid, but the organisation wallet was not credited',
+  org_bill_not_applied: 'Organisation bill paid, but the due date was not moved forward',
 };
 
 /** Short form for SMS. */
@@ -35,6 +36,7 @@ const STUCK_SHORT = {
   renewal_not_applied: 'renewal not applied',
   renewal_router_sync: 'router not updated',
   wallet_not_credited: 'wallet not credited',
+  org_bill_not_applied: 'org bill not applied',
 };
 
 /**
@@ -51,6 +53,7 @@ function stuckQuery({ organizationId, olderThan, newerThan }) {
       { status: 'paid', kind: 'renewal', 'meta.renewedUntil': { $exists: false } },
       { status: 'paid', kind: 'renewal', 'meta.routerSyncPending': true },
       { status: 'paid', organizationId: { $ne: null }, 'meta.walletSettled': { $ne: true } },
+      { status: 'paid', kind: 'org_subscription', 'meta.fulfillment': { $ne: 'done' } },
     ],
   };
   if (organizationId && mongoose.isValidObjectId(String(organizationId))) {
@@ -64,6 +67,7 @@ export function stuckReason(tx) {
   if (!tx) return null;
   if (tx.status === 'pending' && tx.meta?.callbackUnverified) return 'payment_unconfirmed';
   if (tx.status !== 'paid') return null;
+  if (tx.kind === 'org_subscription') return tx.meta?.fulfillment === 'done' ? null : 'org_bill_not_applied';
   if (tx.kind === 'voucher' && tx.meta?.fulfillment !== 'done') return 'voucher_not_delivered';
   if (tx.kind === 'renewal' && !tx.meta?.renewedUntil) return 'renewal_not_applied';
   if (tx.kind === 'renewal' && tx.meta?.routerSyncPending) return 'renewal_router_sync';
@@ -123,7 +127,7 @@ function formatMoney(cents, currency) {
   return `${currency || 'GHS'} ${(Math.max(0, Number(cents) || 0) / 100).toFixed(2)}`;
 }
 
-const KIND_LABEL = { voucher: 'Wi-Fi ticket', renewal: 'PPPoE renewal' };
+const KIND_LABEL = { voucher: 'Wi-Fi ticket', renewal: 'PPPoE renewal', org_subscription: 'Organisation bill' };
 
 /**
  * Cron: email + SMS each organisation's admins once about payments that became stuck.

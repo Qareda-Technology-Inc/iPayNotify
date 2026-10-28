@@ -26,7 +26,8 @@ const transactionSchema = new mongoose.Schema(
     customerName: { type: String },
     kind: {
       type: String,
-      enum: ['subscription', 'voucher', 'renewal', 'topup'],
+      /** org_subscription = an organisation paying its platform bill (meta.billedOrganizationId). */
+      enum: ['subscription', 'voucher', 'renewal', 'topup', 'org_subscription'],
       required: true,
     },
     /** Platform take-rate applied when settling the org wallet (basis points). */

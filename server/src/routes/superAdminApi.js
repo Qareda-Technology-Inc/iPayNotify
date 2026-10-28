@@ -33,6 +33,46 @@ import {
 import { logOrgAudit } from '../services/orgAuditService.js';
 import { updateOrgTeamMember } from '../services/orgTeamService.js';
 import { wireguardAdminRouter } from './wireguardAdmin.js';
+import { applyOrgBillingStatus } from '../services/orgPlatformBillingService.js';
+
+/** Apply a super admin's platform billing edit (prices in cents). */
+function applyPlatformBillingPatch(doc, body) {
+  if (!doc.platformBilling) doc.platformBilling = {};
+  const pb = doc.platformBilling;
+  const cents = (v, field) => {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n < 0) {
+      const e = new Error(`${field} must be 0 or more`);
+      e.status = 400;
+      throw e;
+    }
+    return n;
+  };
+  if (body.enabled !== undefined) pb.enabled = Boolean(body.enabled);
+  if (body.orgFeeCents !== undefined) pb.orgFeeCents = cents(body.orgFeeCents, 'orgFeeCents');
+  if (body.routerFeeCents !== undefined) pb.routerFeeCents = cents(body.routerFeeCents, 'routerFeeCents');
+  if (body.graceDays !== undefined) {
+    const g = Math.round(Number(body.graceDays));
+    if (!Number.isFinite(g) || g < 0 || g > 90) {
+      const e = new Error('graceDays must be 0–90');
+      e.status = 400;
+      throw e;
+    }
+    pb.graceDays = g;
+  }
+  if (body.paidUntil !== undefined) {
+    const d = body.paidUntil ? new Date(body.paidUntil) : null;
+    if (d && Number.isNaN(d.getTime())) {
+      const e = new Error('paidUntil must be a date');
+      e.status = 400;
+      throw e;
+    }
+    pb.paidUntil = d;
+  }
+  /* Turning billing on without a due date: the first bill is due now (grace period applies). */
+  if (pb.enabled && !pb.paidUntil) pb.paidUntil = new Date();
+  doc.markModified('platformBilling');
+}
 
 const SALT = 10;
 
@@ -131,8 +171,21 @@ router.patch(
     const doc = await Organization.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Organisation not found' });
     if (req.body.name != null) doc.name = String(req.body.name).trim() || doc.name;
-    if (req.body.status != null && ['active', 'trial', 'past_due', 'suspended'].includes(req.body.status)) {
+    if (
+      req.body.status != null &&
+      ['active', 'trial', 'past_due', 'suspended'].includes(req.body.status) &&
+      req.body.status !== doc.status
+    ) {
       doc.status = req.body.status;
+      /* A status the super admin changes by hand is not overridden by platform billing. */
+      doc.statusReason = req.body.status === 'active' || req.body.status === 'trial' ? '' : 'manual';
+    }
+    if (req.body.platformBilling != null) {
+      try {
+        applyPlatformBillingPatch(doc, req.body.platformBilling);
+      } catch (e) {
+        return res.status(e.status || 400).json({ error: e.message || 'Invalid platform billing' });
+      }
     }
     if (req.body.slug != null) {
       const slug = String(req.body.slug)
@@ -175,6 +228,9 @@ router.patch(
           limits: req.body.limits != null ? normalizeOrgLimits(doc.limits) : undefined,
         },
       });
+    }
+    if (req.body.platformBilling != null && doc.platformBilling?.enabled) {
+      await applyOrgBillingStatus(doc, { notify: false });
     }
     const o = doc.toObject();
     const usagePack = await getOrgUsageAndLimits(o._id);

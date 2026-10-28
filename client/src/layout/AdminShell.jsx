@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Link, Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { apiFetch } from '../api.js';
 import {
   getActingOrganizationId,
@@ -109,6 +109,10 @@ export function AdminShell({ onSignOut }) {
   const showRemoteAccess = isSuper || Boolean(modules.remoteAccess);
   const organizationName = me?.organizationName || null;
   const platformScope = Boolean(me?.platformScope) || (isSuper && !me?.organizationId);
+  const orgBilling = !platformScope ? me?.organizationBilling : null;
+  /* Suspended for an unpaid bill: everything except Billing is closed (super admins can still look around). */
+  const billingLocked =
+    !isSuper && orgBilling?.status === 'suspended' && orgBilling?.statusReason === 'unpaid';
 
   useEffect(() => {
     apiFetch('/api/auth/me')
@@ -218,6 +222,11 @@ export function AdminShell({ onSignOut }) {
           <NavGroup title="Tenant">
             <SideLink to="/">Dashboard</SideLink>
             <SideLink to="/org/settings">Organisation</SideLink>
+            {orgBilling?.enabled ? (
+              <SideLink to="/org/billing" accent={orgBilling.status === 'active' ? 'indigo' : 'amber'}>
+                Billing
+              </SideLink>
+            ) : null}
             <SideLink to="/account">Account</SideLink>
           </NavGroup>
           <NavGroup title="Customers &amp; access">
@@ -360,7 +369,25 @@ export function AdminShell({ onSignOut }) {
           </div>
         </header>
         <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-4 sm:p-6">
-          <Outlet />
+          {orgBilling?.enabled && orgBilling.status !== 'active' && location.pathname !== '/org/billing' ? (
+            <div
+              className={`mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-2.5 text-sm ${
+                orgBilling.status === 'suspended'
+                  ? 'border-red-500/40 bg-red-950/30 text-red-100'
+                  : 'border-amber-500/40 bg-amber-950/25 text-amber-100'
+              }`}
+            >
+              <span>
+                {orgBilling.status === 'suspended'
+                  ? 'This organisation is suspended for an unpaid bill.'
+                  : 'Your platform bill is overdue. Pay it to avoid suspension.'}
+              </span>
+              <Link to="/org/billing" className="font-semibold underline-offset-2 hover:underline">
+                Open Billing
+              </Link>
+            </div>
+          ) : null}
+          {billingLocked && location.pathname !== '/org/billing' ? <Navigate to="/org/billing" replace /> : <Outlet />}
         </main>
       </div>
     </div>

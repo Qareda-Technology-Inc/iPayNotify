@@ -44,6 +44,15 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
 
   const [phoneLabel, setPhoneLabel] = useState('');
   const [phoneIncludeLan, setPhoneIncludeLan] = useState(true);
+  /* Whose remote access this profile is; switched off while that organisation is suspended for non-payment. */
+  const [phoneOrgId, setPhoneOrgId] = useState('');
+  const [orgs, setOrgs] = useState([]);
+
+  useEffect(() => {
+    apiFetch('/api/super-admin/organizations')
+      .then((list) => setOrgs(Array.isArray(list) ? list : []))
+      .catch(() => setOrgs([]));
+  }, []);
   const [phoneBusy, setPhoneBusy] = useState(false);
   const [phoneBundle, setPhoneBundle] = useState(null);
 
@@ -278,6 +287,7 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
         method: 'POST',
         body: JSON.stringify({
           label: phoneLabel.trim() || undefined,
+          organizationId: phoneOrgId || undefined,
           includeLan: phoneIncludeLan,
         }),
       });
@@ -580,6 +590,24 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
                 className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
               />
             </label>
+            <label className="block text-sm text-slate-300">
+              Organisation
+              <select
+                value={phoneOrgId}
+                onChange={(e) => setPhoneOrgId(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+              >
+                <option value="">None (platform staff)</option>
+                {orgs.map((o) => (
+                  <option key={o._id} value={o._id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1 block text-[11px] text-slate-500">
+                The organisation&apos;s remote access: switched off automatically while its bill is unpaid past the grace period.
+              </span>
+            </label>
             <label className="inline-flex items-center gap-2 text-xs text-slate-400">
               <input
                 type="checkbox"
@@ -772,6 +800,9 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
                       </span>
                       {p.status === 'disabled' && p.disabledReason === 'subscription_expired' ? (
                         <p className="mt-1 text-[10px] text-amber-300/90">Remote access expired</p>
+                      ) : null}
+                      {p.status === 'disabled' && p.disabledReason === 'org_unpaid' ? (
+                        <p className="mt-1 text-[10px] text-amber-300/90">Organisation bill unpaid</p>
                       ) : null}
                       {p.lastSyncError ? (
                         <p

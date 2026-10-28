@@ -60,6 +60,29 @@ const organizationLimitsSchema = new mongoose.Schema(
   { _id: false }
 );
 
+/**
+ * What the organisation pays the platform each month (on top of the per-sale fee):
+ * orgFeeCents + routerFeeCents × routers. Paid by Hubtel; `paidUntil` moves forward per month paid.
+ * When `enabled`, status follows it: active → past_due after paidUntil → suspended after graceDays.
+ */
+const organizationPlatformBillingSchema = new mongoose.Schema(
+  {
+    enabled: { type: Boolean, default: false },
+    orgFeeCents: { type: Number, default: 0, min: 0 },
+    routerFeeCents: { type: Number, default: 0, min: 0 },
+    currency: { type: String, default: 'GHS' },
+    graceDays: { type: Number, default: 7, min: 0, max: 90 },
+    paidUntil: { type: Date, default: null },
+    /** Last reminder sent, so each notice goes out once per due date. */
+    lastNotice: {
+      kind: { type: String, default: '' },
+      forPaidUntil: { type: Date, default: null },
+      at: { type: Date, default: null },
+    },
+  },
+  { _id: false }
+);
+
 /** SaaS tenant — routers, customers, and billing data belong to one organization. */
 const organizationSchema = new mongoose.Schema(
   {
@@ -71,7 +94,10 @@ const organizationSchema = new mongoose.Schema(
       enum: ['active', 'trial', 'past_due', 'suspended'],
       default: 'active',
     },
+    /** Why status is not active: set by platform billing ('unpaid') or by a super admin ('manual'). */
+    statusReason: { type: String, enum: ['', 'manual', 'unpaid'], default: '' },
     billing: { type: organizationBillingSchema, default: () => ({}) },
+    platformBilling: { type: organizationPlatformBillingSchema, default: () => ({}) },
     modules: { type: organizationModulesSchema, default: () => ({}) },
     limits: { type: organizationLimitsSchema, default: () => ({}) },
     /** Cached available wallet balance (cents). Updated with each ledger entry. */

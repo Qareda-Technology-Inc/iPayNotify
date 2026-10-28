@@ -6,7 +6,7 @@ import { removeWireGuardPeerFromVps, syncWireGuardPeerToVps } from './wgPeerSync
  * Disabling removes the peer from wg0, so its tunnel IP is unreachable for everyone
  * (including the billing app) until it is enabled again.
  * @param {import('mongoose').Document} peer WireGuardPeer document
- * @param {{ enabled: boolean, reason?: 'manual' | 'subscription_expired' }} opts
+ * @param {{ enabled: boolean, reason?: 'manual' | 'subscription_expired' | 'org_unpaid' }} opts
  */
 export async function setPeerAccess(peer, { enabled, reason = 'manual' }) {
   try {
