@@ -69,28 +69,31 @@ describe('login page designs', () => {
 });
 
 describe('plan details on the login page', () => {
-  const full = {
+  const unlimited = {
     _id: '6650a1b2c3d4e5f6a7b8c9d2',
     name: 'Premium Day',
     priceCents: 1000,
     currency: 'GHS',
     elapsedSeconds: 86400,
-    dataLimitBytes: 2147483648,
     usersPerTicket: 3,
     speedDownMbps: 5,
     speedUpMbps: 2,
   };
 
-  it('shows only the duration, never speed, data or devices', () => {
-    expect(planDetail(full)).toBe('1 day');
-    expect(planDetail({ ticketDurationType: 'paused', pausedSeconds: 7200 })).toBe('2 hrs online');
-    expect(planDetail({ name: 'No time limit' })).toBe('');
+  it('shows duration and "Unlimited", never speed, caps or devices', () => {
+    expect(planDetail(unlimited)).toBe('1 day · Unlimited');
+    expect(planDetail({ ticketDurationType: 'paused', pausedSeconds: 7200 })).toBe('2 hrs online · Unlimited');
+    expect(planDetail({ name: 'No time limit' })).toBe('Unlimited');
   });
 
-  it.each(LOGIN_THEMES.map((t) => t.id))('%s shows name, duration and price only', (id) => {
-    const html = renderLoginPage({ ...base, plans: [full], designId: id, mode: 'router' });
+  it('does not call a capped plan unlimited, and does not show the cap', () => {
+    expect(planDetail({ ...unlimited, dataLimitBytes: 2147483648 })).toBe('1 day');
+  });
+
+  it.each(LOGIN_THEMES.map((t) => t.id))('%s shows name, duration, Unlimited and price only', (id) => {
+    const html = renderLoginPage({ ...base, plans: [unlimited], designId: id, mode: 'router' });
     expect(html).toContain('Premium Day');
-    expect(html).toContain('1 day');
+    expect(html).toContain('1 day · Unlimited');
     expect(html).toContain('GHS 10');
     expect(html).not.toMatch(/Mbps|devices|GB|MB|Unlimited data/);
   });

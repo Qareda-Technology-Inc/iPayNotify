@@ -301,14 +301,19 @@ export function formatPlanPrice(priceCents, currency = 'GHS') {
   return `${currency || 'GHS'} ${text}`;
 }
 
-/** Plan line under the name on the login page: duration only ("1 day", "2 hrs online"). */
+/**
+ * Plan line under the name on the login page: duration, plus "Unlimited" when there is no
+ * data cap ("1 day · Unlimited", "2 hrs online · Unlimited"). Speed, caps and devices stay off.
+ */
 export function planDetail(p) {
   const paused = p.ticketDurationType === 'paused';
   const time = paused
     ? formatSeconds(p.pausedSeconds ?? p.timeLimitSeconds)
     : formatSeconds(p.elapsedSeconds);
-  if (!time) return '';
-  return paused ? `${time} online` : time;
+  const parts = [];
+  if (time) parts.push(paused ? `${time} online` : time);
+  if (!(Number(p.dataLimitBytes) > 0)) parts.push('Unlimited');
+  return parts.join(' · ');
 }
 
 export const SAMPLE_PLANS = [
