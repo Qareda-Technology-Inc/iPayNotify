@@ -14,6 +14,7 @@ import {
 } from '../services/paymentService.js';
 import {
   loadPortalPlans,
+  sitePlanQuery,
   resolvePortalRouter,
   resolvePortalSiteFromRequest,
 } from '../services/portalContextService.js';
@@ -41,7 +42,8 @@ publicPortalRouter.post(
 
 async function loginPageOptions(ctx, slug) {
   const b = ctx.branding || {};
-  const plans = b.portalShowPlans === false ? [] : await loadPortalPlans(ctx.router.organizationId);
+  const plans =
+    b.portalShowPlans === false ? [] : await loadPortalPlans(ctx.router.organizationId, ctx.router.id);
   return {
     designId: b.portalDesign,
     brandName: b.displayName,
@@ -130,7 +132,7 @@ publicPortalRouter.get(
 );
 
 /**
- * Packages for the resolved venue only (never cross-tenant).
+ * Packages for the resolved venue only (never cross-tenant), limited to the site's chosen plans.
  * GET /packages/hotspot?r=slug  (or on-site IP match)
  */
 publicPortalRouter.get(
@@ -141,11 +143,7 @@ publicPortalRouter.get(
       const e = portalUnresolvedError(ctx);
       return res.status(e.status).json({ error: e.error, reason: e.reason });
     }
-    const list = await PlanPackage.find({
-      organizationId: ctx.router.organizationId,
-      kind: 'hotspot',
-      isActive: true,
-    })
+    const list = await PlanPackage.find(await sitePlanQuery(ctx.router.organizationId, ctx.router.id))
       .select(
         'name priceCents currency activeProfile durationDays durationAmount durationUnit dataLimitBytes timeLimitSeconds elapsedSeconds pausedSeconds ticketDurationType usersPerTicket speedUpMbps speedDownMbps description'
       )

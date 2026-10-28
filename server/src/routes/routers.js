@@ -1,5 +1,6 @@
 import express from 'express';
-import { Router as MikrotikRouter } from '../models/index.js';
+import mongoose from 'mongoose';
+import { PlanPackage, Router as MikrotikRouter } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
 import {
@@ -556,6 +557,7 @@ routersApi.patch(
       smsBrandName,
       smsSenderId,
       monitorAlerts,
+      portalPackageIds,
     } = req.body;
     if (monitorAlerts !== undefined) {
       doc.set('monitor.alertsEnabled', Boolean(monitorAlerts));
@@ -621,6 +623,24 @@ routersApi.patch(
     if (smsSenderId !== undefined) {
       doc.smsSenderId = String(smsSenderId).trim();
     }
+    if (portalPackageIds !== undefined) {
+      if (!Array.isArray(portalPackageIds)) {
+        return res.status(400).json({ error: 'portalPackageIds must be an array (empty = all plans)' });
+      }
+      const ids = [...new Set(portalPackageIds.map(String))];
+      if (ids.some((id) => !mongoose.isValidObjectId(id))) {
+        return res.status(400).json({ error: 'portalPackageIds contains an invalid id' });
+      }
+      const found = await PlanPackage.countDocuments({
+        _id: { $in: ids },
+        organizationId: doc.organizationId,
+        kind: 'hotspot',
+      });
+      if (found !== ids.length) {
+        return res.status(400).json({ error: 'Every plan must be a hotspot plan of this organisation' });
+      }
+      doc.portalPackageIds = ids;
+    }
     await doc.save();
     void logOrgAudit({
       organizationId: req.organizationId,
@@ -644,6 +664,7 @@ routersApi.patch(
       portalSlug: doc.portalSlug,
       smsBrandName: doc.smsBrandName || '',
       smsSenderId: doc.smsSenderId || '',
+      portalPackageIds: (doc.portalPackageIds || []).map(String),
       monitor: doc.monitor,
     });
   })

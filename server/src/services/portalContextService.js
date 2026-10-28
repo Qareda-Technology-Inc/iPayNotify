@@ -166,10 +166,26 @@ export async function resolvePortalRouter(req, slugQuery) {
   return { resolved: false, reason: 'no_match' };
 }
 
-/** Active hotspot plans shown on the login page, cheapest first. */
-export async function loadPortalPlans(organizationId) {
+/**
+ * Query for the hotspot plans sold at one site: the router's chosen plans, or every active
+ * hotspot plan of the organisation when none are chosen.
+ */
+export async function sitePlanQuery(organizationId, routerId) {
+  const q = { organizationId, kind: 'hotspot', isActive: true };
+  if (!routerId) return q;
+  const router = await MikrotikRouter.findOne({ _id: routerId, organizationId })
+    .select('portalPackageIds')
+    .lean();
+  const chosen = router?.portalPackageIds || [];
+  if (chosen.length) q._id = { $in: chosen };
+  return q;
+}
+
+/** Active hotspot plans shown on a site's login page, cheapest first. */
+export async function loadPortalPlans(organizationId, routerId) {
   if (!organizationId) return [];
-  return PlanPackage.find({ organizationId, kind: 'hotspot', isActive: true, showOnPortal: { $ne: false } })
+  const q = await sitePlanQuery(organizationId, routerId);
+  return PlanPackage.find({ ...q, showOnPortal: { $ne: false } })
     .select(
       'name priceCents currency dataLimitBytes timeLimitSeconds elapsedSeconds pausedSeconds ticketDurationType usersPerTicket speedDownMbps'
     )

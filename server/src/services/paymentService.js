@@ -338,7 +338,7 @@ export async function createHotspotPurchaseCheckout({
   }
 
   const routerDoc = await Router.findById(routerId)
-    .select('organizationId captivePortal.hotspotServer')
+    .select('organizationId captivePortal.hotspotServer portalPackageIds')
     .lean();
   if (!routerDoc) {
     const err = new Error('Router not found');
@@ -348,6 +348,12 @@ export async function createHotspotPurchaseCheckout({
   const routerOrg = routerDoc.organizationId ? String(routerDoc.organizationId) : '';
   const pkgOrg = pkg.organizationId ? String(pkg.organizationId) : '';
   if (!routerOrg || !pkgOrg || routerOrg !== pkgOrg) {
+    const err = new Error('Package is not available at this site');
+    err.status = 400;
+    throw err;
+  }
+  const sitePlans = (routerDoc.portalPackageIds || []).map(String);
+  if (sitePlans.length && !sitePlans.includes(String(pkg._id))) {
     const err = new Error('Package is not available at this site');
     err.status = 400;
     throw err;

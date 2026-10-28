@@ -223,7 +223,7 @@ organizationRouter.get(
 
 /**
  * Every login template rendered with this organisation's branding, wording and plans.
- * Body overrides unsaved wording so the picker previews edits live.
+ * Body overrides unsaved wording so the picker previews edits live; `routerId` previews that site's plans.
  * POST /api/organization/portal-previews
  */
 organizationRouter.post(
@@ -235,12 +235,14 @@ organizationRouter.post(
         ? await Organization.findById(oid).select('name billing').lean()
         : null;
     const saved = org?.billing || {};
-    const b = { ...saved, ...(req.body && typeof req.body === 'object' ? req.body : {}) };
+    const { routerId, ...overrides } = req.body && typeof req.body === 'object' ? req.body : {};
+    const b = { ...saved, ...overrides };
     const showPlans = b.portalShowPlans !== false;
+    const siteRouterId = routerId && mongoose.isValidObjectId(String(routerId)) ? String(routerId) : null;
     let plans = [];
     let samplePlans = false;
     if (showPlans) {
-      plans = org ? await loadPortalPlans(org._id) : [];
+      plans = org ? await loadPortalPlans(org._id, siteRouterId) : [];
       const hasAnyPlan =
         plans.length > 0 ||
         (org && (await PlanPackage.exists({ organizationId: org._id, kind: 'hotspot', isActive: true })));

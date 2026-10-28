@@ -174,8 +174,8 @@ function PlansEditor({ onChanged }) {
         </Link>
       </div>
       <p className="text-xs text-slate-500">
-        These are your real plans — a new price is what customers pay when buying. Untick to hide a plan from the login
-        page only.
+        These are your real plans — a new price is what customers pay when buying. Untick to hide a plan from every
+        login page; choose which plans each site sells under Push to router.
       </p>
       {state === 'loading' ? <p className="text-xs text-slate-500">Loading plans…</p> : null}
       {state === 'idle' && plans.length === 0 ? (
@@ -236,6 +236,124 @@ function PlansEditor({ onChanged }) {
       </ul>
       {msg ? <p className="text-xs text-red-300">{msg}</p> : null}
     </section>
+  );
+}
+
+/**
+ * Which hotspot plans one site offers (login page, buy page, checkout).
+ * No plans chosen = every active plan, so existing sites keep working until someone picks.
+ */
+function SitePlansPicker({ router, onSaved }) {
+  const [plans, setPlans] = useState([]);
+  const [state, setState] = useState(/** @type {'loading' | 'idle' | 'error'} */ ('loading'));
+  const [onlySelected, setOnlySelected] = useState(false);
+  const [selected, setSelected] = useState(/** @type {string[]} */ ([]));
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    apiFetch('/api/packages?kind=hotspot')
+      .then((list) => {
+        const rows = (Array.isArray(list) ? list : [])
+          .filter((p) => p.isActive !== false)
+          .sort((a, b) => Number(a.priceCents || 0) - Number(b.priceCents || 0) || String(a.name).localeCompare(String(b.name)));
+        setPlans(rows);
+        setState('idle');
+      })
+      .catch((e) => {
+        setMsg(e.message || 'Could not load plans');
+        setState('error');
+      });
+  }, []);
+
+  const routerKey = router?._id || '';
+  const savedIds = useMemo(() => (router?.portalPackageIds || []).map(String), [router?.portalPackageIds]);
+  useEffect(() => {
+    setSelected(savedIds);
+    setOnlySelected(savedIds.length > 0);
+    setMsg('');
+  }, [routerKey, savedIds]);
+
+  async function save(ids) {
+    if (!routerKey) return;
+    setSaving(true);
+    setMsg('');
+    try {
+      const updated = await apiFetch(`/api/routers/${routerKey}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ portalPackageIds: ids }),
+      });
+      onSaved(routerKey, (updated?.portalPackageIds || ids).map(String));
+    } catch (e) {
+      setMsg(e.message || 'Could not save plans for this site');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function chooseAll() {
+    setOnlySelected(false);
+    setSelected([]);
+    if (savedIds.length) save([]);
+  }
+
+  function toggle(id, on) {
+    const next = on ? [...new Set([...selected, id])] : selected.filter((x) => x !== id);
+    setSelected(next);
+    /* An empty list means "all plans", so only save once at least one plan is ticked. */
+    if (next.length) save(next);
+    else setMsg('Tick at least one plan, or choose "All plans".');
+  }
+
+  if (!routerKey) return null;
+  return (
+    <div className="space-y-2 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+      <p className="text-xs font-medium text-slate-300">Plans at this site</p>
+      <div className="flex flex-wrap gap-4 text-xs text-slate-300">
+        <label className="flex items-center gap-1.5">
+          <input type="radio" checked={!onlySelected} disabled={saving} onChange={chooseAll} />
+          All plans
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input type="radio" checked={onlySelected} disabled={saving} onChange={() => setOnlySelected(true)} />
+          Only selected plans
+        </label>
+      </div>
+      {onlySelected ? (
+        state === 'loading' ? (
+          <p className="text-xs text-slate-500">Loading plans…</p>
+        ) : plans.length === 0 ? (
+          <p className="text-xs text-slate-400">No active hotspot plans yet.</p>
+        ) : (
+          <ul className="max-h-48 space-y-1 overflow-y-auto">
+            {plans.map((p) => (
+              <li key={p._id}>
+                <label className="flex items-center gap-2 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    className="rounded border-slate-600"
+                    checked={selected.includes(String(p._id))}
+                    disabled={saving}
+                    onChange={(e) => toggle(String(p._id), e.target.checked)}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                  <span className="text-xs text-slate-500">
+                    {p.currency || 'GHS'} {(Number(p.priceCents || 0) / 100).toFixed(2)}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : (
+        <p className="text-xs text-slate-500">Every active hotspot plan is offered here.</p>
+      )}
+      <p className="text-[11px] text-slate-500">
+        Applies to the login page, the buy page and checkout at this site. Push again to update the router&apos;s login page.
+      </p>
+      {saving ? <p className="text-xs text-slate-400">Saving…</p> : null}
+      {msg ? <p className="text-xs text-amber-300">{msg}</p> : null}
+    </div>
   );
 }
 
@@ -322,8 +440,9 @@ export function TemplatesPage() {
       portalFooter: settings.portalFooter,
       portalSupportPhone: settings.portalSupportPhone,
       portalShowPlans: settings.portalShowPlans,
+      routerId: routerId || undefined,
     }),
-    [settings]
+    [settings, routerId]
   );
 
   useEffect(() => {
@@ -644,6 +763,13 @@ export function TemplatesPage() {
                   ))}
                 </select>
               </label>
+              <SitePlansPicker
+                router={routers.find((r) => r._id === routerId)}
+                onSaved={(id, ids) => {
+                  setRouters((list) => list.map((r) => (r._id === id ? { ...r, portalPackageIds: ids } : r)));
+                  setPlansVersion((v) => v + 1);
+                }}
+              />
               <label className="block text-xs text-slate-400">
                 Hotspot server
                 <select

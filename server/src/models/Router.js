@@ -35,6 +35,11 @@ const routerSchema = new mongoose.Schema(
     smsBrandName: { type: String, trim: true, default: '' },
     /** Optional Arkesel sender ID for this router (must be registered in Arkesel); empty = use global ARKESEL_SENDER_ID. */
     smsSenderId: { type: String, trim: true, default: '' },
+    /**
+     * Hotspot plans offered at this site (login page, buy page, checkout).
+     * Empty = every active hotspot plan of the organisation.
+     */
+    portalPackageIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'PlanPackage' }],
     /** Shared secret the hotspot on-login script sends back to /api/public/hotspot/login-event. */
     hotspotHookKey: { type: String, select: false, sparse: true, unique: true },
     /** Last successful login-page push (Templates & designs). */
