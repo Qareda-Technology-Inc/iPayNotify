@@ -39,6 +39,8 @@ const transactionSchema = new mongoose.Schema(
      * Kept outside `meta` because callers rewrite `meta` wholesale on save.
      */
     walletClaimedAt: { type: Date, default: null },
+    /** When admins were alerted that this payment is stuck (alert once per payment). */
+    stuckAlertedAt: { type: Date, default: null },
     meta: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true }

@@ -12,6 +12,7 @@ import {
 } from '../services/paymentService.js';
 import { enforceRemoteAccessRouters } from '../services/remoteAccessService.js';
 import { runRouterMonitor } from '../services/routerMonitorService.js';
+import { runStuckPaymentAlerts } from '../services/stuckPaymentService.js';
 import { config } from '../config.js';
 
 let task;
@@ -23,6 +24,7 @@ let stalePaymentsTask;
 let voucherFulfillTask;
 let routerMonitorTask;
 let hubtelReconcileTask;
+let stuckPaymentTask;
 
 export function startBillingScheduler() {
   if (!routerMonitorTask) {
@@ -178,6 +180,22 @@ export function startBillingScheduler() {
     console.log(`[billing] Hubtel unconfirmed-payment check every minute (${config.cronTz})`);
   }
 
+  if (!stuckPaymentTask) {
+    stuckPaymentTask = cron.schedule(
+      '*/5 * * * *',
+      async () => {
+        try {
+          const summary = await runStuckPaymentAlerts();
+          if (summary.stuck > 0) console.warn('[payments.stuck] tick', new Date().toISOString(), summary);
+        } catch (e) {
+          console.error('[payments.stuck] tick failed', e?.message || e);
+        }
+      },
+      { timezone: config.cronTz }
+    );
+    console.log(`[billing] stuck payment alerts every 5 minutes (${config.cronTz})`);
+  }
+
   if (!stalePaymentsTask) {
     stalePaymentsTask = cron.schedule(
       '15 * * * *',
@@ -233,5 +251,9 @@ export function stopBillingScheduler() {
   if (routerMonitorTask) {
     routerMonitorTask.stop();
     routerMonitorTask = null;
+  }
+  if (stuckPaymentTask) {
+    stuckPaymentTask.stop();
+    stuckPaymentTask = null;
   }
 }

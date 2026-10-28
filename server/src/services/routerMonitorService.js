@@ -80,7 +80,8 @@ async function probeRouter(routerId) {
   }
 }
 
-async function alertRecipients(organizationId) {
+/** Org admins/staff who get operational alerts (falls back to super admins). */
+export async function alertRecipients(organizationId) {
   const q =
     organizationId && mongoose.isValidObjectId(String(organizationId))
       ? { organizationId, role: { $in: ALERT_ROLES }, status: NOT_INVITED }

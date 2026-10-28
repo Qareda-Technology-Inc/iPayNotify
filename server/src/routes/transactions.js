@@ -4,6 +4,7 @@ import { Transaction } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
 import { checkTransactionStatusWithHubtel } from '../services/paymentService.js';
+import { listStuckPayments, retryStuckPayment } from '../services/stuckPaymentService.js';
 
 export const transactionsRouter = express.Router();
 
@@ -176,6 +177,33 @@ transactionsRouter.post(
           ? 503
           : 200;
     res.status(status).json(result);
+  })
+);
+
+/**
+ * GET /api/transactions/needs-attention
+ * Paid (or reported-paid) online payments the system has not finished delivering.
+ */
+transactionsRouter.get(
+  '/needs-attention',
+  requireRoles('super_admin', 'org_admin', 'org_staff', 'ticket_manager'),
+  asyncHandler(async (req, res) => {
+    res.json({ items: await listStuckPayments({ organizationId: req.organizationId }) });
+  })
+);
+
+/**
+ * POST /api/transactions/:id/retry
+ * Runs whichever step is missing (confirm with Hubtel, deliver voucher, apply renewal, credit wallet).
+ */
+transactionsRouter.post(
+  '/:id/retry',
+  requireRoles('super_admin', 'org_admin', 'org_staff'),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Transaction not found' });
+    const out = await retryStuckPayment(req.params.id, { organizationId: req.organizationId });
+    if (out.reason === 'not_found') return res.status(404).json({ error: 'Transaction not found' });
+    res.json(out);
   })
 );
 

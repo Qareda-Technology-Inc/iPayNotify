@@ -863,7 +863,7 @@ async function fulfillVoucherTransaction(tx) {
   }
 }
 
-async function syncRenewalToRouter(tx, acc) {
+export async function syncRenewalToRouter(tx, acc) {
   try {
     await syncPppoeAccountToRouter(acc);
     mergeTxMeta(tx, { routerSyncPending: false, routerSyncError: null });

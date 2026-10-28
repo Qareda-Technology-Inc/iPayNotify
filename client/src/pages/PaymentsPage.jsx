@@ -37,6 +37,96 @@ function kindLabel(kind) {
   return kind || '—';
 }
 
+/**
+ * Paid (or reported-paid) online payments the system has not finished delivering.
+ * Hidden when there are none; admins are also alerted by email/SMS once per payment.
+ */
+function NeedsAttention({ reloadKey, onChanged }) {
+  const [items, setItems] = useState([]);
+  const [retryingId, setRetryingId] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const d = await apiFetch('/api/transactions/needs-attention');
+      setItems(Array.isArray(d?.items) ? d.items : []);
+    } catch {
+      /* The main list shows load errors; this section just stays hidden. */
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load, reloadKey]);
+
+  async function retry(item) {
+    setRetryingId(item.id);
+    setMsg('');
+    try {
+      const out = await apiFetch(`/api/transactions/${item.id}/retry`, { method: 'POST' });
+      setMsg(
+        out.ok
+          ? `Fixed: ${item.customerPhone || item.clientReference} is now delivered.`
+          : `Still not done: ${out.item?.reasonLabel || out.reason || 'try again shortly'}${
+              out.item?.lastError ? ` (${out.item.lastError})` : ''
+            }.`
+      );
+      await load();
+      onChanged();
+    } catch (e) {
+      setMsg(e.message || 'Retry failed');
+    } finally {
+      setRetryingId('');
+    }
+  }
+
+  if (!items.length && !msg) return null;
+  return (
+    <section className="rounded-2xl border border-amber-500/40 bg-amber-950/20 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold text-amber-100">
+          Needs attention{items.length ? ` (${items.length})` : ''}
+        </h2>
+        <p className="text-xs text-amber-200/70">
+          Paid but not finished after 15 minutes. The system keeps retrying; Retry runs it now.
+        </p>
+      </div>
+      {msg ? <p className="mt-2 text-xs text-amber-100">{msg}</p> : null}
+      {items.length ? (
+        <ul className="mt-3 divide-y divide-amber-500/15">
+          {items.map((it) => (
+            <li key={it.id} className="flex flex-col gap-2 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 text-sm">
+                <p className="text-white">
+                  {it.customerPhone || it.customerName || '—'}
+                  <span className="ml-2 text-slate-400">{formatMoney(it.amountCents, it.currency)}</span>
+                  <span className="ml-2 text-xs text-slate-500">
+                    {kindLabel(it.kind)} · {new Date(it.createdAt).toLocaleString()}
+                  </span>
+                </p>
+                <p className="mt-0.5 text-xs text-amber-200/90">{it.reasonLabel}</p>
+                {it.lastError ? <p className="mt-0.5 truncate text-[11px] text-slate-500">{it.lastError}</p> : null}
+                <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+                  {it.clientReference}
+                  {it.voucherCode ? ` · code ${it.voucherCode}` : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => retry(it)}
+                disabled={Boolean(retryingId)}
+                className="shrink-0 rounded-lg border border-amber-500/50 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-950/40 disabled:opacity-50"
+              >
+                {retryingId === it.id ? 'Retrying…' : 'Retry now'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
 export function PaymentsPage() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -50,6 +140,7 @@ export function PaymentsPage() {
   const [exporting, setExporting] = useState(false);
   const [checkingRef, setCheckingRef] = useState('');
   const [statusDetail, setStatusDetail] = useState(null);
+  const [attentionKey, setAttentionKey] = useState(0);
 
   const filterParams = useCallback(() => {
     const params = new URLSearchParams();
@@ -163,7 +254,10 @@ export function PaymentsPage() {
           </button>
           <button
             type="button"
-            onClick={() => load()}
+            onClick={() => {
+              load();
+              setAttentionKey((k) => k + 1);
+            }}
             disabled={loading}
             className="rounded-xl border border-slate-600/80 bg-slate-800/50 px-4 py-2.5 text-sm font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
           >
@@ -171,6 +265,8 @@ export function PaymentsPage() {
           </button>
         </div>
       </div>
+
+      <NeedsAttention reloadKey={attentionKey} onChanged={load} />
 
       <div className="flex flex-wrap gap-3 text-sm">
         <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">

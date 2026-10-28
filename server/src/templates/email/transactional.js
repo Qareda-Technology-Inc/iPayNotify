@@ -275,3 +275,52 @@ export function buildRouterStatusAlertEmail(p) {
   });
   return { subject, text, html };
 }
+
+/**
+ * Digest of payments that were paid (or reported paid) but not delivered.
+ * @param {{ brand?: string, items: { when: string, customer: string, amount: string, what: string, problem: string, reference: string }[], appUrl?: string }} p
+ */
+export function buildStuckPaymentsAlertEmail(p) {
+  const brand = String(p.brand || 'QareFi Billing').trim();
+  const items = Array.isArray(p.items) ? p.items : [];
+  const n = items.length;
+  const subject = `⚠️ ${n} payment${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} attention`;
+  const lead =
+    'These customers paid (or Hubtel reported them as paid), but the system could not finish the job. ' +
+    'It keeps retrying automatically; open Payments → Needs attention to retry now or follow up.';
+  const appUrl = String(p.appUrl || '').trim();
+  const text = [
+    brand,
+    '',
+    lead,
+    '',
+    ...items.map((i) => `- ${i.when} · ${i.customer} · ${i.amount} · ${i.what}: ${i.problem} (ref ${i.reference})`),
+    appUrl ? `\nPayments: ${appUrl}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const cell = (v, extra = '') =>
+    `<td style="padding:6px 8px 6px 0;color:#e2e8f0;vertical-align:top;${extra}">${escapeHtml(v)}</td>`;
+  const innerHtml = `
+    <p style="margin:0 0 16px;">${escapeHtml(lead)}</p>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:13px;">
+      <tr style="color:#94a3b8;"><td>When</td><td>Customer</td><td>Amount</td><td>Problem</td></tr>
+      ${items
+        .map(
+          (i) =>
+            `<tr>${cell(i.when, 'white-space:nowrap;')}${cell(i.customer)}${cell(i.amount, 'white-space:nowrap;')}${cell(
+              `${i.what}: ${i.problem}`
+            )}</tr>`
+        )
+        .join('')}
+    </table>
+  `.trim();
+  const html = wrapTransactionalHtml({
+    brand,
+    title: subject.replace(/^⚠️ /, ''),
+    preheader: `${n} paid payment${n === 1 ? '' : 's'} not delivered`,
+    innerHtml,
+    footerText: appUrl ? `Payments: ${appUrl}` : '',
+  });
+  return { subject, text, html };
+}
