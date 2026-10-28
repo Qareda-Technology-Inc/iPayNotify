@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { publicFetch } from '../api.js';
 import { usePortalContext, getPortalSlugFromLocation } from './usePortalContext.js';
@@ -41,6 +41,9 @@ export function HotspotBuyPage() {
   const { ctx, loading: ctxLoading, error: ctxError } = usePortalContext();
   const [packages, setPackages] = useState([]);
   const [packageId, setPackageId] = useState('');
+  /* Opened from a plan tile on the login page: show just that plan and the number field. */
+  const [focusedPlan, setFocusedPlan] = useState(false);
+  const msisdnRef = useRef(null);
   const [msisdn, setMsisdn] = useState(() => {
     try {
       return localStorage.getItem('wifiMomoNumber') || '';
@@ -77,11 +80,18 @@ export function HotspotBuyPage() {
         setPackages(list);
         const wanted = new URLSearchParams(window.location.search).get('package');
         const match = wanted && list.find((x) => String(x._id) === wanted);
+        setFocusedPlan(Boolean(match));
         if (match) setPackageId(match._id);
         else if (list[0]) setPackageId(list[0]._id);
       })
       .catch((e) => setError(e.message));
   }, [siteReady, slug]);
+
+  useEffect(() => {
+    if (focusedPlan) msisdnRef.current?.focus();
+  }, [focusedPlan]);
+
+  const selectedPlan = packages.find((p) => String(p._id) === String(packageId));
 
   async function onPay(e) {
     e.preventDefault();
@@ -199,7 +209,9 @@ export function HotspotBuyPage() {
             ctxLoading
               ? 'Detecting your location…'
               : siteReady
-                ? 'Choose a time or data package for this venue. After payment you will get a login code for the captive portal.'
+                ? focusedPlan
+                  ? 'Enter your mobile money number to pay. You will get your login code right after.'
+                  : 'Choose a plan for this venue. After payment you will get a login code for the Wi‑Fi login page.'
                 : 'Access is sold per venue. Use the buy link from the login page or connect to venue Wi‑Fi.'
           }
         />
@@ -222,8 +234,31 @@ export function HotspotBuyPage() {
 
         {siteReady && (
           <form onSubmit={onPay} className="mt-8 space-y-4">
+            {focusedPlan && selectedPlan ? (
+              <div className="rounded-xl border border-emerald-500/60 bg-emerald-950/30 px-4 py-3 ring-1 ring-emerald-500/40">
+                <p className="text-xs font-medium uppercase tracking-wide text-emerald-300/80">Your plan</p>
+                <div className="mt-1 flex items-start justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block font-semibold text-white">{selectedPlan.name}</span>
+                    {selectedPlan.detail ? (
+                      <span className="mt-0.5 block text-xs text-slate-400">{selectedPlan.detail}</span>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 text-lg font-bold text-emerald-300">
+                    {(Number(selectedPlan.priceCents) / 100).toFixed(2)} {selectedPlan.currency || 'GHS'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFocusedPlan(false)}
+                  className="mt-2 text-xs font-medium text-emerald-300 underline-offset-2 hover:underline"
+                >
+                  Change plan
+                </button>
+              </div>
+            ) : (
             <fieldset className="space-y-3">
-              <legend className="text-sm font-medium text-slate-300">Packages</legend>
+              <legend className="text-sm font-medium text-slate-300">Choose a plan</legend>
               {packages.length === 0 ? (
                 <p className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-4 text-sm text-slate-500">
                   No packages available at this venue right now.
@@ -231,9 +266,9 @@ export function HotspotBuyPage() {
               ) : (
                 packages.map((p) => {
                   const selected = String(packageId) === String(p._id);
-                  const duration = formatDuration(p);
-                  const data = formatData(p.dataLimitBytes);
-                  const session = formatSession(p.timeLimitSeconds);
+                  const detail = p.detail ?? [formatDuration(p), formatData(p.dataLimitBytes), formatSession(p.timeLimitSeconds)]
+                    .filter(Boolean)
+                    .join(' · ');
                   return (
                     <label
                       key={p._id}
@@ -257,22 +292,18 @@ export function HotspotBuyPage() {
                             {(Number(p.priceCents) / 100).toFixed(2)} {p.currency || 'GHS'}
                           </span>
                         </span>
-                        {(duration || data || session || p.description) && (
-                          <span className="mt-1 block text-xs text-slate-400">
-                            {[duration && `Valid ${duration}`, data && `${data} data`, session, p.description]
-                              .filter(Boolean)
-                              .join(' · ')}
-                          </span>
-                        )}
+                        {detail ? <span className="mt-1 block text-xs text-slate-400">{detail}</span> : null}
                       </span>
                     </label>
                   );
                 })
               )}
             </fieldset>
+            )}
             <label className="block text-sm font-medium text-slate-300">
               Mobile money number
               <input
+                ref={msisdnRef}
                 type="tel"
                 inputMode="tel"
                 autoComplete="tel"
@@ -295,7 +326,11 @@ export function HotspotBuyPage() {
               disabled={loading || !packages.length}
               className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
             >
-              {loading ? 'Please wait…' : 'Proceed to checkout'}
+              {loading
+                ? 'Please wait…'
+                : selectedPlan
+                  ? `Pay ${(Number(selectedPlan.priceCents) / 100).toFixed(2)} ${selectedPlan.currency || 'GHS'}`
+                  : 'Proceed to checkout'}
             </button>
             <p className="text-center text-xs text-slate-500">
               After payment, enter the ticket code on the Wi‑Fi login screen (username and password).

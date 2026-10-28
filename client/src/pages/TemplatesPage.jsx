@@ -308,8 +308,8 @@ function PlansEditor({ onChanged }) {
         </Link>
       </div>
       <p className="text-xs text-slate-500">
-        These are your real plans — a new price is what customers pay when buying. Untick to hide a plan from every
-        login page; choose which plans each site sells under Push to router.
+        These are your real plans — a new price is what customers pay when buying. Untick to stop selling a plan online
+        at every site (login page and buy page); choose which plans each site sells under Push to router.
       </p>
       {state === 'loading' ? <p className="text-xs text-slate-500">Loading plans…</p> : null}
       {state === 'idle' && plans.length === 0 ? (

@@ -19,6 +19,7 @@ import { notifyTransactionPaidSms } from './paymentSmsService.js';
 import { notifyTransactionPaidAdminEmail } from './paymentAdminNotifyService.js';
 import { resolveOrgBilling } from './orgBillingService.js';
 import { settlePaidTransactionToWallet } from './orgWalletService.js';
+import { sitePlanQuery } from './portalContextService.js';
 
 function newClientReference() {
   return `QF-${crypto.randomBytes(12).toString('hex')}`;
@@ -338,7 +339,7 @@ export async function createHotspotPurchaseCheckout({
   }
 
   const routerDoc = await Router.findById(routerId)
-    .select('organizationId captivePortal.hotspotServer portalPackageIds')
+    .select('organizationId captivePortal.hotspotServer')
     .lean();
   if (!routerDoc) {
     const err = new Error('Router not found');
@@ -352,8 +353,10 @@ export async function createHotspotPurchaseCheckout({
     err.status = 400;
     throw err;
   }
-  const sitePlans = (routerDoc.portalPackageIds || []).map(String);
-  if (sitePlans.length && !sitePlans.includes(String(pkg._id))) {
+  /* Same plans the site's login and buy pages offer (site choice, "Plans & prices" ticks). */
+  /* $and, not a spread: the site query may already constrain _id to the site's chosen plans. */
+  const soldHere = await PlanPackage.exists({ $and: [await sitePlanQuery(routerOrg, routerId), { _id: pkg._id }] });
+  if (!soldHere) {
     const err = new Error('Package is not available at this site');
     err.status = 400;
     throw err;

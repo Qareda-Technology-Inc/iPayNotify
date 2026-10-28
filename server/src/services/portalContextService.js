@@ -168,10 +168,11 @@ export async function resolvePortalRouter(req, slugQuery) {
 
 /**
  * Query for the hotspot plans sold at one site: the router's chosen plans, or every active
- * hotspot plan of the organisation when none are chosen.
+ * hotspot plan of the organisation when none are chosen — minus plans unticked under
+ * "Plans & prices", so the login page, buy page and checkout always offer the same plans.
  */
 export async function sitePlanQuery(organizationId, routerId) {
-  const q = { organizationId, kind: 'hotspot', isActive: true };
+  const q = { organizationId, kind: 'hotspot', isActive: true, showOnPortal: { $ne: false } };
   if (!routerId) return q;
   const router = await MikrotikRouter.findOne({ _id: routerId, organizationId })
     .select('portalPackageIds')
@@ -185,7 +186,7 @@ export async function sitePlanQuery(organizationId, routerId) {
 export async function loadPortalPlans(organizationId, routerId) {
   if (!organizationId) return [];
   const q = await sitePlanQuery(organizationId, routerId);
-  return PlanPackage.find({ ...q, showOnPortal: { $ne: false } })
+  return PlanPackage.find(q)
     .select(
       'name priceCents currency dataLimitBytes timeLimitSeconds elapsedSeconds pausedSeconds ticketDurationType usersPerTicket speedDownMbps'
     )

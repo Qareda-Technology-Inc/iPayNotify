@@ -19,6 +19,7 @@ import {
   resolvePortalSiteFromRequest,
 } from '../services/portalContextService.js';
 import { buildCaptiveLoginHtml } from '../services/captivePortalHtml.js';
+import { planDetail } from '../services/captiveTemplates.js';
 import { captiveBuyUrl } from '../services/captivePortalPushService.js';
 import { recordHotspotLoginEvent } from '../services/hotspotService.js';
 import { normalizeGhanaMsisdn } from '../utils/phoneGhana.js';
@@ -147,9 +148,10 @@ publicPortalRouter.get(
       .select(
         'name priceCents currency activeProfile durationDays durationAmount durationUnit dataLimitBytes timeLimitSeconds elapsedSeconds pausedSeconds ticketDurationType usersPerTicket speedUpMbps speedDownMbps description'
       )
-      .sort({ name: 1 })
+      .sort({ priceCents: 1, name: 1 })
       .lean();
-    res.json(list);
+    /* `detail` is the same "1 day · Unlimited" line the login page shows for the plan. */
+    res.json(list.map((p) => ({ ...p, detail: planDetail(p) })));
   })
 );
 

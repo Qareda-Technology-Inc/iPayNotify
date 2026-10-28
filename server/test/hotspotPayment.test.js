@@ -69,9 +69,9 @@ describe('createHotspotPurchaseCheckout', () => {
     expect(await Transaction.countDocuments()).toBe(0);
   });
 
-  it('still sells a package hidden from the login-page plan list', async () => {
+  it('rejects a package unticked under "Plans & prices"', async () => {
     await PlanPackage.updateOne({ _id: pkg._id }, { $set: { showOnPortal: false } });
-    await expect(checkout()).resolves.toMatchObject({ mode: 'hubtel_checkout' });
+    await expect(checkout()).rejects.toMatchObject({ status: 400, message: 'Package is not available at this site' });
   });
 
   it('rejects a package from another organisation', async () => {

@@ -96,6 +96,22 @@ describe('plans per captive portal site', () => {
     expect(await buyList(mall)).toHaveLength(3);
   });
 
+  it('keeps the buy page in step with the login page when a plan is unticked', async () => {
+    await monthly.updateOne({ showOnPortal: false });
+    expect(await buyList(mall)).toEqual(['Daily Pass', 'Weekly Pass']);
+    expect(await loginPage(mall)).not.toContain('Monthly Pass');
+    await expect(
+      createHotspotPurchaseCheckout({ packageId: monthly._id, routerId: mall._id, customerMsisdn: '0241234567' })
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('lists buy-page plans cheapest first with the same line the login page shows', async () => {
+    await daily.updateOne({ elapsedSeconds: 86400 });
+    const list = await fetch(`${base}/api/public/packages/hotspot?r=${mall.portalSlug}`).then((r) => r.json());
+    expect(list.map((p) => p.name)).toEqual(['Daily Pass', 'Weekly Pass', 'Monthly Pass']);
+    expect(list[0].detail).toBe('1 day · Unlimited');
+  });
+
   it('rejects plans from another organisation or of another kind', async () => {
     const otherOrgPlan = await createHotspotPackage(await createOrg(), { name: 'Rival Pass' });
     const pppoePlan = await createHotspotPackage(org, { name: 'Home 10M', kind: 'pppoe' });
