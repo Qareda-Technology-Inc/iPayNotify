@@ -34,6 +34,11 @@ const transactionSchema = new mongoose.Schema(
     platformFeeCents: { type: Number },
     /** amountCents − platformFeeCents credited to the vendor wallet. */
     orgNetCents: { type: Number },
+    /**
+     * Set atomically by the one caller allowed to credit the org wallet for this tx.
+     * Kept outside `meta` because callers rewrite `meta` wholesale on save.
+     */
+    walletClaimedAt: { type: Date, default: null },
     meta: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true }

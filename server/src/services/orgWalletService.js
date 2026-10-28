@@ -72,9 +72,14 @@ export async function appendLedgerEntry({
   }
 }
 
+/** A claim older than this belongs to a settlement that crashed; another caller may take over. */
+const WALLET_CLAIM_STALE_MS = 10 * 60 * 1000;
+
 /**
  * Idempotent: credit org wallet with net of platform fee when a Hubtel sale is paid.
  * Fee is recorded on the Transaction; balance only increases by orgNetCents.
+ * Concurrent callers (callback, status poll, cron) race on an atomic claim of the tx,
+ * so exactly one credits — without relying on the ledger's unique index existing.
  */
 export async function settlePaidTransactionToWallet(txDoc) {
   if (!txDoc || txDoc.status !== 'paid') {
@@ -88,6 +93,36 @@ export async function settlePaidTransactionToWallet(txDoc) {
     return { ok: true, duplicate: true };
   }
 
+  const claimedAt = new Date();
+  const claim = await Transaction.updateOne(
+    {
+      _id: txDoc._id,
+      status: 'paid',
+      'meta.walletSettled': { $ne: true },
+      $or: [
+        { walletClaimedAt: null },
+        { walletClaimedAt: { $lt: new Date(claimedAt.getTime() - WALLET_CLAIM_STALE_MS) } },
+      ],
+    },
+    { $set: { walletClaimedAt: claimedAt } }
+  );
+  if (!claim.modifiedCount) {
+    return { ok: true, duplicate: true };
+  }
+
+  try {
+    return await creditClaimedTransaction(txDoc, orgId);
+  } catch (e) {
+    /* Release the claim so the next confirmation or the backfill script can retry. */
+    await Transaction.updateOne(
+      { _id: txDoc._id, walletClaimedAt: claimedAt },
+      { $set: { walletClaimedAt: null } }
+    );
+    throw e;
+  }
+}
+
+async function creditClaimedTransaction(txDoc, orgId) {
   const existing = await OrgLedgerEntry.findOne({
     organizationId: orgId,
     transactionId: txDoc._id,
