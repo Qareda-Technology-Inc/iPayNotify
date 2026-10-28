@@ -14,6 +14,37 @@ const ROUND = "'Trebuchet MS','Segoe UI',Arial,sans-serif";
  *    plan (plan row background), line (borders), price
  */
 export const LOGIN_THEMES = [
+  /* Showcase: c also has glow1/glow2 (background light), accent2 (gradient end), ring (focus halo). */
+  {
+    id: 'lumen',
+    name: 'Lumen',
+    blurb: 'Midnight blue with soft glow, plan tiles and a gradient button.',
+    layout: 'showcase',
+    font: SANS,
+    headline: 'Get online in seconds',
+    subtitle: 'Enter the code from your ticket, or buy one with mobile money.',
+    c: { bg: '#070b1a', glow1: 'rgba(99,102,241,.38)', glow2: 'rgba(20,184,166,.30)', text: '#f8fafc', muted: '#a3b1c6', card: 'rgba(255,255,255,.06)', line: 'rgba(255,255,255,.12)', accent: '#6366f1', accent2: '#14b8a6', accentText: '#ffffff', ring: 'rgba(99,102,241,.35)', field: 'rgba(255,255,255,.06)', fieldBorder: 'rgba(255,255,255,.2)', plan: 'rgba(255,255,255,.05)', price: '#5eead4' },
+  },
+  {
+    id: 'daylight',
+    name: 'Daylight',
+    blurb: 'Bright and airy, blue-to-violet accents and plan tiles.',
+    layout: 'showcase',
+    font: SANS,
+    headline: 'Welcome! Let’s get you online',
+    subtitle: 'Enter the code from your ticket, or buy one in a minute.',
+    c: { bg: '#f5f7fc', glow1: 'rgba(59,130,246,.20)', glow2: 'rgba(168,85,247,.16)', text: '#0f172a', muted: '#5b6779', card: '#ffffff', line: '#e3e8f1', accent: '#2563eb', accent2: '#7c3aed', accentText: '#ffffff', ring: 'rgba(37,99,235,.18)', field: '#f8fafc', fieldBorder: '#d5ddea', plan: '#ffffff', price: '#1d4ed8' },
+  },
+  {
+    id: 'goldcoast',
+    name: 'Gold Coast',
+    blurb: 'Deep green and gold, premium and warm.',
+    layout: 'showcase',
+    font: SANS,
+    headline: 'Akwaaba! Get connected',
+    subtitle: 'Enter your ticket code, or buy one with MoMo right here.',
+    c: { bg: '#04231a', glow1: 'rgba(234,179,8,.24)', glow2: 'rgba(16,185,129,.26)', text: '#fefce8', muted: '#b9d3c4', card: 'rgba(255,255,255,.05)', line: 'rgba(250,204,21,.22)', accent: '#eab308', accent2: '#f59e0b', accentText: '#1c1917', ring: 'rgba(234,179,8,.3)', field: 'rgba(0,0,0,.25)', fieldBorder: 'rgba(250,204,21,.35)', plan: 'rgba(255,255,255,.04)', price: '#facc15' },
+  },
   {
     id: 'midnight',
     name: 'Midnight',
@@ -240,7 +271,7 @@ export const LOGIN_THEMES = [
 export const LOGIN_THEME_IDS = LOGIN_THEMES.map((t) => t.id);
 
 export function loginThemeById(id) {
-  return LOGIN_THEMES.find((t) => t.id === id) || LOGIN_THEMES[0];
+  return LOGIN_THEMES.find((t) => t.id === id) || LOGIN_THEMES.find((t) => t.id === 'midnight');
 }
 
 /** Escapes HTML and `$` so router macros like $(error) cannot be injected through saved text. */
@@ -297,7 +328,58 @@ export const SAMPLE_PLANS = [
   { _id: 'sample-3', name: 'Weekly', priceCents: 2500, currency: 'GHS', elapsedSeconds: 604800, usersPerTicket: 2 },
 ];
 
+const WIFI_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M6 12.6a9 9 0 0 1 12 0"/><path d="M9.4 16.1a4 4 0 0 1 5.2 0"/><circle cx="12" cy="19.5" r="1.3" fill="currentColor" stroke="none"/></svg>';
+
+/** Showcase layout: glow background, emblem header, glass card, plan tiles, how-it-works steps. */
+function showcaseCss(t) {
+  const c = t.c;
+  return `*{box-sizing:border-box}
+html{background:${c.bg}}
+body{margin:0;min-height:100vh;color:${c.text};font-family:${t.font};-webkit-text-size-adjust:100%;background:radial-gradient(900px 520px at 10% -10%,${c.glow1},transparent 60%),radial-gradient(760px 540px at 110% 15%,${c.glow2},transparent 60%),${c.bg};background-attachment:fixed}
+a{color:${c.accent}}
+.wrap{max-width:460px;margin:0 auto;padding:28px 18px 32px}
+.top{display:flex;align-items:center;gap:12px;margin-bottom:28px}
+.emblem{flex:none;display:flex;align-items:center;justify-content:center;width:46px;height:46px;border-radius:15px;background:linear-gradient(135deg,${c.accent},${c.accent2});color:${c.accentText};box-shadow:0 12px 26px -10px ${c.accent}}
+.emblem svg{width:25px;height:25px}
+.logo{flex:none}.logo img{display:block;max-height:46px;max-width:160px}
+.who{display:flex;min-width:0;flex-direction:column;gap:4px}
+.bn{font-size:16px;font-weight:700;letter-spacing:-.01em}
+.chip{align-self:flex-start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 9px;border-radius:999px;border:1px solid ${c.line};background:${c.plan};font-size:11px;font-weight:600;color:${c.muted}}
+h1{margin:0;font-size:32px;line-height:1.1;font-weight:800;letter-spacing:-.025em}
+.sub{margin:10px 0 0;font-size:15px;line-height:1.5;color:${c.muted}}
+.card{margin-top:24px;padding:22px;border-radius:24px;border:1px solid ${c.line};background:${c.card};box-shadow:0 30px 60px -32px rgba(0,0,0,.5);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+form{margin:0}
+label{display:block;margin:0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:${c.muted}}
+input[type=text]{width:100%;padding:16px;border:1.5px solid ${c.fieldBorder};border-radius:16px;background:${c.field};color:${c.text};font-family:${MONO};font-size:26px;font-weight:700;letter-spacing:.32em;text-align:center;outline:none;transition:border-color .15s,box-shadow .15s}
+input[type=text]:focus{border-color:${c.accent};box-shadow:0 0 0 4px ${c.ring}}
+button{width:100%;margin-top:14px;padding:16px;border:0;border-radius:16px;background:linear-gradient(135deg,${c.accent},${c.accent2});color:${c.accentText};font-family:inherit;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 16px 30px -14px ${c.accent}}
+button:active{transform:translateY(1px)}
+.err{margin:0 0 14px;padding:10px 12px;border:1px solid #fecaca;border-radius:12px;background:#fef2f2;color:#991b1b;font-size:14px}
+.or{display:flex;align-items:center;gap:12px;margin:20px 0 14px;font-size:12px;color:${c.muted}}
+.or:before,.or:after{content:"";flex:1;height:1px;background:${c.line}}
+.buy{display:block;padding:14px;border:1.5px solid ${c.line};border-radius:16px;color:${c.text};font-size:15px;font-weight:700;text-align:center;text-decoration:none}
+.plans{margin-top:30px}
+.ph{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px}
+.ph h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:${c.muted}}
+.ph span{font-size:12px;color:${c.muted}}
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.tiles.one{grid-template-columns:1fr}
+.tile{display:flex;flex-direction:column;gap:4px;padding:14px;border:1px solid ${c.line};border-radius:18px;background:${c.plan};color:${c.text};text-decoration:none}
+.tile .tn{font-size:13px;font-weight:600;color:${c.muted}}
+.tile .tp{font-size:22px;font-weight:800;letter-spacing:-.02em;color:${c.price}}
+.tile .td{font-size:12px;line-height:1.4;color:${c.muted}}
+@media(max-width:340px){.tiles{grid-template-columns:1fr}h1{font-size:28px}.card{padding:18px}input[type=text]{padding:14px 10px;font-size:21px;letter-spacing:.2em}}
+.steps{display:flex;gap:8px;margin:28px 0 0;padding:0;list-style:none}
+.steps li{flex:1;font-size:12px;line-height:1.35;text-align:center;color:${c.muted}}
+.steps b{display:flex;align-items:center;justify-content:center;width:26px;height:26px;margin:0 auto 6px;border:1px solid ${c.line};border-radius:50%;background:${c.plan};color:${c.text};font-size:12px}
+.foot{margin-top:28px;font-size:12px;line-height:1.6;text-align:center;color:${c.muted}}
+.foot p{margin:0}
+.foot a{color:inherit;font-weight:700}`;
+}
+
 function css(t) {
+  if (t.layout === 'showcase') return showcaseCss(t);
   const c = t.c;
   const r = t.radius;
   const pageBg = t.layout === 'glass' && c.bg2 ? `linear-gradient(160deg,${c.bg},${c.bg2})` : c.bg;
@@ -414,7 +496,7 @@ export function renderLoginPage(o = {}) {
   const brand = `<p class="brand">${logo}<span>${esc(brandName)}${site ? ` <span class="site">· ${esc(site)}</span>` : ''}</span></p>`;
   const lead = `<div class="lead"><h1>${esc(headline)}</h1><p class="sub">${esc(subtitle)}</p></div>`;
   const buyLink = buyUrl ? `<a class="buy" href="${buyHref(buyUrl)}">${esc(buyLabel)}</a>` : '';
-  const form = `${errorBlock}
+  const formCore = `${errorBlock}
 <form action="${action}" method="post"${formAttrs}>
 <input type="hidden" name="dst" value="${dst}">
 <input type="hidden" name="popup" value="true">
@@ -422,17 +504,20 @@ export function renderLoginPage(o = {}) {
 <input id="code" type="text" name="username" value="${username}" inputmode="numeric" autocomplete="off" autocapitalize="off" spellcheck="false">
 <input type="hidden" name="password" value="">
 <button type="submit">${esc(buttonLabel)}</button>
-</form>
+</form>`;
+  const form = `${formCore}
 ${buyLink}`;
 
   const plans = o.showPlans === false ? [] : Array.isArray(o.plans) ? o.plans.slice(0, 12) : [];
+  const planHref = (p) => {
+    const sep = buyUrl.includes('?') ? '&' : '?';
+    return /^[a-f\d]{24}$/i.test(String(p._id)) ? `${buyUrl}${sep}package=${p._id}` : buyUrl;
+  };
   const planItems = plans
     .map((p) => {
       const inner = `<span class="pi"><span class="pn">${esc(p.name)}</span><span class="pd">${esc(planDetail(p))}</span></span><span class="pp">${esc(formatPlanPrice(p.priceCents, p.currency))}</span>`;
       if (!buyUrl) return `<div class="plan">${inner}</div>`;
-      const sep = buyUrl.includes('?') ? '&' : '?';
-      const href = /^[a-f\d]{24}$/i.test(String(p._id)) ? `${buyUrl}${sep}package=${p._id}` : buyUrl;
-      return `<a class="plan" href="${buyHref(href)}">${inner}</a>`;
+      return `<a class="plan" href="${buyHref(planHref(p))}">${inner}</a>`;
     })
     .join('');
   const plansBlock = planItems ? `<section class="plans"><h2>Plans &amp; prices</h2>${planItems}</section>` : '';
@@ -448,6 +533,27 @@ ${buyLink}`;
 
   let body;
   switch (t.layout) {
+    case 'showcase': {
+      const mark = logo ? `<span class="logo">${logo}</span>` : `<span class="emblem">${WIFI_ICON}</span>`;
+      const top = `<header class="top">${mark}<span class="who"><span class="bn">${esc(brandName)}</span>${site ? `<span class="chip">${esc(site)}</span>` : ''}</span></header>`;
+      const buyBlock = buyUrl
+        ? `<div class="or">No code yet?</div><a class="buy" href="${buyHref(buyUrl)}">${esc(buyLabel)}</a>`
+        : '';
+      const tiles = plans
+        .map((p) => {
+          const inner = `<span class="tn">${esc(p.name)}</span><span class="tp">${esc(formatPlanPrice(p.priceCents, p.currency))}</span><span class="td">${esc(planDetail(p))}</span>`;
+          return buyUrl ? `<a class="tile" href="${buyHref(planHref(p))}">${inner}</a>` : `<div class="tile">${inner}</div>`;
+        })
+        .join('');
+      const tilesBlock = tiles
+        ? `<section class="plans"><div class="ph"><h2>Plans</h2>${buyUrl ? '<span>Tap a plan to buy</span>' : ''}</div><div class="tiles${plans.length === 1 ? ' one' : ''}">${tiles}</div></section>`
+        : '';
+      const steps = buyUrl
+        ? '<ol class="steps"><li><b>1</b>Pick a plan</li><li><b>2</b>Pay with MoMo</li><li><b>3</b>Enter your code</li></ol>'
+        : '';
+      body = `<div class="wrap">${top}${lead}<div class="card">${formCore}${buyBlock}</div>${tilesBlock}${steps}${footer}</div>`;
+      break;
+    }
     case 'hero':
       body = `<div class="hero"><div class="wrap">${brand}${lead}</div></div><div class="wrap lift"><div class="card">${form}</div>${plansBlock}${footer}</div>`;
       break;
