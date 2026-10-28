@@ -294,13 +294,6 @@ function formatSeconds(total) {
   return `${Math.round(n / 60)} min`;
 }
 
-function formatBytes(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v) || v <= 0) return '';
-  if (v >= 1073741824) return `${+(v / 1073741824).toFixed(1)} GB`;
-  return `${Math.round(v / 1048576)} MB`;
-}
-
 export function formatPlanPrice(priceCents, currency = 'GHS') {
   const amount = Math.max(0, Number(priceCents) || 0) / 100;
   if (!amount) return 'Free';
@@ -308,18 +301,14 @@ export function formatPlanPrice(priceCents, currency = 'GHS') {
   return `${currency || 'GHS'} ${text}`;
 }
 
-/** Short plan facts: "1 day · 2 GB · 2 devices". */
+/** Plan line under the name on the login page: duration only ("1 day", "2 hrs online"). */
 export function planDetail(p) {
   const paused = p.ticketDurationType === 'paused';
   const time = paused
     ? formatSeconds(p.pausedSeconds ?? p.timeLimitSeconds)
     : formatSeconds(p.elapsedSeconds);
-  const parts = [];
-  if (time) parts.push(paused ? `${time} online` : time);
-  parts.push(formatBytes(p.dataLimitBytes) || 'Unlimited data');
-  if (Number(p.usersPerTicket) > 1) parts.push(`${p.usersPerTicket} devices`);
-  if (Number(p.speedDownMbps) > 0) parts.push(`${p.speedDownMbps} Mbps`);
-  return parts.join(' · ');
+  if (!time) return '';
+  return paused ? `${time} online` : time;
 }
 
 export const SAMPLE_PLANS = [
@@ -515,7 +504,8 @@ ${buyLink}`;
   };
   const planItems = plans
     .map((p) => {
-      const inner = `<span class="pi"><span class="pn">${esc(p.name)}</span><span class="pd">${esc(planDetail(p))}</span></span><span class="pp">${esc(formatPlanPrice(p.priceCents, p.currency))}</span>`;
+      const detail = planDetail(p);
+      const inner = `<span class="pi"><span class="pn">${esc(p.name)}</span>${detail ? `<span class="pd">${esc(detail)}</span>` : ''}</span><span class="pp">${esc(formatPlanPrice(p.priceCents, p.currency))}</span>`;
       if (!buyUrl) return `<div class="plan">${inner}</div>`;
       return `<a class="plan" href="${buyHref(planHref(p))}">${inner}</a>`;
     })
@@ -541,7 +531,8 @@ ${buyLink}`;
         : '';
       const tiles = plans
         .map((p) => {
-          const inner = `<span class="tn">${esc(p.name)}</span><span class="tp">${esc(formatPlanPrice(p.priceCents, p.currency))}</span><span class="td">${esc(planDetail(p))}</span>`;
+          const detail = planDetail(p);
+          const inner = `<span class="tn">${esc(p.name)}</span><span class="tp">${esc(formatPlanPrice(p.priceCents, p.currency))}</span>${detail ? `<span class="td">${esc(detail)}</span>` : ''}`;
           return buyUrl ? `<a class="tile" href="${buyHref(planHref(p))}">${inner}</a>` : `<div class="tile">${inner}</div>`;
         })
         .join('');

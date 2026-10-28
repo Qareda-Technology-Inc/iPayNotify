@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOGIN_THEMES, loginThemeById, renderLoginPage } from '../src/services/captiveTemplates.js';
+import { LOGIN_THEMES, loginThemeById, planDetail, renderLoginPage } from '../src/services/captiveTemplates.js';
 import { normalizePortalDesign } from '../src/utils/portalDesigns.js';
 
 const plans = [
@@ -65,5 +65,33 @@ describe('login page designs', () => {
     const html = renderLoginPage({ ...base, designId: 'goldcoast', logoUrl: 'https://cdn.test/logo.png' });
     expect(html).toContain('<span class="logo"><img src="https://cdn.test/logo.png"');
     expect(html).not.toContain('class="emblem"');
+  });
+});
+
+describe('plan details on the login page', () => {
+  const full = {
+    _id: '6650a1b2c3d4e5f6a7b8c9d2',
+    name: 'Premium Day',
+    priceCents: 1000,
+    currency: 'GHS',
+    elapsedSeconds: 86400,
+    dataLimitBytes: 2147483648,
+    usersPerTicket: 3,
+    speedDownMbps: 5,
+    speedUpMbps: 2,
+  };
+
+  it('shows only the duration, never speed, data or devices', () => {
+    expect(planDetail(full)).toBe('1 day');
+    expect(planDetail({ ticketDurationType: 'paused', pausedSeconds: 7200 })).toBe('2 hrs online');
+    expect(planDetail({ name: 'No time limit' })).toBe('');
+  });
+
+  it.each(LOGIN_THEMES.map((t) => t.id))('%s shows name, duration and price only', (id) => {
+    const html = renderLoginPage({ ...base, plans: [full], designId: id, mode: 'router' });
+    expect(html).toContain('Premium Day');
+    expect(html).toContain('1 day');
+    expect(html).toContain('GHS 10');
+    expect(html).not.toMatch(/Mbps|devices|GB|MB|Unlimited data/);
   });
 });
