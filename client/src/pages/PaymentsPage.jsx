@@ -132,7 +132,7 @@ function NeedsAttention({ reloadKey, onChanged, isSuperAdmin }) {
                 </p>
               </div>
               <div className="flex shrink-0 gap-2">
-                {isSuperAdmin && it.reason === 'payment_unconfirmed' ? (
+                {isSuperAdmin && (it.reason === 'payment_unconfirmed' || it.reason === 'payment_reported_by_customer') ? (
                   <button
                     type="button"
                     onClick={() => confirmPaid(it)}

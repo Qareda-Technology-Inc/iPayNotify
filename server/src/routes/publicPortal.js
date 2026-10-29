@@ -1,6 +1,7 @@
 import express from 'express';
 import { PlanPackage } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { limits } from '../middleware/rateLimit.js';
 import { config } from '../config.js';
 import {
   quotePppoeRenewal,
@@ -157,6 +158,7 @@ publicPortalRouter.get(
 
 publicPortalRouter.post(
   '/renew/quote',
+  limits.renewQuote,
   asyncHandler(async (req, res) => {
     const { secretName, renewCode, phone, portalSlug } = req.body || {};
     const hasCode = Boolean(String(renewCode || '').trim());
@@ -213,6 +215,8 @@ publicPortalRouter.post(
 
 publicPortalRouter.post(
   '/renew/checkout',
+  limits.checkoutPerIp,
+  limits.checkoutPerPhone,
   asyncHandler(async (req, res) => {
     const { secretName, renewCode, phone, customerMsisdn, customerName, portalSlug } =
       req.body || {};
@@ -253,6 +257,8 @@ publicPortalRouter.post(
 
 publicPortalRouter.post(
   '/hotspot/checkout',
+  limits.checkoutPerIp,
+  limits.checkoutPerPhone,
   asyncHandler(async (req, res) => {
     const { packageId, customerMsisdn, customerName, portalSlug, hotspotServer } = req.body;
     if (!packageId) {
@@ -281,6 +287,7 @@ publicPortalRouter.post(
 
 publicPortalRouter.get(
   '/payment/:ref/status',
+  limits.statusPerRef,
   asyncHandler(async (req, res) => {
     let tx = await getTransactionByReference(req.params.ref);
     if (!tx) return res.status(404).json({ error: 'Not found' });
@@ -337,6 +344,7 @@ publicPortalRouter.get(
  */
 publicPortalRouter.post(
   '/payment/hubtel-client-event',
+  limits.clientEvent,
   asyncHandler(async (req, res) => {
     const { clientReference, event, payload } = req.body || {};
     const out = await recordHubtelClientCheckoutEvent({

@@ -219,14 +219,15 @@ transactionsRouter.post(
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Transaction not found' });
     const tx = await Transaction.findById(req.params.id).select('clientReference').lean();
     if (!tx) return res.status(404).json({ error: 'Transaction not found' });
-    const out = await releaseHeldCallbackPayment(tx.clientReference, {
-      releasedVia: 'super_admin',
-      confirmedBy: req.admin?.email || req.admin?.id || '',
-    });
+    const out = await releaseHeldCallbackPayment(
+      tx.clientReference,
+      { releasedVia: 'super_admin', confirmedBy: req.admin?.email || req.admin?.id || '' },
+      { allowClientReported: true }
+    );
     if (!out.ok) {
       const error =
         out.reason === 'not_held'
-          ? 'Only payments Hubtel reported as paid (waiting for confirmation) can be confirmed here.'
+          ? 'Only pending payments that Hubtel or the payment screen reported as paid can be confirmed here.'
           : out.reason === 'amount_mismatch'
             ? 'The amount Hubtel reported does not match this payment.'
             : 'Could not confirm this payment.';

@@ -1,6 +1,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { limits } from '../middleware/rateLimit.js';
 import { config } from '../config.js';
 import { WireGuardPeer } from '../models/WireGuardPeer.js';
 import { allocateNextTunnelIp } from '../services/wireguard/allocateTunnelIp.js';
@@ -291,8 +292,8 @@ async function handleWireGuardRegister(req, res) {
     }
 }
 
-wireguardRegisterRouter.post('/register', asyncHandler(handleWireGuardRegister));
-wireguardRegisterRouter.get('/register', asyncHandler(handleWireGuardRegister));
+wireguardRegisterRouter.post('/register', limits.routerRegister, asyncHandler(handleWireGuardRegister));
+wireguardRegisterRouter.get('/register', limits.routerRegister, asyncHandler(handleWireGuardRegister));
 
 /**
  * Path-based key (MikroTik-safe — avoids query-string +/= mangling).
@@ -300,6 +301,7 @@ wireguardRegisterRouter.get('/register', asyncHandler(handleWireGuardRegister));
  */
 wireguardRegisterRouter.get(
   '/register/pk/:publicKey',
+  limits.routerRegister,
   asyncHandler(async (req, res) => {
     req.query = {
       ...(req.query || {}),
@@ -329,6 +331,7 @@ wireguardRegisterRouter.get(
  */
 wireguardRegisterRouter.get(
   ['/bootstrap.rsc', '/bootstrap'],
+  limits.routerRegister,
   asyncHandler(async (req, res) => {
     const wg = config.wireguard;
     const token = String(req.query.token || req.get('x-wg-register-token') || '').trim();
@@ -363,6 +366,7 @@ wireguardRegisterRouter.get(
  */
 wireguardRegisterRouter.get(
   ['/b/:code.rsc', '/b/:code'],
+  limits.routerRegister,
   asyncHandler(async (req, res) => {
     const code = String(req.params.code || '')
       .replace(/\.rsc$/i, '')

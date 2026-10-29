@@ -22,6 +22,8 @@ const STALE_RENEW_CLAIM_MS = 5 * 60 * 1000;
 
 export const STUCK_REASONS = {
   payment_unconfirmed: 'Hubtel reported it paid, but Status Check has not confirmed it yet',
+  payment_reported_by_customer:
+    'The customer’s payment screen said paid, but Hubtel has not confirmed it. Check the Hubtel dashboard',
   voucher_not_delivered: 'Paid, but the voucher code has not reached the router',
   renewal_not_applied: 'Paid, but the renewal was not applied to the account',
   renewal_router_sync: 'Paid and renewed, but the router was not updated',
@@ -32,6 +34,7 @@ export const STUCK_REASONS = {
 /** Short form for SMS. */
 const STUCK_SHORT = {
   payment_unconfirmed: 'payment not confirmed',
+  payment_reported_by_customer: 'customer says paid, Hubtel not confirmed',
   voucher_not_delivered: 'voucher not delivered',
   renewal_not_applied: 'renewal not applied',
   renewal_router_sync: 'router not updated',
@@ -49,6 +52,7 @@ function stuckQuery({ organizationId, olderThan, newerThan }) {
     createdAt: { $gte: newerThan, $lte: olderThan },
     $or: [
       { status: 'pending', 'meta.callbackUnverified': { $exists: true } },
+      { status: 'pending', 'meta.clientReportedPaidAt': { $exists: true } },
       { status: 'paid', kind: 'voucher', 'meta.fulfillment': { $ne: 'done' } },
       { status: 'paid', kind: 'renewal', 'meta.renewedUntil': { $exists: false } },
       { status: 'paid', kind: 'renewal', 'meta.routerSyncPending': true },
@@ -66,6 +70,7 @@ function stuckQuery({ organizationId, olderThan, newerThan }) {
 export function stuckReason(tx) {
   if (!tx) return null;
   if (tx.status === 'pending' && tx.meta?.callbackUnverified) return 'payment_unconfirmed';
+  if (tx.status === 'pending' && tx.meta?.clientReportedPaidAt) return 'payment_reported_by_customer';
   if (tx.status !== 'paid') return null;
   if (tx.kind === 'org_subscription') return tx.meta?.fulfillment === 'done' ? null : 'org_bill_not_applied';
   if (tx.kind === 'voucher' && tx.meta?.fulfillment !== 'done') return 'voucher_not_delivered';
@@ -82,6 +87,11 @@ function lastError(tx) {
     tx.meta?.routerSyncError?.error ||
     tx.meta?.walletSettleFailed?.error ||
     tx.meta?.callbackUnverified?.reason ||
+    (tx.status === 'pending' && tx.meta?.statusCheckResult
+      ? `Hubtel Status Check: ${tx.meta.statusCheckResult.hubtelStatus || 'no answer'}${
+          tx.meta.statusCheckHttp && tx.meta.statusCheckHttp !== 200 ? ` (HTTP ${tx.meta.statusCheckHttp})` : ''
+        }`
+      : '') ||
     tx.meta?.reason ||
     ''
   );

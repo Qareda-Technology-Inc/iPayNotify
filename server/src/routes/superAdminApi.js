@@ -33,7 +33,7 @@ import {
 import { logOrgAudit } from '../services/orgAuditService.js';
 import { updateOrgTeamMember } from '../services/orgTeamService.js';
 import { wireguardAdminRouter } from './wireguardAdmin.js';
-import { applyOrgBillingStatus } from '../services/orgPlatformBillingService.js';
+import { applyOrgBillingStatus, sendOrgBillReminder } from '../services/orgPlatformBillingService.js';
 
 /** Apply a super admin's platform billing edit (prices in cents). */
 function applyPlatformBillingPatch(doc, body) {
@@ -240,6 +240,23 @@ router.patch(
       limits: normalizeOrgLimits(o.limits),
       usage: usagePack.usage,
     });
+  })
+);
+
+/** POST /api/super-admin/organizations/:id/billing-reminder — email + SMS the org admins about their bill now. */
+router.post(
+  '/organizations/:id/billing-reminder',
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
+    const out = await sendOrgBillReminder(req.params.id);
+    if (out.reason === 'not_found') return res.status(404).json({ error: 'Organisation not found' });
+    if (out.reason === 'billing_off') {
+      return res.status(400).json({ error: 'Turn on the monthly charge for this organisation first.' });
+    }
+    if (!out.emails && !out.sms) {
+      return res.status(400).json({ error: 'No admin email or phone could be reached for this organisation.' });
+    }
+    res.json(out);
   })
 );
 

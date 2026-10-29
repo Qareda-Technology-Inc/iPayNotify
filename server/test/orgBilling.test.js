@@ -30,6 +30,7 @@ const {
   orgBillQuote,
   orgBillingSummary,
   runOrgBillingJob,
+  sendOrgBillReminder,
 } = await import('../src/services/orgPlatformBillingService.js');
 const { markTransactionPaidByReference } = await import('../src/services/paymentService.js');
 const { listStuckPayments } = await import('../src/services/stuckPaymentService.js');
@@ -137,6 +138,21 @@ describe('organisation bill', () => {
     expect(mocks.sendArkeselSms).toHaveBeenCalledTimes(3);
     expect(mocks.sendArkeselSms.mock.calls[2][0].message).toMatch(/suspended/);
     expect(mocks.sendSmtpMail).toHaveBeenCalledTimes(3);
+  });
+
+  it('a super admin can send a reminder any time without disturbing the automatic ones', async () => {
+    mocks.sendSmtpMail.mockResolvedValue({ ok: true });
+    mocks.sendArkeselSms.mockResolvedValue({ ok: true });
+    const org = await billedOrg({ paidUntil: daysFromNow(-2) });
+    const out = await sendOrgBillReminder(org._id);
+    expect(out).toMatchObject({ ok: true, kind: 'past_due', emails: 1, sms: 1 });
+    expect(mocks.sendArkeselSms.mock.calls[0][0].message).toMatch(/overdue/);
+
+    await runOrgBillingJob();
+    expect(mocks.sendArkeselSms).toHaveBeenCalledTimes(2);
+
+    const off = await createOrg();
+    expect(await sendOrgBillReminder(off._id)).toMatchObject({ ok: false, reason: 'billing_off' });
   });
 
   it('ignores organisations with platform billing off', async () => {

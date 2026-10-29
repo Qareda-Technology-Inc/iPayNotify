@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { formatRemainingFromPaidUntil } from '../utils/remainingTime.js';
 import { publicFetch } from '../api.js';
 import { usePortalContext, getPortalSlugFromLocation } from './usePortalContext.js';
@@ -31,9 +31,12 @@ function estimateNewPaidUntil(paidUntil, durationDays) {
  */
 export function RenewPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  /* SMS links carry the renew ID (?id=) so the customer lands on their bill, ready to pay. */
+  const linkedRenewId = String(searchParams.get('id') || '').trim();
   const { ctx, loading: ctxLoading, error: ctxError } = usePortalContext();
   const [lookupMode, setLookupMode] = useState('renewCode');
-  const [lookupValue, setLookupValue] = useState('');
+  const [lookupValue, setLookupValue] = useState(linkedRenewId);
   const [quote, setQuote] = useState(null);
   const [msisdn, setMsisdn] = useState('');
   const [error, setError] = useState('');
@@ -73,6 +76,24 @@ export function RenewPage() {
     setMsisdn(String(data?.customerPhone || '').trim());
     setStep('review');
   }
+
+  const autoQuoted = useRef(false);
+  useEffect(() => {
+    if (!linkedRenewId || autoQuoted.current) return;
+    autoQuoted.current = true;
+    const body = { renewCode: linkedRenewId };
+    setLoading(true);
+    publicFetch('/api/public/renew/quote', { method: 'POST', body: JSON.stringify(body) })
+      .then((data) => {
+        if (data.needsPrice) {
+          setError('This line has no renewal price. Ask your ISP to link a PPPoE package with a price.');
+          return;
+        }
+        applyQuote(data, body);
+      })
+      .catch((err) => setError(err.message || 'Could not find this renew ID. Check it and try again.'))
+      .finally(() => setLoading(false));
+  }, [linkedRenewId]);
 
   async function doQuote(e) {
     e.preventDefault();

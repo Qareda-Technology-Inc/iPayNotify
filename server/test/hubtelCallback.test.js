@@ -6,6 +6,7 @@ import { hubtelPaymentsRouter } from '../src/routes/hubtelPayments.js';
 import {
   expireStalePendingPayments,
   reconcilePaymentFromHubtelStatus,
+  recordHubtelClientCheckoutEvent,
   releaseHeldCallbackPayment,
 } from '../src/services/paymentService.js';
 import { fakeHubtelStatus } from './helpers/network.js';
@@ -231,5 +232,28 @@ describe('when Hubtel Status Check is unavailable', () => {
     const noCallback = await createPendingTx(org);
     expect(await releaseHeldCallbackPayment(noCallback.clientReference)).toMatchObject({ ok: false, reason: 'not_held' });
     expect((await reloadTx(noCallback)).status).toBe('pending');
+  });
+
+  it('a payment only the payment screen reported stays pending, is kept from expiry, and only a super admin can confirm it', async () => {
+    hubtel.mode = 'blocked';
+    const tx = await createPendingTx(org);
+    await recordHubtelClientCheckoutEvent({ clientReference: tx.clientReference, event: 'success' });
+    await recordHubtelClientCheckoutEvent({ clientReference: tx.clientReference, event: 'close' });
+    expect((await reloadTx(tx)).meta.clientReportedPaidAt).toBeTruthy();
+
+    config.hubtel.trustUnverifiedCallbacks = true;
+    try {
+      await reconcilePaymentFromHubtelStatus(tx.clientReference);
+      expect((await reloadTx(tx)).status).toBe('pending');
+    } finally {
+      config.hubtel.trustUnverifiedCallbacks = false;
+    }
+
+    await ageTransaction(tx, 30);
+    expect((await expireStalePendingPayments({ maxAgeHours: 24 })).held).toBe(1);
+    expect(await releaseHeldCallbackPayment(tx.clientReference)).toMatchObject({ reason: 'not_held' });
+
+    await releaseHeldCallbackPayment(tx.clientReference, { releasedVia: 'super_admin' }, { allowClientReported: true });
+    expect((await reloadTx(tx)).status).toBe('paid');
   });
 });

@@ -130,10 +130,15 @@ async function notifyAdmins(org, kind, quote) {
     }`,
     footerText: appUrl ? `Subscription: ${appUrl}` : '',
   });
-  await Promise.allSettled([
+  const results = await Promise.allSettled([
     ...emails.map((to) => sendSmtpMail({ to, subject, text: `${message}${appUrl ? `\n\n${appUrl}` : ''}`, html })),
     ...phones.map((to) => sendArkeselSms({ to, message })),
   ]);
+  const sent = (r) => r.status === 'fulfilled' && r.value?.ok !== false;
+  return {
+    emails: results.slice(0, emails.length).filter(sent).length,
+    sms: results.slice(emails.length).filter(sent).length,
+  };
 }
 
 /** Which reminder is due now for this org, if any (each goes out once per due date). */
@@ -189,6 +194,21 @@ export async function applyOrgBillingStatus(orgOrId, { now = new Date(), notify 
   }
   if (before !== want) console.log('[org-billing] status', org.slug, before, '→', want);
   return out;
+}
+
+/**
+ * Super admin "Send reminder": the message that fits the organisation's state right now (due,
+ * overdue or suspended), sent to its admins by email and SMS. Does not change the automatic ones.
+ */
+export async function sendOrgBillReminder(organizationId, { now = new Date() } = {}) {
+  const org = await Organization.findById(organizationId);
+  if (!org) return { ok: false, reason: 'not_found' };
+  if (!org.platformBilling?.enabled) return { ok: false, reason: 'billing_off' };
+  const status = billingStatusFor(org, now);
+  const kind = status === 'suspended' ? 'suspended' : status === 'past_due' ? 'past_due' : 'due_soon';
+  const sent = await notifyAdmins(org, kind, await orgBillQuote(org, now));
+  console.log('[org-billing] manual reminder', org.slug, kind, sent);
+  return { ok: true, kind, ...sent };
 }
 
 /** Cron: every organisation with platform billing on. */

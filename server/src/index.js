@@ -13,6 +13,7 @@ import { protectedApiRouter } from './routes/protectedApi.js';
 import { superAdminApiRouter } from './routes/superAdminApi.js';
 import { startBillingScheduler } from './jobs/scheduler.js';
 import { secretEncryptionEnabled } from './utils/secretBox.js';
+import { limits } from './middleware/rateLimit.js';
 
 const app = express();
 /** Behind nginx/Cloudflare so req.ip / X-Forwarded-For reflect the customer (for sitePublicIp matching). */
@@ -110,7 +111,7 @@ app.use((req, _res, next) => {
 
 app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
-app.use('/api/public', publicPortalRouter);
+app.use('/api/public', limits.publicApi, publicPortalRouter);
 app.use('/api/payments/hubtel', hubtelPaymentsRouter);
 /** Legacy path kept so old MTN callback registrations still hit a handler if needed. */
 app.use('/api/payments/momo', hubtelPaymentsRouter);

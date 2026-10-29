@@ -599,15 +599,22 @@ export async function checkTransactionStatusWithHubtel(clientReference, opts = {
  * HUBTEL_TRUST_UNVERIFIED_CALLBACKS is on, or when a super admin has seen the payment Paid in Hubtel.
  * The held callback already carried the right amount; it is checked again here.
  */
-export async function releaseHeldCallbackPayment(clientReference, extra = {}) {
+export async function releaseHeldCallbackPayment(clientReference, extra = {}, { allowClientReported = false } = {}) {
   const ref = String(clientReference || '').trim();
   const tx = await Transaction.findOne({ clientReference: ref }).lean();
   if (!tx) return { ok: false, reason: 'not_found' };
   if (tx.status === 'paid') return { ok: true, duplicate: true, status: 'paid' };
-  if (tx.status !== 'pending' || !tx.meta?.callbackUnverified) return { ok: false, reason: 'not_held', status: tx.status };
-  const held = tx.meta.callback && typeof tx.meta.callback === 'object' ? tx.meta.callback : {};
-  const amt = hubtelAmountMatchesTx(held, tx.amountCents);
-  if (amt.skipped || !amt.ok) return { ok: false, reason: 'amount_mismatch' };
+  /* Only the payment screen said paid (a browser event anyone can send): a super admin who has
+     checked the Hubtel dashboard may confirm it; the trust flag never does. */
+  const clientOnly = !tx.meta?.callbackUnverified && Boolean(tx.meta?.clientReportedPaidAt);
+  if (tx.status !== 'pending' || !(tx.meta?.callbackUnverified || (allowClientReported && clientOnly))) {
+    return { ok: false, reason: 'not_held', status: tx.status };
+  }
+  const held = !clientOnly && tx.meta.callback && typeof tx.meta.callback === 'object' ? tx.meta.callback : {};
+  if (!clientOnly) {
+    const amt = hubtelAmountMatchesTx(held, tx.amountCents);
+    if (amt.skipped || !amt.ok) return { ok: false, reason: 'amount_mismatch' };
+  }
   console.warn('[hubtel.callback] releasing held callback without Status Check', { clientReference: ref, ...extra });
   const out = await markTransactionPaidByReference(ref, { ...held, paidUnverified: true, ...extra });
   const fresh = await Transaction.findById(tx._id).select('status').lean();
@@ -748,6 +755,8 @@ export async function recordHubtelClientCheckoutEvent({
       event: kind,
       payload,
     },
+    /* Sticky: later close/cancel events overwrite clientCheckoutEvent. Not proof of payment. */
+    ...(kind === 'success' && !tx.meta?.clientReportedPaidAt ? { clientReportedPaidAt: new Date().toISOString() } : {}),
   });
   await tx.save();
 
@@ -1186,7 +1195,7 @@ export async function expireStalePendingPayments({ maxAgeHours = 24, limit = 200
   })
     .sort({ createdAt: 1 })
     .limit(Math.min(500, Math.max(1, Number(limit) || 200)))
-    .select('clientReference meta.callbackUnverified')
+    .select('clientReference meta.callbackUnverified meta.clientReportedPaidAt')
     .lean();
 
   let expired = 0;
@@ -1206,8 +1215,9 @@ export async function expireStalePendingPayments({ maxAgeHours = 24, limit = 200
     } catch (e) {
       console.warn('[payments] stale status check failed', row.clientReference, e?.message || e);
     }
-    /* Hubtel sent a success callback we could not verify yet: keep it until Status Check answers. */
-    if (row.meta?.callbackUnverified && !checked) {
+    /* Hubtel (or the customer's payment screen) said paid but Status Check could not answer:
+       keep it, and on Needs attention, until it does or an admin confirms it. */
+    if ((row.meta?.callbackUnverified || row.meta?.clientReportedPaidAt) && !checked) {
       held += 1;
       continue;
     }

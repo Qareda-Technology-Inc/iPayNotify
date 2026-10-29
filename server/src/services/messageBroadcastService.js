@@ -12,16 +12,13 @@ import {
   intersectRecipientsByAudiencePhones,
   normalizeAudienceFlags,
 } from './messageRecipientService.js';
+import { publicRenewUrl } from '../utils/renewLink.js';
 import { renderMessageBody } from './messageTemplateService.js';
 import { resolveSmsBranding } from './smsRouterBranding.js';
 import { assertOrgLimit } from './orgLimitsService.js';
 import { logOrgAudit } from './orgAuditService.js';
 
 const MAX_ERROR_ROWS = 40;
-
-function publicRenewUrl() {
-  return `${String(config.publicAppUrl || '').replace(/\/$/, '') || 'http://localhost:5173'}/portal/renew`;
-}
 
 /** Per-recipient placeholders for broadcast SMS (renew ID, PPP secret, etc.). */
 function recipientTemplateVars(r) {
@@ -30,7 +27,7 @@ function recipientTemplateVars(r) {
     phone: r?.phone || '',
     secret: r?.secret || '',
     renew_code: r?.renewCode || '',
-    renew_url: publicRenewUrl(),
+    renew_url: publicRenewUrl(r?.renewCode),
   };
 }
 

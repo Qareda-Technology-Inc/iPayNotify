@@ -65,8 +65,15 @@ describe('stuck payments', () => {
     const noWallet = await createPendingTx(org, { status: 'paid', kind: 'voucher', meta: { fulfillment: 'done' } });
     await ageTransaction(noWallet, 1);
 
+    const customerSaysPaid = await createPendingTx(org, { meta: { clientReportedPaidAt: new Date().toISOString() } });
+    await ageTransaction(customerSaysPaid, 1);
     const items = await listStuckPayments({ organizationId: org._id });
-    expect(items.map((i) => i.reason).sort()).toEqual(['payment_unconfirmed', 'voucher_not_delivered', 'wallet_not_credited']);
+    expect(items.map((i) => i.reason).sort()).toEqual([
+      'payment_reported_by_customer',
+      'payment_unconfirmed',
+      'voucher_not_delivered',
+      'wallet_not_credited',
+    ]);
     const voucher = items.find((i) => i.reason === 'voucher_not_delivered');
     expect(voucher).toMatchObject({ lastError: 'router offline', voucherCode: '482193', customerPhone: '233241234567' });
   });

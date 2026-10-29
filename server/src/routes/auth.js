@@ -5,6 +5,7 @@ import { Admin } from '../models/index.js';
 import { normalizeGhanaMsisdn } from '../utils/phoneGhana.js';
 import { config } from '../config.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { limits } from '../middleware/rateLimit.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { attachOrganization } from '../middleware/attachOrganization.js';
 import { smtpReadyForSend, isSmtpConfigured } from '../integrations/mail.js';
@@ -63,6 +64,7 @@ authRouter.get(
 
 authRouter.post(
   '/setup',
+  limits.accountSetup,
   asyncHandler(async (req, res) => {
     const existing = await Admin.countDocuments();
     if (existing > 0) {
@@ -118,6 +120,7 @@ authRouter.get(
 
 authRouter.post(
   '/invite/accept',
+  limits.accountSetup,
   asyncHandler(async (req, res) => {
     const token = String(req.body?.token || '').trim();
     const password = req.body?.password;
@@ -146,6 +149,8 @@ authRouter.post(
 
 authRouter.post(
   '/login',
+  limits.loginPerIp,
+  limits.loginPerEmail,
   asyncHandler(async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -201,6 +206,7 @@ authRouter.post(
 
 authRouter.post(
   '/login/verify',
+  limits.loginPerIp,
   asyncHandler(async (req, res) => {
     if (!config.adminLoginVerify) {
       return res.status(400).json({ error: 'Login verification is not enabled on this server' });

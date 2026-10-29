@@ -136,6 +136,8 @@ export function SuperAdminOrganizationsPage() {
   const [editForm, setEditForm] = useState(EMPTY_EDIT);
   const [editBusy, setEditBusy] = useState(false);
   const [editErr, setEditErr] = useState('');
+  const [reminderBusy, setReminderBusy] = useState(false);
+  const [reminderMsg, setReminderMsg] = useState('');
 
   const [feeOpen, setFeeOpen] = useState(false);
   const [feeDraft, setFeeDraft] = useState('');
@@ -226,6 +228,7 @@ export function SuperAdminOrganizationsPage() {
 
   function openEdit(o) {
     setEditing(o);
+    setReminderMsg('');
     setEditForm({
       name: o.name || '',
       slug: o.slug || '',
@@ -242,6 +245,21 @@ export function SuperAdminOrganizationsPage() {
       paidUntil: o.platformBilling?.paidUntil ? String(o.platformBilling.paidUntil).slice(0, 10) : '',
     });
     setEditErr('');
+  }
+
+  async function sendReminder() {
+    if (!editing) return;
+    setReminderBusy(true);
+    setReminderMsg('');
+    try {
+      const out = await apiFetch(`/api/super-admin/organizations/${editing._id}/billing-reminder`, { method: 'POST' });
+      const what = { due_soon: 'due', past_due: 'overdue', suspended: 'suspended' }[out.kind] || 'bill';
+      setReminderMsg(`Sent (${what} notice): ${out.emails} email${out.emails === 1 ? '' : 's'}, ${out.sms} SMS.`);
+    } catch (e) {
+      setReminderMsg(e.message || 'Could not send the reminder');
+    } finally {
+      setReminderBusy(false);
+    }
   }
 
   async function submitEdit(e) {
@@ -755,6 +773,21 @@ export function SuperAdminOrganizationsPage() {
                       Blank = first bill due today. Moves forward automatically when they pay.
                     </span>
                   </label>
+                  {editing.platformBilling?.enabled ? (
+                    <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={sendReminder}
+                        disabled={reminderBusy}
+                        className="rounded-lg border border-amber-500/50 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-950/40 disabled:opacity-50"
+                      >
+                        {reminderBusy ? 'Sending…' : 'Send payment reminder now'}
+                      </button>
+                      <span className="text-[11px] text-slate-500">
+                        {reminderMsg || 'Emails and texts the organisation’s admins what they owe. Automatic reminders still go out.'}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </fieldset>

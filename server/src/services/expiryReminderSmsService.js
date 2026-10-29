@@ -8,12 +8,9 @@ import {
 import { config } from '../config.js';
 import { sendArkeselSms } from '../integrations/arkesel.js';
 import { normalizeGhanaMsisdn } from '../utils/phoneGhana.js';
+import { publicRenewUrl } from '../utils/renewLink.js';
 import { renderMessageBody } from './messageTemplateService.js';
 import { resolveSmsBranding } from './smsRouterBranding.js';
-
-function publicRenewUrl() {
-  return `${String(config.publicAppUrl || '').replace(/\/$/, '') || 'http://localhost:5173'}/portal/renew`;
-}
 
 /** Fallback when no org template exists for a tier. */
 export const DEFAULT_EXPIRY_REMINDER_SMS_BODY =
@@ -160,7 +157,7 @@ export async function runExpiryReminderSmsJob(options = {}) {
       package: pkgName,
       secret: String(secret || '').trim(),
       renew_code: code,
-      renew_url: publicRenewUrl(),
+      renew_url: publicRenewUrl(code),
       service_type: serviceType,
       days_left: daysLeftLabel,
       days_before: String(tier),

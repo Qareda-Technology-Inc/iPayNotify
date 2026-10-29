@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { afterAll, afterEach, beforeAll, inject, vi } from 'vitest';
 import '../../src/models/index.js';
 import { blockUnexpectedFetch } from '../helpers/network.js';
+import { resetRateLimits } from '../../src/middleware/rateLimit.js';
 
 beforeAll(async () => {
   const base = inject('mongoUri').replace(/\/?(\?.*)?$/, '');
@@ -13,6 +14,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  resetRateLimits();
   blockUnexpectedFetch();
   const collections = await mongoose.connection.db.collections();
   await Promise.all(collections.map((c) => c.deleteMany({})));
