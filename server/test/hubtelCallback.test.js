@@ -96,6 +96,13 @@ describe('Hubtel success callback', () => {
     expect((await reloadTx(tx)).status).toBe('pending');
   });
 
+  it('accepts a Paid amount that includes the customer’s MoMo charges', async () => {
+    hubtel.amountGhs = 5.1;
+    const tx = await createPendingTx(org);
+    await postCallback(successBody(tx, 5.1));
+    expect((await reloadTx(tx)).status).toBe('paid');
+  });
+
   it('marks a genuine payment paid and credits the wallet net of fee', async () => {
     const tx = await createPendingTx(org);
     const out = await postCallback(successBody(tx));

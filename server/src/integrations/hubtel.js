@@ -382,14 +382,16 @@ export function hubtelPayloadAmountGhs(payload) {
 
 /**
  * Compare Hubtel-reported amount to our pending tx (cents).
- * Returns { ok: true } when amount missing (cannot verify) or within 1 pesewa.
+ * Returns { ok: true, skipped: true } when the amount is missing (cannot verify). Otherwise ok when
+ * the customer paid at least the price (1 pesewa slack): when the customer bears the MoMo charges,
+ * Hubtel reports the price plus charges.
  */
 export function hubtelAmountMatchesTx(payload, amountCents) {
   const ghs = hubtelPayloadAmountGhs(payload);
   if (ghs == null) return { ok: true, skipped: true };
   const expected = Number(amountCents) || 0;
   const gotCents = Math.round(ghs * 100);
-  const ok = Math.abs(gotCents - expected) <= 1;
+  const ok = gotCents >= expected - 1;
   return { ok, skipped: false, expectedCents: expected, gotCents, amountGhs: ghs };
 }
 
