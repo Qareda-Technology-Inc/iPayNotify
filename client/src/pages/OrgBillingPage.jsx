@@ -106,8 +106,11 @@ export function OrgBillingPage() {
   if (!data.enabled) {
     return (
       <div className="mx-auto max-w-2xl space-y-2">
-        <h1 className="text-2xl font-semibold text-white">Billing</h1>
-        <p className="text-sm text-slate-400">There is no monthly platform charge set up for this organisation.</p>
+        <h1 className="text-2xl font-semibold text-white">Subscription</h1>
+        <p className="text-sm text-slate-400">
+          There is no monthly subscription set up for this organisation yet. Once the platform sets your price and
+          due date, your bill and the Pay button appear here.
+        </p>
       </div>
     );
   }
@@ -141,7 +144,7 @@ export function OrgBillingPage() {
       />
 
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Billing</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Subscription</h1>
         <p className="mt-1 text-sm text-slate-400">Your monthly platform charge: organisation fee plus a fee per router.</p>
       </div>
 

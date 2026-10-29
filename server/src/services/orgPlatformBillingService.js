@@ -111,9 +111,9 @@ async function notifyAdmins(org, kind, quote) {
   const suspendAt = suspendAtFor(org);
   const appUrl = config.publicAppUrl ? `${String(config.publicAppUrl).replace(/\/$/, '')}/org/billing` : '';
   const lines = {
-    due_soon: `${org.name}: your ${brand} bill of ${due} is due on ${paidUntil}. Pay in Billing to keep your account active.`,
+    due_soon: `${org.name}: your ${brand} bill of ${due} is due on ${paidUntil}. Pay under Subscription to keep your account active.`,
     past_due: `${org.name}: your ${brand} bill of ${due} is overdue. Pay by ${suspendAt ? suspendAt.toDateString() : 'soon'} to avoid suspension.`,
-    suspended: `${org.name}: your ${brand} account is suspended for an unpaid bill of ${due}. Remote access is off. Pay in Billing to restore it; customer sales continue.`,
+    suspended: `${org.name}: your ${brand} account is suspended for an unpaid bill of ${due}. Remote access is off. Pay under Subscription to restore it; customer sales continue.`,
   };
   const message = lines[kind];
   const subject = {
@@ -126,9 +126,9 @@ async function notifyAdmins(org, kind, quote) {
     title: subject.replace(/^[^\w]+/, ''),
     preheader: message,
     innerHtml: `<p style="margin:0 0 16px;">${escapeHtml(message)}</p>${
-      appUrl ? `<p style="margin:0;"><a href="${escapeHtml(appUrl)}" style="color:#34d399;">Open Billing</a></p>` : ''
+      appUrl ? `<p style="margin:0;"><a href="${escapeHtml(appUrl)}" style="color:#34d399;">Pay subscription</a></p>` : ''
     }`,
-    footerText: appUrl ? `Billing: ${appUrl}` : '',
+    footerText: appUrl ? `Subscription: ${appUrl}` : '',
   });
   await Promise.allSettled([
     ...emails.map((to) => sendSmtpMail({ to, subject, text: `${message}${appUrl ? `\n\n${appUrl}` : ''}`, html })),

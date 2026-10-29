@@ -33,7 +33,7 @@ export async function requireActiveOrganization(req, res, next) {
       }
       return res.status(403).json({
         error: unpaid
-          ? 'This organisation is suspended for an unpaid bill. Pay it in Billing to restore access.'
+          ? 'This organisation is suspended for an unpaid bill. Pay it under Subscription to restore access.'
           : 'This organisation is suspended. Contact the platform operator.',
         organizationStatus: org.status,
         billingLocked: unpaid,

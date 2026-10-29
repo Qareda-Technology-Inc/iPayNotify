@@ -222,9 +222,9 @@ export function AdminShell({ onSignOut }) {
           <NavGroup title="Tenant">
             <SideLink to="/">Dashboard</SideLink>
             <SideLink to="/org/settings">Organisation</SideLink>
-            {orgBilling?.enabled ? (
-              <SideLink to="/org/billing" accent={orgBilling.status === 'active' ? 'indigo' : 'amber'}>
-                Billing
+            {orgBilling ? (
+              <SideLink to="/org/billing" accent={!orgBilling.enabled || orgBilling.status === 'active' ? 'indigo' : 'amber'}>
+                Subscription
               </SideLink>
             ) : null}
             <SideLink to="/account">Account</SideLink>
@@ -383,7 +383,7 @@ export function AdminShell({ onSignOut }) {
                   : 'Your platform bill is overdue. Pay it to avoid suspension.'}
               </span>
               <Link to="/org/billing" className="font-semibold underline-offset-2 hover:underline">
-                Open Billing
+                Pay subscription
               </Link>
             </div>
           ) : null}
