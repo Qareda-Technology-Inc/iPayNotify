@@ -22,7 +22,7 @@ function agingBucket(s) {
   return '0–7 days';
 }
 
-export function TicketReportsPage() {
+export function TicketReportsPage({ embedded = false } = {}) {
   const { showSuccess } = useMessage();
   const [sites, setSites] = useState([]);
   const [siteId, setSiteId] = useState('');
@@ -144,12 +144,14 @@ export function TicketReportsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-white">Ticket reports</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          What sellers owe right now, and what was issued, collected and returned in the period you pick.
-        </p>
-      </div>
+      {embedded ? null : (
+        <div>
+          <h1 className="text-xl font-semibold text-white">Ticket reports</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            What sellers owe right now, and what was issued, collected and returned in the period you pick.
+          </p>
+        </div>
+      )}
 
       <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
         <label className="text-sm text-slate-300">

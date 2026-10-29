@@ -22,12 +22,10 @@ import { OrgBillingPage } from '../pages/OrgBillingPage.jsx';
 import { AccountPage } from '../pages/AccountPage.jsx';
 import { SuperAdminGate } from '../components/SuperAdminGate.jsx';
 import { RoleGate } from '../components/RoleGate.jsx';
-import { TicketSitesPage } from '../pages/tickets/TicketSitesPage.jsx';
-import { TicketTypesPage } from '../pages/tickets/TicketTypesPage.jsx';
+import { TicketSellersPage } from '../pages/tickets/TicketSellersPage.jsx';
 import { TicketIssuePage } from '../pages/tickets/TicketIssuePage.jsx';
 import { TicketCollectionsPage } from '../pages/tickets/TicketCollectionsPage.jsx';
-import { TicketReportsPage } from '../pages/tickets/TicketReportsPage.jsx';
-import { TicketSalesReportPage } from '../pages/tickets/TicketSalesReportPage.jsx';
+import { TicketReportPage } from '../pages/tickets/TicketReportPage.jsx';
 import { MessageProvider } from '../messages/MessageProvider.jsx';
 
 export function Dashboard({ onSignOut }) {
@@ -84,27 +82,18 @@ export function Dashboard({ onSignOut }) {
           }
         />
         <Route
-          path="tickets/sites"
+          path="tickets/sellers"
           element={
             <RoleGate
               allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}
               module="tickets"
             >
-              <TicketSitesPage />
+              <TicketSellersPage />
             </RoleGate>
           }
         />
-        <Route
-          path="tickets/types"
-          element={
-            <RoleGate
-              allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}
-              module="tickets"
-            >
-              <TicketTypesPage />
-            </RoleGate>
-          }
-        />
+        <Route path="tickets/sites" element={<Navigate to="/tickets/sellers" replace />} />
+        <Route path="tickets/types" element={<Navigate to="/tickets/issue" replace />} />
         <Route
           path="tickets/issue"
           element={
@@ -127,25 +116,19 @@ export function Dashboard({ onSignOut }) {
             </RoleGate>
           }
         />
+        <Route path="tickets/sales" element={<Navigate to="/tickets/report?view=sales" replace />} />
         <Route
-          path="tickets/sales"
-          element={
-            <RoleGate allow={['super_admin', 'org_admin', 'org_staff']} module="tickets">
-              <TicketSalesReportPage />
-            </RoleGate>
-          }
-        />
-        <Route
-          path="tickets/reports"
+          path="tickets/report"
           element={
             <RoleGate
               allow={['super_admin', 'org_admin', 'ticket_manager', 'org_staff']}
               module="tickets"
             >
-              <TicketReportsPage />
+              <TicketReportPage />
             </RoleGate>
           }
         />
+        <Route path="tickets/reports" element={<Navigate to="/tickets/report" replace />} />
         <Route
           path="finance/packages"
           element={

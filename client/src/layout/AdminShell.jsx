@@ -49,12 +49,10 @@ function headerTitleForPath(pathname) {
   const exact = {
     '/users/customers': 'Customers',
     '/users/active': 'Active users',
-    '/tickets/sites': 'Ticket sites',
-    '/tickets/types': 'Ticket types',
+    '/tickets/sellers': 'Sellers',
     '/tickets/issue': 'Issue tickets',
-    '/tickets/collections': 'Cash collections',
-    '/tickets/reports': 'Ticket reports',
-    '/tickets/sales': 'Ticket sales',
+    '/tickets/collections': 'Collections',
+    '/tickets/report': 'Ticket report',
     '/finance/pppoe': 'PPPoE',
     '/users/remote-access': 'Remote access',
     '/finance/packages': 'Packages',
@@ -272,22 +270,14 @@ export function AdminShell({ onSignOut }) {
               <SideLink to="/tickets/issue" accent="amber">
                 Issue tickets
               </SideLink>
+              <SideLink to="/tickets/sellers" accent="amber">
+                Sellers
+              </SideLink>
               <SideLink to="/tickets/collections" accent="amber">
                 Collections
               </SideLink>
-              {adminRole !== 'ticket_manager' ? (
-                <SideLink to="/tickets/sales" accent="amber">
-                  Sales
-                </SideLink>
-              ) : null}
-              <SideLink to="/tickets/reports" accent="amber">
-                Reports
-              </SideLink>
-              <SideLink to="/tickets/types" accent="amber">
-                Ticket types
-              </SideLink>
-              <SideLink to="/tickets/sites" accent="amber">
-                Ticket sites
+              <SideLink to="/tickets/report" accent="amber">
+                Report
               </SideLink>
             </NavGroup>
           ) : null}

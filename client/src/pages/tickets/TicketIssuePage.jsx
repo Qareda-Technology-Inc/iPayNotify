@@ -1,132 +1,122 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../../api.js';
 import { presetMessages, useMessage } from '../../messages/index.js';
 import { VOUCHER_DESIGNS } from '../../portal/designs.js';
 import { downloadVouchersPdf, sheetOptions } from '../../utils/exportVouchersPdf.js';
 import { money } from './common.js';
-import {
-  SellerOutstandingByTypePanel,
-  sellerOutstandingByTicketType,
-} from './SellerOutstandingByType.jsx';
+import { inputCls, useTicketOps } from './useTicketOps.js';
 
 function batchLabel(b) {
   const when = b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '';
-  return `${b.batchId || 'No batch'}${when ? ` · ${when}` : ''} · ${b.available} left`;
+  return `${b.batchId}${when ? ` · ${when}` : ''} · ${b.available} left`;
 }
 
+function Choice({ active, onClick, title, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-xl border px-3 py-2.5 text-left transition ${
+        active ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-700 bg-slate-950 hover:border-slate-500'
+      }`}
+    >
+      <span className="block text-sm font-semibold text-white">{title}</span>
+      {children ? <span className="mt-0.5 block text-xs text-slate-400">{children}</span> : null}
+    </button>
+  );
+}
+
+/**
+ * Issue tickets: site (router) → seller → source → plan and quantity.
+ * System codes are reserved for the seller and owed as customers use them; external tickets
+ * (made on another platform for the same router) are owed in full when issued.
+ */
 export function TicketIssuePage() {
   const { showSuccess } = useMessage();
-  const [stock, setStock] = useState(null);
-  const [stockLoading, setStockLoading] = useState(false);
+  const [params] = useSearchParams();
+  const { sites, loading, reload: reloadSites } = useTicketOps();
+  const [routerId, setRouterId] = useState(params.get('router') || '');
+  const [sellerId, setSellerId] = useState(params.get('seller') || '');
+  const [source, setSource] = useState('system');
+  const [plans, setPlans] = useState([]);
+  const [packageId, setPackageId] = useState('');
   const [batchId, setBatchId] = useState('');
-  const [wholeBatch, setWholeBatch] = useState(false);
+  const [quantity, setQuantity] = useState('');
+  const [price, setPrice] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
   const [lastIssue, setLastIssue] = useState(null);
+  const [recent, setRecent] = useState([]);
   const [printDesign, setPrintDesign] = useState('grid');
-  const [printTitle, setPrintTitle] = useState('');
   const [printSheet, setPrintSheet] = useState('auto');
   const [printBusy, setPrintBusy] = useState('');
-  const [sites, setSites] = useState([]);
-  const [types, setTypes] = useState([]);
-  const [sales, setSales] = useState([]);
-  const [siteSellers, setSiteSellers] = useState([]);
-  const [saleSiteId, setSaleSiteId] = useState('');
-  const [sellTypeId, setSellTypeId] = useState('');
-  /** 'saved' = pick from TicketSiteSeller; 'legacy' = free-text name (no site seller row). */
-  const [sellerMode, setSellerMode] = useState('saved');
-  const [ticketSiteSellerId, setTicketSiteSellerId] = useState('');
-  const [sellerName, setSellerName] = useState('');
-  const [quantity, setQuantity] = useState(1);
-  const [sellerPhone, setSellerPhone] = useState('');
-  const [note, setNote] = useState('');
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [sellerOpenIssues, setSellerOpenIssues] = useState([]);
-  const [outstandingLoading, setOutstandingLoading] = useState(false);
 
-  async function load() {
-    setErr('');
-    try {
-      const [s, t, issued] = await Promise.all([
-        apiFetch('/api/ticket-sales/sites'),
-        apiFetch('/api/ticket-sales/types'),
-        apiFetch('/api/ticket-sales/sales?kind=issued&limit=60'),
-      ]);
-      const ss = Array.isArray(s) ? s : [];
-      setSites(ss);
-      setTypes(Array.isArray(t) ? t : []);
-      setSales(Array.isArray(issued) ? issued : []);
-      if (!saleSiteId && ss.length > 0) setSaleSiteId(String(ss[0]._id));
-    } catch (e) {
-      setErr(e.message || 'Could not load issue form');
-    }
-  }
+  const routerSites = useMemo(() => sites.filter((s) => s.routerId), [sites]);
+  const site = routerSites.find((s) => s.routerId === routerId);
+  const sellers = useMemo(() => (site?.sellers || []).filter((s) => s.active && s._id), [site]);
+  const seller = sellers.find((s) => s._id === sellerId);
+  const plan = plans.find((p) => p._id === packageId);
+  const batches = plan?.batches || [];
+  const batch = batches.find((b) => b.batchId === batchId);
+  const qty = Math.max(0, Math.round(Number(quantity) || 0));
+  const unitCents = source === 'external' ? Math.round((Number(price) || 0) * 100) : plan?.priceCents || 0;
+  const available = batch ? batch.available : plan?.available || 0;
+  const shortStock = source === 'system' && plan && qty > available;
 
-  async function loadSiteSellers(siteId) {
-    if (!siteId) {
-      setSiteSellers([]);
+  useEffect(() => {
+    if (!routerId && routerSites.length === 1) setRouterId(routerSites[0].routerId);
+  }, [routerSites, routerId]);
+
+  useEffect(() => {
+    /* Keep a seller from the link (?seller=) until the site's sellers have loaded. */
+    if (!site) return;
+    if (sellerId && !sellers.some((s) => s._id === sellerId)) setSellerId('');
+    if (!sellerId && sellers.length === 1) setSellerId(sellers[0]._id);
+  }, [sellers, sellerId]);
+
+  async function loadPlans(id) {
+    if (!id) {
+      setPlans([]);
       return;
     }
     try {
-      const rows = await apiFetch(`/api/ticket-sales/sites/${encodeURIComponent(siteId)}/sellers`);
-      const list = Array.isArray(rows) ? rows : [];
-      setSiteSellers(list);
-      const active = list.filter((x) => x.active !== false);
-      if (active.length === 0) {
-        setSellerMode('legacy');
-        setTicketSiteSellerId('');
-        return;
-      }
-      if (!ticketSiteSellerId || !active.some((x) => String(x._id) === String(ticketSiteSellerId))) {
-        const first = active[0];
-        setTicketSiteSellerId(String(first._id));
-        setSellerPhone(String(first.phone || '').trim());
-      }
+      const d = await apiFetch(`/api/ticket-sales/ops/routers/${id}/plans`);
+      setPlans(Array.isArray(d?.plans) ? d.plans : []);
+    } catch (e) {
+      setErr(e.message || 'Could not load plans');
+    }
+  }
+
+  async function loadRecent() {
+    try {
+      const rows = await apiFetch('/api/ticket-sales/sales?kind=issued&limit=15');
+      setRecent(Array.isArray(rows) ? rows : []);
     } catch {
-      setSiteSellers([]);
-      setSellerMode('legacy');
-      setTicketSiteSellerId('');
+      /* the list is a convenience */
     }
   }
 
   useEffect(() => {
-    load();
-    apiFetch('/api/organization')
-      .then((o) => {
-        const id = o?.billing?.voucherDesign;
-        if (VOUCHER_DESIGNS.some((d) => d.id === id)) setPrintDesign(id);
-        setPrintTitle(String(o?.billing?.voucherTitle || '').trim());
-        setPrintSheet(o?.billing?.voucherSheet || 'auto');
-      })
-      .catch(() => {});
-  }, []);
+    loadPlans(routerId);
+    setPackageId('');
+  }, [routerId]);
 
-  async function loadStock(typeId) {
-    if (!typeId) {
-      setStock(null);
-      return;
-    }
-    setStockLoading(true);
-    try {
-      setStock(await apiFetch(`/api/ticket-sales/types/${encodeURIComponent(typeId)}/stock`));
-    } catch {
-      setStock(null);
-    } finally {
-      setStockLoading(false);
-    }
-  }
+  useEffect(() => {
+    loadRecent();
+  }, []);
 
   useEffect(() => {
     setBatchId('');
-    setWholeBatch(false);
-    loadStock(sellTypeId);
-  }, [sellTypeId]);
+    if (plan) setPrice((plan.priceCents / 100).toFixed(2));
+  }, [packageId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function printCodes(codes, label) {
     setErr('');
     try {
       const { printed, skipped } = downloadVouchersPdf(codes, {
-        title: printTitle || 'Wi‑Fi Access',
+        title: 'Wi‑Fi Access',
         design: printDesign,
         sheet: printSheet,
         filename: `issued-${String(label || 'tickets').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${Date.now()}.pdf`,
@@ -149,329 +139,205 @@ export function TicketIssuePage() {
     }
   }
 
-  useEffect(() => {
-    if (!saleSiteId) return;
-    loadSiteSellers(saleSiteId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saleSiteId]);
-
-  const options = useMemo(
-    () => types.filter((t) => t.active && (!saleSiteId || String(t.siteId) === String(saleSiteId))),
-    [types, saleSiteId]
-  );
-  const sellType = useMemo(() => types.find((t) => String(t._id) === String(sellTypeId)), [types, sellTypeId]);
-  const linked = Boolean(stock?.linked);
-  const namedBatches = useMemo(() => (stock?.batches || []).filter((b) => b.batchId), [stock]);
-  const selectedBatch = useMemo(() => namedBatches.find((b) => b.batchId === batchId), [namedBatches, batchId]);
-  const issueQty = linked && wholeBatch && selectedBatch ? selectedBatch.available : Number(quantity || 0);
-  const available = linked ? (selectedBatch ? selectedBatch.available : Number(stock?.available || 0)) : null;
-  const shortStock = linked && issueQty > available;
-  const activeSiteSellers = useMemo(() => siteSellers.filter((x) => x.active !== false), [siteSellers]);
-  const selectedSiteSeller = useMemo(
-    () => activeSiteSellers.find((x) => String(x._id) === String(ticketSiteSellerId)),
-    [activeSiteSellers, ticketSiteSellerId]
-  );
-  const effectiveSellerName =
-    sellerMode === 'saved' && selectedSiteSeller
-      ? String(selectedSiteSeller.name || '').trim()
-      : String(sellerName || '').trim();
-
-  const outstandingBreakdown = useMemo(
-    () => sellerOutstandingByTicketType(options, sellerOpenIssues),
-    [options, sellerOpenIssues]
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    const site = String(saleSiteId || '').trim();
-    const seller = String(effectiveSellerName || '').trim();
-    if (!site || !seller) {
-      setSellerOpenIssues([]);
-      setOutstandingLoading(false);
-      return undefined;
-    }
-    setOutstandingLoading(true);
-    const qs = new URLSearchParams({ siteId: site, sellerName: seller });
-    apiFetch(`/api/ticket-sales/issues/open?${qs}`)
-      .then((rows) => {
-        if (!cancelled) setSellerOpenIssues(Array.isArray(rows) ? rows : []);
-      })
-      .catch(() => {
-        if (!cancelled) setSellerOpenIssues([]);
-      })
-      .finally(() => {
-        if (!cancelled) setOutstandingLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [saleSiteId, effectiveSellerName]);
-
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
     setErr('');
     try {
-      const body = {
-        ticketTypeId: sellTypeId,
-        quantity: linked && wholeBatch && selectedBatch ? selectedBatch.available : Number(quantity),
-        note: note.trim() || undefined,
-      };
-      if (linked && batchId) body.batchId = batchId;
-      if (sellerMode === 'saved' && ticketSiteSellerId) {
-        body.ticketSiteSellerId = ticketSiteSellerId;
-        if (sellerPhone.trim()) body.sellerPhone = sellerPhone.trim();
-      } else {
-        body.sellerName = String(sellerName || '').trim();
-        if (sellerPhone.trim()) body.sellerPhone = sellerPhone.trim();
-      }
-      const issued = await apiFetch('/api/ticket-sales/sales', {
+      const issued = await apiFetch('/api/ticket-sales/ops/issue', {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          routerId,
+          sellerId,
+          packageId,
+          quantity: qty,
+          source,
+          ...(source === 'external' ? { unitPriceCents: unitCents } : batchId ? { batchId } : {}),
+          note: note.trim() || undefined,
+        }),
       });
       showSuccess(presetMessages.ticketsIssued);
-      setLastIssue({ ...issued, typeLabel: sellType?.label || 'Ticket' });
-      setSellerName('');
-      setQuantity(1);
-      setSellerPhone('');
+      setLastIssue({ ...issued, planName: plan?.name || 'Ticket' });
+      setQuantity('');
       setNote('');
-      setWholeBatch(false);
-      await Promise.all([load(), loadSiteSellers(saleSiteId), loadStock(sellTypeId)]);
+      await Promise.all([loadPlans(routerId), loadRecent(), reloadSites()]);
     } catch (e2) {
-      setErr(e2.message || 'Could not save issued tickets');
+      setErr(e2.message || 'Could not issue the tickets');
     } finally {
       setBusy(false);
     }
   }
 
+  const canIssue = Boolean(routerId && seller && plan && qty > 0 && !shortStock && (source === 'system' || unitCents >= 0));
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-white">Issue tickets</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Record ticket batches issued to sellers. Manage{' '}
-          <Link to="/tickets/sites" className="text-emerald-400 underline hover:text-emerald-300">
-            sellers per site
-          </Link>{' '}
-          under Ticket sites.
-        </p>
+        <p className="mt-1 text-sm text-slate-400">Give tickets to a seller at a site. The seller gets an SMS with what they received.</p>
       </div>
-      {err && <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{err}</p>}
-      <form onSubmit={submit} className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 grid gap-3 sm:grid-cols-2">
-        <label className="text-sm text-slate-300">
-          Site
-          <select
-            value={saleSiteId}
-            onChange={(e) => {
-              setSaleSiteId(e.target.value);
-              setSellTypeId('');
-            }}
-            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-          >
-            <option value="">Select site…</option>
-            {sites.filter((s) => s.active !== false).map((s) => (
-              <option key={s._id} value={s._id}>
+      {err ? <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{err}</p> : null}
+
+      <form onSubmit={submit} className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <label className="block text-sm text-slate-300">
+          1. Site
+          <select value={routerId} onChange={(e) => setRouterId(e.target.value)} className={inputCls}>
+            <option value="">{loading ? 'Loading…' : 'Choose a site…'}</option>
+            {routerSites.map((s) => (
+              <option key={s.routerId} value={s.routerId}>
                 {s.name}
               </option>
             ))}
           </select>
         </label>
-        <label className="text-sm text-slate-300">
-          Ticket type
-          <select value={sellTypeId} onChange={(e) => setSellTypeId(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
-            <option value="">Select ticket…</option>
-            {options.map((t) => (
-              <option key={t._id} value={t._id}>
-                {t.label} - {money(t.priceCents)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="text-sm text-slate-300 sm:col-span-2">
-          Receiver / seller
-          <div className="mt-1 grid gap-2 sm:grid-cols-2">
-            <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
-              <input
-                type="radio"
-                name="sellerMode"
-                checked={sellerMode === 'saved'}
-                onChange={() => setSellerMode('saved')}
-                disabled={activeSiteSellers.length === 0}
-              />
-              <span>Saved seller for this site</span>
-            </label>
-            <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
-              <input type="radio" name="sellerMode" checked={sellerMode === 'legacy'} onChange={() => setSellerMode('legacy')} />
-              <span>One-off name (not saved)</span>
-            </label>
-          </div>
-          {sellerMode === 'saved' ? (
-            <select
-              value={ticketSiteSellerId}
-              onChange={(e) => {
-                const id = e.target.value;
-                setTicketSiteSellerId(id);
-                const row = activeSiteSellers.find((x) => String(x._id) === id);
-                setSellerPhone(String(row?.phone || '').trim());
-              }}
-              disabled={activeSiteSellers.length === 0}
-              className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 disabled:opacity-60"
-            >
-              {activeSiteSellers.length === 0 ? (
-                <option value="">No sellers for this site yet — add under Ticket sites</option>
-              ) : (
-                activeSiteSellers.map((row) => (
-                  <option key={row._id} value={row._id}>
-                    {row.name}
-                    {row.phone ? ` · ${row.phone}` : ''}
-                  </option>
-                ))
-              )}
-            </select>
-          ) : (
-            <input
-              value={sellerName}
-              onChange={(e) => setSellerName(e.target.value)}
-              required={sellerMode === 'legacy'}
-              placeholder="Enter receiver name"
-              className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-            />
-          )}
-        </div>
-        <SellerOutstandingByTypePanel
-          heading="Outstanding by ticket type (this seller)"
-          contextLine={
-            saleSiteId && String(effectiveSellerName || '').trim()
-              ? `${String(effectiveSellerName).trim()} · ${sites.find((s) => String(s._id) === String(saleSiteId))?.name || 'Site'}`
-              : ''
-          }
-          placeholder="Select site and receiver to see remaining quantity and amount for each ticket type."
-          breakdown={outstandingBreakdown}
-          loading={outstandingLoading}
-        />
-        {sellTypeId ? (
-          <div
-            className={`sm:col-span-2 rounded-lg border px-3 py-2 text-sm ${
-              linked ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-100' : 'border-slate-700 bg-slate-950 text-slate-400'
-            }`}
-          >
-            {stockLoading ? (
-              'Checking ticket stock…'
-            ) : linked ? (
-              <>
-                <strong>{stock.available}</strong> unused hotspot code{stock.available === 1 ? '' : 's'} ready to hand out. The
-                seller owes for each code once a customer uses it.
-                {stock.available === 0 ? (
-                  <>
-                    {' '}
-                    <Link to="/hotspot" className="text-emerald-300 underline">
-                      Generate tickets
-                    </Link>{' '}
-                    for this plan first.
-                  </>
-                ) : null}
-              </>
+
+        {routerId ? (
+          <div className="text-sm text-slate-300">
+            2. Seller
+            {sellers.length ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {sellers.map((s) => (
+                  <Choice key={s._id} active={s._id === sellerId} onClick={() => setSellerId(s._id)} title={s.name}>
+                    holding {s.holdingQty}
+                    {s.balanceCents > 0 ? ` · owes ${money(s.balanceCents)}` : ''}
+                  </Choice>
+                ))}
+              </div>
             ) : (
-              <>
-                Count only: no hotspot codes are attached, so the seller owes for every ticket issued. To hand out real codes, link
-                this type to a hotspot plan under{' '}
-                <Link to="/tickets/types" className="text-emerald-400 underline">
-                  Ticket types
-                </Link>{' '}
-                and the site to a router under{' '}
-                <Link to="/tickets/sites" className="text-emerald-400 underline">
-                  Ticket sites
+              <p className="mt-2 text-sm text-slate-500">
+                No sellers at this site yet.{' '}
+                <Link to="/tickets/sellers" className="text-emerald-400 underline">
+                  Add a seller
                 </Link>
-                .
-              </>
+              </p>
             )}
           </div>
         ) : null}
-        {linked && namedBatches.length > 0 ? (
-          <label className="text-sm text-slate-300">
-            Print batch
-            <select
-              value={batchId}
-              onChange={(e) => {
-                setBatchId(e.target.value);
-                if (!e.target.value) setWholeBatch(false);
-              }}
-              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-            >
-              <option value="">Any (oldest codes first)</option>
-              {namedBatches.map((b) => (
-                <option key={b.batchId} value={b.batchId}>
-                  {batchLabel(b)}
-                </option>
-              ))}
-            </select>
-            {selectedBatch ? (
-              <span className="mt-1 flex items-center gap-2 text-xs text-slate-400">
-                <input type="checkbox" checked={wholeBatch} onChange={(e) => setWholeBatch(e.target.checked)} />
-                Issue the whole batch ({selectedBatch.available})
-              </span>
-            ) : null}
-          </label>
+
+        {seller ? (
+          <div className="text-sm text-slate-300">
+            3. Tickets
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <Choice active={source === 'system'} onClick={() => setSource('system')} title="Codes from this system">
+                Printed from here. The seller pays for each one a customer uses.
+              </Choice>
+              <Choice active={source === 'external'} onClick={() => setSource('external')} title="External tickets">
+                Made on another platform for this router. The seller owes for all of them now.
+              </Choice>
+            </div>
+          </div>
         ) : null}
-        <label className="text-sm text-slate-300">
-          Quantity
-          <input
-            type="number"
-            min={1}
-            value={linked && wholeBatch && selectedBatch ? selectedBatch.available : quantity}
-            disabled={linked && wholeBatch && Boolean(selectedBatch)}
-            onChange={(e) => setQuantity(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 disabled:opacity-60"
-          />
-          {shortStock ? (
-            <span className="mt-1 block text-xs text-amber-300">Only {available} in stock.</span>
-          ) : null}
-        </label>
-        <label className="text-sm text-slate-300 sm:col-span-2">
-          Receiver mobile (Ghana SMS, optional — overrides saved seller phone when using saved seller)
-          <input
-            value={sellerPhone}
-            onChange={(e) => setSellerPhone(e.target.value)}
-            placeholder="e.g. 054… or 233…"
-            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-          />
-          <span className="mt-1 block text-xs text-slate-500">SMS includes quantity and total amount issued.</span>
-        </label>
-        <label className="text-sm text-slate-300 sm:col-span-2">
-          Note (optional)
-          <input value={note} onChange={(e) => setNote(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-        </label>
-        <div className="sm:col-span-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-300">
-          Face value: <strong className="text-white">{money((sellType?.priceCents || 0) * issueQty)}</strong>
-          {linked ? <span className="text-slate-500"> · owed as codes get used</span> : null}
-        </div>
+
+        {seller ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-sm text-slate-300">
+              4. Plan
+              <select value={packageId} onChange={(e) => setPackageId(e.target.value)} className={inputCls}>
+                <option value="">Choose a plan…</option>
+                {plans.map((p) => (
+                  <option key={p._id} value={p._id}>
+                    {p.name} · {money(p.priceCents)}
+                    {source === 'system' ? ` · ${p.available} ready` : ''}
+                  </option>
+                ))}
+              </select>
+              {source === 'system' && plan && !plan.available ? (
+                <span className="mt-1 block text-xs text-amber-300">
+                  No unused codes for this plan on this router.{' '}
+                  <Link to="/hotspot" className="underline">
+                    Generate tickets
+                  </Link>{' '}
+                  first.
+                </span>
+              ) : null}
+            </label>
+            {source === 'system' && batches.length ? (
+              <label className="text-sm text-slate-300">
+                Print batch (optional)
+                <select value={batchId} onChange={(e) => setBatchId(e.target.value)} className={inputCls}>
+                  <option value="">Any, oldest codes first</option>
+                  {batches.map((b) => (
+                    <option key={b.batchId} value={b.batchId}>
+                      {batchLabel(b)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {source === 'external' && plan ? (
+              <label className="text-sm text-slate-300">
+                Price per ticket (GHS)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  className={inputCls}
+                />
+              </label>
+            ) : null}
+            <label className="text-sm text-slate-300">
+              Quantity
+              <input
+                type="number"
+                min="1"
+                inputMode="numeric"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder={source === 'system' && plan ? `up to ${available}` : 'e.g. 50'}
+                className={inputCls}
+              />
+              {shortStock ? <span className="mt-1 block text-xs text-amber-300">Only {available} ready.</span> : null}
+              {source === 'system' && batch && !shortStock ? (
+                <button
+                  type="button"
+                  onClick={() => setQuantity(String(batch.available))}
+                  className="mt-1 text-xs text-emerald-400 hover:text-emerald-300"
+                >
+                  Whole batch ({batch.available})
+                </button>
+              ) : null}
+            </label>
+            <label className="text-sm text-slate-300">
+              Note (optional)
+              <input value={note} onChange={(e) => setNote(e.target.value)} className={inputCls} />
+            </label>
+          </div>
+        ) : null}
+
+        {seller && plan && qty > 0 ? (
+          <div className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300">
+            <strong className="text-white">{seller.name}</strong> receives {qty} × {plan.name} ({money(unitCents)} each,{' '}
+            {money(unitCents * qty)} in total).{' '}
+            {source === 'system' ? (
+              <span className="text-slate-400">They owe as customers use the codes.</span>
+            ) : (
+              <span className="text-amber-200">They owe {money(unitCents * qty)} now.</span>
+            )}
+          </div>
+        ) : null}
+
         <button
           type="submit"
-          disabled={
-            busy ||
-            !sellTypeId ||
-            stockLoading ||
-            shortStock ||
-            issueQty < 1 ||
-            (sellerMode === 'saved' && (!ticketSiteSellerId || activeSiteSellers.length === 0)) ||
-            (sellerMode === 'legacy' && !String(sellerName || '').trim())
-          }
-          className="sm:col-span-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-50"
+          disabled={busy || !canIssue}
+          className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 sm:w-auto sm:px-6"
         >
-          {busy ? 'Issuing…' : linked ? `Issue ${issueQty || ''} code${issueQty === 1 ? '' : 's'}` : 'Save issued tickets'}
+          {busy ? 'Issuing…' : qty > 0 ? `Issue ${qty} ticket${qty === 1 ? '' : 's'}` : 'Issue tickets'}
         </button>
       </form>
+
       {lastIssue ? (
         <section className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-lg text-white">
-                Issued {lastIssue.quantity} × {lastIssue.typeLabel} to {lastIssue.sellerName}
+                Issued {lastIssue.quantity} × {lastIssue.planName} to {lastIssue.sellerName}
               </h2>
               <p className="mt-1 text-sm text-slate-400">
-                {lastIssue.linked
+                {lastIssue.codes?.length
                   ? 'Print these codes and hand them over. They are now reserved for this seller.'
-                  : 'Count-only issue recorded.'}
+                  : `External tickets recorded. ${lastIssue.sellerName} owes ${money(lastIssue.amountCents)}.`}
               </p>
             </div>
             <button type="button" onClick={() => setLastIssue(null)} className="text-sm text-slate-400 hover:text-white">
@@ -511,7 +377,7 @@ export function TicketIssuePage() {
                 </label>
                 <button
                   type="button"
-                  onClick={() => printCodes(lastIssue.codes, `${lastIssue.sellerName}-${lastIssue.typeLabel}`)}
+                  onClick={() => printCodes(lastIssue.codes, `${lastIssue.sellerName}-${lastIssue.planName}`)}
                   className="rounded-lg bg-emerald-600 px-3 py-2 text-sm text-white hover:bg-emerald-500"
                 >
                   Download PDF
@@ -528,17 +394,22 @@ export function TicketIssuePage() {
           ) : null}
         </section>
       ) : null}
+
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-        <h2 className="text-lg text-white">Recent issued batches</h2>
-        <ul className="mt-3 space-y-2 text-sm text-slate-300">
-          {sales.map((s) => (
-            <li key={s._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 px-3 py-2">
+        <h2 className="text-lg text-white">Recently issued</h2>
+        <ul className="mt-3 divide-y divide-slate-800 text-sm text-slate-300">
+          {recent.map((s) => (
+            <li key={s._id} className="flex flex-wrap items-center justify-between gap-2 py-2">
               <span>
-                {new Date(s.soldAt || s.createdAt).toLocaleDateString()} · {s.siteId?.name || 'Site'} ·{' '}
-                {s.ticketTypeId?.label || 'Ticket'} · {s.sellerName || '—'} · Qty {s.quantity} · {money(s.amountCents)}
-                {s.linked ? (
-                  <span className="ml-2 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-300">codes</span>
-                ) : null}
+                {new Date(s.soldAt || s.createdAt).toLocaleDateString()} · {s.siteId?.name || 'Site'} · {s.sellerName} ·{' '}
+                {s.quantity} × {s.ticketTypeId?.label || 'Ticket'} · {money(s.amountCents)}
+                <span
+                  className={`ml-2 rounded px-1.5 py-0.5 text-[11px] ${
+                    s.linked ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-200'
+                  }`}
+                >
+                  {s.linked ? 'system codes' : s.external ? 'external' : 'count only'}
+                </span>
               </span>
               {s.linked ? (
                 <button
@@ -552,7 +423,7 @@ export function TicketIssuePage() {
               ) : null}
             </li>
           ))}
-          {sales.length === 0 && <li className="text-slate-500">No issued entries yet.</li>}
+          {!recent.length ? <li className="py-2 text-slate-500">Nothing issued yet.</li> : null}
         </ul>
       </section>
     </div>

@@ -304,15 +304,28 @@ async function resolveSeller(organizationId, siteId, { ticketSiteSellerId, selle
 
 /**
  * Hand tickets to a seller. For linked types the oldest unused, unissued codes are claimed
- * (optionally only from one print batch). Returns { issue, codes }.
+ * (optionally only from one print batch). `external` issues tickets made on another platform:
+ * no codes are claimed and the seller owes for all of them (count-only), at `unitPriceCents`
+ * when given. Returns { issue, codes }.
  */
-export async function issueTickets({ organizationId, admin, ticketTypeId, quantity, batchId, seller, note }) {
+export async function issueTickets({
+  organizationId,
+  admin,
+  ticketTypeId,
+  quantity,
+  batchId,
+  seller,
+  note,
+  external = false,
+  unitPriceCents,
+}) {
   if (!mongoose.isValidObjectId(String(ticketTypeId))) throw fail('Choose a ticket type');
   const tt = await TicketType.findOne({ _id: ticketTypeId, organizationId, active: true }).lean();
   if (!tt) throw fail('Active ticket type not found', 404);
   const who = await resolveSeller(organizationId, tt.siteId, seller || {});
-  const src = await linkedSourceForType(organizationId, tt);
-  const price = Math.round(Number(tt.priceCents || 0));
+  const src = external ? null : await linkedSourceForType(organizationId, tt);
+  const price =
+    external && unitPriceCents != null ? Math.max(0, Math.round(Number(unitPriceCents) || 0)) : Math.round(Number(tt.priceCents || 0));
 
   let qty = Math.round(Number(quantity) || 0);
   let pickIds = [];
@@ -348,6 +361,7 @@ export async function issueTickets({ organizationId, admin, ticketTypeId, quanti
     unitPriceCents: price,
     amountCents: price * qty,
     linked: Boolean(src),
+    ...(external ? { external: true } : {}),
     ...(src ? { routerId: src.routerId, packageId: src.packageId } : {}),
     ...(note ? { note } : {}),
   });

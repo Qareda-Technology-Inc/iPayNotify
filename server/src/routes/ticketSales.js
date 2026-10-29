@@ -28,6 +28,12 @@ import {
   voidEntry,
 } from '../services/ticketLedgerService.js';
 import { ticketSalesReport } from '../services/ticketSalesReportService.js';
+import {
+  addSellerAtRouter,
+  issueAtRouter,
+  plansForRouter,
+  ticketOpsOverview,
+} from '../services/ticketOpsService.js';
 import { orgQuery } from '../utils/tenantScope.js';
 
 export const ticketSalesRouter = express.Router();
@@ -72,6 +78,76 @@ ticketSalesRouter.use(
   requireRoles('super_admin', 'org_admin', 'ticket_manager', 'org_staff')
 );
 ticketSalesRouter.use(requireOrgModule('tickets'));
+
+/* ---------- By router: each router is a ticket site, its hotspot plans are the ticket types ---------- */
+
+/** Sites (routers) with their sellers and each seller's current position. */
+ticketSalesRouter.get(
+  '/ops/overview',
+  asyncHandler(async (req, res) => {
+    /* Ticket managers see the balances of what they issued, as on the other ticket pages. */
+    const onlyIssuedBy = req.admin.role === 'ticket_manager' ? req.admin.id : null;
+    res.json({ sites: await ticketOpsOverview(req.organizationId, { onlyIssuedBy }) });
+  })
+);
+
+ticketSalesRouter.post(
+  '/ops/routers/:routerId/sellers',
+  requireRoles('super_admin', 'org_admin', 'ticket_manager'),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.routerId)) return res.status(400).json({ error: 'Invalid router' });
+    const doc = await addSellerAtRouter(req.organizationId, req.params.routerId, req.body || {});
+    res.status(201).json(doc);
+  })
+);
+
+/** Plans that can be issued at a router, with system codes ready for each. */
+ticketSalesRouter.get(
+  '/ops/routers/:routerId/plans',
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.routerId)) return res.status(400).json({ error: 'Invalid router' });
+    res.json({ plans: await plansForRouter(req.organizationId, req.params.routerId) });
+  })
+);
+
+ticketSalesRouter.post(
+  '/ops/issue',
+  asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const { issue, codes } = await issueAtRouter({
+      organizationId: req.organizationId,
+      admin: req.admin,
+      routerId: String(b.routerId || ''),
+      sellerId: String(b.sellerId || ''),
+      packageId: String(b.packageId || ''),
+      quantity: b.quantity,
+      source: b.source === 'external' ? 'external' : 'system',
+      unitPriceCents: b.unitPriceCents,
+      batchId: b.batchId,
+      note: String(b.note || '').trim(),
+    });
+    notifyTicketTransactionUpdate({
+      organizationId: req.organizationId,
+      actorAdminId: req.admin.id,
+      eventKind: 'issued',
+      saleId: issue._id,
+    });
+    void logOrgAudit({
+      organizationId: req.organizationId,
+      actorEmail: req.admin?.email,
+      action: 'ticket.issue',
+      meta: {
+        saleId: String(issue._id),
+        quantity: issue.quantity,
+        amountCents: issue.amountCents,
+        sellerName: issue.sellerName,
+        linked: issue.linked,
+        external: Boolean(issue.external),
+      },
+    });
+    res.status(201).json({ ...issue, codes });
+  })
+);
 
 ticketSalesRouter.get(
   '/sites',

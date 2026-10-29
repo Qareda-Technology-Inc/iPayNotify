@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../../api.js';
 import { presetMessages, useMessage } from '../../messages/index.js';
 import { money } from './common.js';
@@ -32,12 +33,15 @@ function groupCollections(rows) {
 
 export function TicketCollectionsPage() {
   const { showSuccess } = useMessage();
+  const [params] = useSearchParams();
+  const linkedSeller = params.get('seller') || '';
   const [sites, setSites] = useState([]);
-  const [siteId, setSiteId] = useState('');
-  const [sellers, setSellers] = useState([]);
-  const [sellersLoading, setSellersLoading] = useState(false);
+  /* A site is a router (it may hold several older ticket sites): filter by all of its site ids. */
+  const [siteKey, setSiteKey] = useState('');
+  const [allSellers, setAllSellers] = useState([]);
+  const [sellersLoading, setSellersLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [sellerKey, setSellerKey] = useState('');
+  const [sellerKey, setSellerKey] = useState(linkedSeller);
   const [issues, setIssues] = useState([]);
   const [issuesLoading, setIssuesLoading] = useState(false);
   const [collections, setCollections] = useState([]);
@@ -52,12 +56,11 @@ export function TicketCollectionsPage() {
   const [busy, setBusy] = useState(false);
   const collectRef = useRef(null);
 
-  const loadSellers = useCallback(async (site) => {
+  const loadSellers = useCallback(async () => {
     setSellersLoading(true);
     try {
-      const qs = site ? `?siteId=${encodeURIComponent(site)}` : '';
-      const rows = await apiFetch(`/api/ticket-sales/seller-balances${qs}`);
-      setSellers(Array.isArray(rows) ? rows : []);
+      const rows = await apiFetch('/api/ticket-sales/seller-balances');
+      setAllSellers(Array.isArray(rows) ? rows : []);
     } catch (e) {
       setErr(e.message || 'Could not load sellers');
     } finally {
@@ -91,15 +94,23 @@ export function TicketCollectionsPage() {
   }, []);
 
   useEffect(() => {
-    apiFetch('/api/ticket-sales/sites')
-      .then((s) => setSites(Array.isArray(s) ? s : []))
+    apiFetch('/api/ticket-sales/ops/overview')
+      .then((d) => setSites(Array.isArray(d?.sites) ? d.sites.filter((x) => x.sellers.length) : []))
       .catch((e) => setErr(e.message || 'Could not load sites'));
     loadCollections();
-  }, [loadCollections]);
+    loadSellers();
+  }, [loadCollections, loadSellers]);
 
-  useEffect(() => {
-    loadSellers(siteId);
-  }, [siteId, loadSellers]);
+  const sellers = useMemo(() => {
+    const site = sites.find((x) => x.key === siteKey);
+    if (!site) return allSellers;
+    const ids = new Set(site.siteIds);
+    return allSellers.filter((x) => ids.has(x.siteId));
+  }, [allSellers, sites, siteKey]);
+  const siteNameOf = useCallback(
+    (siteId) => sites.find((x) => x.siteIds.includes(siteId))?.name || '',
+    [sites]
+  );
 
   useEffect(() => {
     setAmountGhs('');
@@ -127,10 +138,11 @@ export function TicketCollectionsPage() {
   );
 
   useEffect(() => {
+    if (sellersLoading) return;
     if (sellerKey && sellers.some((s) => s.sellerKey === sellerKey)) return;
     const top = sellers.find((s) => s.balanceCents > 0);
     setSellerKey(top ? top.sellerKey : '');
-  }, [sellers, sellerKey]);
+  }, [sellers, sellerKey, sellersLoading]);
 
   function chooseSeller(key) {
     setSellerKey(key);
@@ -147,7 +159,7 @@ export function TicketCollectionsPage() {
   const advanceCents = Math.max(0, amountCents - owedCents);
 
   async function refreshAfterChange() {
-    await Promise.all([loadSellers(siteId), loadIssues(sellerKey), loadCollections()]);
+    await Promise.all([loadSellers(), loadIssues(sellerKey), loadCollections()]);
   }
 
   async function collect(e) {
@@ -217,10 +229,10 @@ export function TicketCollectionsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-white">Cash collections</h1>
+        <h1 className="text-xl font-semibold text-white">Collections</h1>
         <p className="mt-1 text-sm text-slate-400">
-          Choose the seller who is paying and enter the cash they handed over. It clears their oldest tickets first. Sellers
-          with hotspot codes owe for each code a customer has used, and can also pay ahead for codes they still hold.
+          Collect cash from a seller, or take back tickets they could not sell. System codes are owed once a customer uses
+          them; external tickets are owed from the day they were issued.
         </p>
       </div>
       {err && <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{err}</p>}
@@ -234,7 +246,7 @@ export function TicketCollectionsPage() {
               <option value="">{sellersLoading ? 'Loading sellers…' : sellers.length ? 'Choose the seller…' : 'No tickets issued yet'}</option>
               {pickerSellers.map((s) => (
                 <option key={s.sellerKey} value={s.sellerKey}>
-                  {s.sellerName} · {s.siteName || 'Site'}
+                  {s.sellerName} · {siteNameOf(s.siteId) || s.siteName || 'Site'}
                   {s.balanceCents > 0 ? ` · owes ${money(s.balanceCents)}` : s.balanceCents < 0 ? ' · paid ahead' : ' · settled'}
                 </option>
               ))}
@@ -245,12 +257,12 @@ export function TicketCollectionsPage() {
         <>
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-lg text-white">
-              {seller.sellerName} <span className="text-sm text-slate-500">· {seller.siteName}</span>
+              {seller.sellerName} <span className="text-sm text-slate-500">· {siteNameOf(seller.siteId) || seller.siteName}</span>
             </h2>
             <p className="text-sm text-slate-400">
               Owes <strong className="text-amber-300">{money(owedCents)}</strong> · holding {seller.holdingQty} ticket
               {seller.holdingQty === 1 ? '' : 's'}
-              {seller.usedQty ? ` · ${seller.usedQty} used by customers` : ''}
+              {seller.usedQty ? ` · ${seller.usedQty} sold` : ''}
               {seller.balanceCents < 0 ? (
                 <>
                   {' '}
@@ -364,7 +376,7 @@ export function TicketCollectionsPage() {
                   <th className="py-1.5 pr-2 font-medium">Issued</th>
                   <th className="py-1.5 pr-2 font-medium">Ticket</th>
                   <th className="py-1.5 pr-2 text-right font-medium">Qty</th>
-                  <th className="py-1.5 pr-2 text-right font-medium">Used</th>
+                  <th className="py-1.5 pr-2 text-right font-medium">Sold</th>
                   <th className="py-1.5 pr-2 text-right font-medium">Holding</th>
                   <th className="py-1.5 pr-2 text-right font-medium">Returned</th>
                   <th className="py-1.5 pr-2 text-right font-medium">Owed</th>
@@ -379,7 +391,9 @@ export function TicketCollectionsPage() {
                     <td className="py-1.5 pr-2">{new Date(i.soldAt || i.createdAt).toLocaleDateString()}</td>
                     <td className="py-1.5 pr-2 text-slate-200">
                       {i.ticketTypeId?.label || 'Ticket'}
-                      <span className="ml-1 text-slate-500">{i.linked ? '· codes' : '· count only'}</span>
+                      <span className="ml-1 text-slate-500">
+                        {i.linked ? '· system codes' : i.external ? '· external' : '· count only'}
+                      </span>
                     </td>
                     <td className="py-1.5 pr-2 text-right">{i.issuedQty}</td>
                     <td className="py-1.5 pr-2 text-right">{i.linked ? i.usedQty : '—'}</td>
@@ -407,7 +421,7 @@ export function TicketCollectionsPage() {
                           }}
                           className="text-emerald-400 hover:text-emerald-300"
                         >
-                          Return
+                          Return unsold
                         </button>
                       ) : null}
                       {returnFor === String(i._id) ? (
@@ -461,10 +475,10 @@ export function TicketCollectionsPage() {
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-sm text-slate-300">
             Site
-            <select value={siteId} onChange={(e) => setSiteId(e.target.value)} className={inputCls}>
+            <select value={siteKey} onChange={(e) => setSiteKey(e.target.value)} className={inputCls}>
               <option value="">All sites</option>
               {sites.map((s) => (
-                <option key={s._id} value={s._id}>
+                <option key={s.key} value={s.key}>
                   {s.name}
                 </option>
               ))}
@@ -504,7 +518,7 @@ export function TicketCollectionsPage() {
                     {s.sellerName}
                     {s.sellerPhone ? <span className="ml-2 text-xs text-slate-500">{s.sellerPhone}</span> : null}
                   </td>
-                  <td className="py-2 pr-3">{s.siteName || '—'}</td>
+                  <td className="py-2 pr-3">{siteNameOf(s.siteId) || s.siteName || '—'}</td>
                   <td className={`py-2 pr-3 text-right ${s.balanceCents > 0 ? 'font-medium text-amber-300' : 'text-slate-500'}`}>
                     {money(Math.max(0, s.balanceCents))}
                   </td>

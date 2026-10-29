@@ -31,7 +31,7 @@ function Card({ label, value, sub, tone = 'text-white' }) {
   );
 }
 
-export function TicketSalesReportPage() {
+export function TicketSalesReportPage({ embedded = false } = {}) {
   const [preset, setPreset] = useState('month');
   const [customFrom, setCustomFrom] = useState(isoDate(new Date()));
   const [customTo, setCustomTo] = useState(isoDate(new Date()));
@@ -134,13 +134,15 @@ export function TicketSalesReportPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-white">Ticket sales</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Tickets sold and money made, per router, site, plan or seller. Seller and printed codes count as sold when a customer
-          uses them; count-only seller tickets when issued (less returns); online tickets when paid.
-        </p>
-      </div>
+      {embedded ? null : (
+        <div>
+          <h1 className="text-xl font-semibold text-white">Ticket sales</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Tickets sold and money made, per router, site, plan or seller. Seller and printed codes count as sold when a customer
+            uses them; count-only seller tickets when issued (less returns); online tickets when paid.
+          </p>
+        </div>
+      )}
 
       <section className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
         <div className="flex flex-wrap items-end gap-3">

@@ -58,6 +58,8 @@ const ticketSaleSchema = new mongoose.Schema(
     unitPriceCents: { type: Number, min: 0, default: null },
     /** Issued only: real hotspot codes were handed out; the seller owes per code used. */
     linked: { type: Boolean, default: false },
+    /** Issued only: tickets made on another platform for the same router; owed in full when issued. */
+    external: { type: Boolean, default: false },
     routerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Router', default: null },
     packageId: { type: mongoose.Schema.Types.ObjectId, ref: 'PlanPackage', default: null },
     /** Linked issues: counts kept when the underlying codes were deleted from the Tickets page. */
