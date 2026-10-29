@@ -19,7 +19,8 @@ const HANDSHAKE_STALE_SEC = 180;
 const WG_FAILS_BEFORE_PROBE = 2;
 /** Routers without a tunnel: three failed logins a minute apart (~3 minutes). */
 const LOGIN_FAILS_BEFORE_OFFLINE = 3;
-const REMIND_EVERY_MS = 60 * 60 * 1000;
+/** While a router stays offline, repeat the alert this often. */
+const REMIND_EVERY_MS = 6 * 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 25_000;
 const PROBE_CONCURRENCY = 4;
 /** Router answered (refused / rejected login / slow): it is up, the app just cannot manage it. */
