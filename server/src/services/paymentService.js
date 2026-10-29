@@ -594,12 +594,39 @@ export async function checkTransactionStatusWithHubtel(clientReference, opts = {
   };
 }
 
+/**
+ * Apply a success callback that was held because Status Check could not be reached. Used when
+ * HUBTEL_TRUST_UNVERIFIED_CALLBACKS is on, or when a super admin has seen the payment Paid in Hubtel.
+ * The held callback already carried the right amount; it is checked again here.
+ */
+export async function releaseHeldCallbackPayment(clientReference, extra = {}) {
+  const ref = String(clientReference || '').trim();
+  const tx = await Transaction.findOne({ clientReference: ref }).lean();
+  if (!tx) return { ok: false, reason: 'not_found' };
+  if (tx.status === 'paid') return { ok: true, duplicate: true, status: 'paid' };
+  if (tx.status !== 'pending' || !tx.meta?.callbackUnverified) return { ok: false, reason: 'not_held', status: tx.status };
+  const held = tx.meta.callback && typeof tx.meta.callback === 'object' ? tx.meta.callback : {};
+  const amt = hubtelAmountMatchesTx(held, tx.amountCents);
+  if (amt.skipped || !amt.ok) return { ok: false, reason: 'amount_mismatch' };
+  console.warn('[hubtel.callback] releasing held callback without Status Check', { clientReference: ref, ...extra });
+  const out = await markTransactionPaidByReference(ref, { ...held, paidUnverified: true, ...extra });
+  const fresh = await Transaction.findById(tx._id).select('status').lean();
+  /* Paid is what matters here; delivery problems stay on the Needs attention list. */
+  return fresh?.status === 'paid' ? { ...out, ok: true, status: 'paid' } : out;
+}
+
 /** Pay-return / SDK success path — only promote to paid; never fail on Unpaid (customer may still pay). */
 export async function reconcilePaymentFromHubtelStatus(clientReference) {
-  const out = await checkTransactionStatusWithHubtel(clientReference, {
+  let out = await checkTransactionStatusWithHubtel(clientReference, {
     apply: true,
     applyUnpaidAsFailed: false,
   });
+  /* Hubtel did not answer: with the trust flag on, a held success callback is good enough. */
+  if (out.localStatus === 'pending' && out.ok === false && config.hubtel.trustUnverifiedCallbacks) {
+    await releaseHeldCallbackPayment(clientReference, { releasedVia: 'trust_flag' });
+    const fresh = await Transaction.findOne({ clientReference }).select('status').lean();
+    if (fresh?.status === 'paid') out = { ...out, localStatus: 'paid', applied: true };
+  }
   if (out.localStatus === 'paid') {
     return { ok: true, status: 'paid', alreadyPaid: !out.applied, via: 'status_check', ...out };
   }

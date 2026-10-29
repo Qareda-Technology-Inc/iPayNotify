@@ -3,7 +3,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { config } from '../src/config.js';
 import { Organization } from '../src/models/index.js';
 import { hubtelPaymentsRouter } from '../src/routes/hubtelPayments.js';
-import { expireStalePendingPayments } from '../src/services/paymentService.js';
+import {
+  expireStalePendingPayments,
+  reconcilePaymentFromHubtelStatus,
+  releaseHeldCallbackPayment,
+} from '../src/services/paymentService.js';
 import { fakeHubtelStatus } from './helpers/network.js';
 import {
   ageTransaction,
@@ -188,5 +192,37 @@ describe('when Hubtel Status Check is unavailable', () => {
     } finally {
       config.hubtel.trustUnverifiedCallbacks = false;
     }
+  });
+
+  it('releases payments held while blocked once HUBTEL_TRUST_UNVERIFIED_CALLBACKS is turned on', async () => {
+    hubtel.mode = 'blocked';
+    const tx = await createPendingTx(org);
+    await postCallback(successBody(tx));
+    expect((await reloadTx(tx)).status).toBe('pending');
+
+    config.hubtel.trustUnverifiedCallbacks = true;
+    try {
+      const out = await reconcilePaymentFromHubtelStatus(tx.clientReference);
+      const saved = await reloadTx(tx);
+      expect(out.status).toBe('paid');
+      expect(saved.status).toBe('paid');
+      expect(saved.meta.callback.releasedVia).toBe('trust_flag');
+      expect(saved.meta.walletSettled).toBe(true);
+    } finally {
+      config.hubtel.trustUnverifiedCallbacks = false;
+    }
+  });
+
+  it('a held payment can be confirmed by hand; a checkout with no callback cannot', async () => {
+    hubtel.mode = 'blocked';
+    const held = await createPendingTx(org);
+    await postCallback(successBody(held));
+    const out = await releaseHeldCallbackPayment(held.clientReference, { releasedVia: 'super_admin' });
+    expect(out.reason).not.toBe('not_held');
+    expect((await reloadTx(held)).status).toBe('paid');
+
+    const noCallback = await createPendingTx(org);
+    expect(await releaseHeldCallbackPayment(noCallback.clientReference)).toMatchObject({ ok: false, reason: 'not_held' });
+    expect((await reloadTx(noCallback)).status).toBe('pending');
   });
 });

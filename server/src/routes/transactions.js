@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { Transaction } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
-import { checkTransactionStatusWithHubtel } from '../services/paymentService.js';
+import { checkTransactionStatusWithHubtel, releaseHeldCallbackPayment } from '../services/paymentService.js';
 import { listStuckPayments, retryStuckPayment } from '../services/stuckPaymentService.js';
 
 export const transactionsRouter = express.Router();
@@ -204,6 +204,35 @@ transactionsRouter.post(
     const out = await retryStuckPayment(req.params.id, { organizationId: req.organizationId });
     if (out.reason === 'not_found') return res.status(404).json({ error: 'Transaction not found' });
     res.json(out);
+  })
+);
+
+/**
+ * POST /api/transactions/:id/confirm-paid
+ * Super admin only: Hubtel sent a success callback but Status Check is unreachable, and the
+ * payment shows as Paid in the Hubtel dashboard. Applies the held callback and delivers.
+ */
+transactionsRouter.post(
+  '/:id/confirm-paid',
+  requireRoles('super_admin'),
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Transaction not found' });
+    const tx = await Transaction.findById(req.params.id).select('clientReference').lean();
+    if (!tx) return res.status(404).json({ error: 'Transaction not found' });
+    const out = await releaseHeldCallbackPayment(tx.clientReference, {
+      releasedVia: 'super_admin',
+      confirmedBy: req.admin?.email || req.admin?.id || '',
+    });
+    if (!out.ok) {
+      const error =
+        out.reason === 'not_held'
+          ? 'Only payments Hubtel reported as paid (waiting for confirmation) can be confirmed here.'
+          : out.reason === 'amount_mismatch'
+            ? 'The amount Hubtel reported does not match this payment.'
+            : 'Could not confirm this payment.';
+      return res.status(400).json({ error, reason: out.reason });
+    }
+    res.json({ ok: true });
   })
 );
 

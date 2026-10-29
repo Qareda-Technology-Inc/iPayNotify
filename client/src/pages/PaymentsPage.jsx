@@ -41,7 +41,7 @@ function kindLabel(kind) {
  * Paid (or reported-paid) online payments the system has not finished delivering.
  * Hidden when there are none; admins are also alerted by email/SMS once per payment.
  */
-function NeedsAttention({ reloadKey, onChanged }) {
+function NeedsAttention({ reloadKey, onChanged, isSuperAdmin }) {
   const [items, setItems] = useState([]);
   const [retryingId, setRetryingId] = useState('');
   const [msg, setMsg] = useState('');
@@ -80,6 +80,26 @@ function NeedsAttention({ reloadKey, onChanged }) {
     }
   }
 
+  async function confirmPaid(item) {
+    const ok = window.confirm(
+      `Only do this if ${formatMoney(item.amountCents, item.currency)} from ${item.customerPhone || 'this customer'} ` +
+        `shows as Paid in your Hubtel dashboard (reference ${item.clientReference}). Mark it paid and deliver?`
+    );
+    if (!ok) return;
+    setRetryingId(item.id);
+    setMsg('');
+    try {
+      await apiFetch(`/api/transactions/${item.id}/confirm-paid`, { method: 'POST' });
+      setMsg(`Marked paid: ${item.customerPhone || item.clientReference}.`);
+      await load();
+      onChanged();
+    } catch (e) {
+      setMsg(e.message || 'Could not confirm');
+    } finally {
+      setRetryingId('');
+    }
+  }
+
   if (!items.length && !msg) return null;
   return (
     <section className="rounded-2xl border border-amber-500/40 bg-amber-950/20 p-4">
@@ -111,14 +131,26 @@ function NeedsAttention({ reloadKey, onChanged }) {
                   {it.voucherCode ? ` · code ${it.voucherCode}` : ''}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => retry(it)}
-                disabled={Boolean(retryingId)}
-                className="shrink-0 rounded-lg border border-amber-500/50 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-950/40 disabled:opacity-50"
-              >
-                {retryingId === it.id ? 'Retrying…' : 'Retry now'}
-              </button>
+              <div className="flex shrink-0 gap-2">
+                {isSuperAdmin && it.reason === 'payment_unconfirmed' ? (
+                  <button
+                    type="button"
+                    onClick={() => confirmPaid(it)}
+                    disabled={Boolean(retryingId)}
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                  >
+                    Paid in Hubtel
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => retry(it)}
+                  disabled={Boolean(retryingId)}
+                  className="rounded-lg border border-amber-500/50 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-950/40 disabled:opacity-50"
+                >
+                  {retryingId === it.id ? 'Working…' : 'Retry now'}
+                </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -141,6 +173,13 @@ export function PaymentsPage() {
   const [checkingRef, setCheckingRef] = useState('');
   const [statusDetail, setStatusDetail] = useState(null);
   const [attentionKey, setAttentionKey] = useState(0);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/auth/me')
+      .then((me) => setIsSuperAdmin(me?.admin?.role === 'super_admin'))
+      .catch(() => {});
+  }, []);
 
   const filterParams = useCallback(() => {
     const params = new URLSearchParams();
@@ -266,7 +305,7 @@ export function PaymentsPage() {
         </div>
       </div>
 
-      <NeedsAttention reloadKey={attentionKey} onChanged={load} />
+      <NeedsAttention reloadKey={attentionKey} onChanged={load} isSuperAdmin={isSuperAdmin} />
 
       <div className="flex flex-wrap gap-3 text-sm">
         <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">
