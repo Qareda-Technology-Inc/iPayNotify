@@ -30,6 +30,8 @@ export function RoutersPanel() {
   const [connMessage, setConnMessage] = useState('');
   const [connError, setConnError] = useState('');
   const [testing, setTesting] = useState(false);
+  const [garden, setGarden] = useState(null);
+  const [gardenBusy, setGardenBusy] = useState(false);
   const [detailTab, setDetailTab] = useState('access');
 
   const [editComment, setEditComment] = useState('');
@@ -136,6 +138,7 @@ export function RoutersPanel() {
     setEditPortalSlug(selected.portalSlug || '');
     setConnMessage('');
     setConnError('');
+    setGarden(null);
     setSaveError('');
     setLiveSnap(null);
     setLiveError('');
@@ -197,10 +200,25 @@ export function RoutersPanel() {
     try {
       const r = await apiFetch(`/api/routers/${selectedId}/mikrotik/ping`);
       setConnMessage(r.message || 'Connected');
+      if (r.walledGarden) setGarden(r.walledGarden);
     } catch (e) {
       setConnError(e.message || 'Connection failed');
     } finally {
       setTesting(false);
+    }
+  }
+
+  /* Lets customers open the buy page, this API and Hubtel before they log in to the hotspot. */
+  async function syncWalledGarden() {
+    if (!selectedId) return;
+    setGardenBusy(true);
+    setGarden(null);
+    try {
+      setGarden(await apiFetch(`/api/routers/${selectedId}/mikrotik/walled-garden/sync`, { method: 'POST' }));
+    } catch (e) {
+      setGarden({ ok: false, error: e.message || 'Could not update the walled garden' });
+    } finally {
+      setGardenBusy(false);
     }
   }
 
@@ -802,6 +820,41 @@ function RouterDetail({
               {connError}
             </p>
           ) : null}
+
+          <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3">
+            <p className="text-sm font-medium text-slate-200">Walled garden</p>
+            <p className="mt-1 text-xs text-slate-400">
+              Lets customers open the buy page and pay with MoMo before they log in. Update it if buying shows
+              “Failed to fetch” or “Location not detected”.
+            </p>
+            <button
+              type="button"
+              disabled={gardenBusy}
+              onClick={syncWalledGarden}
+              className="mt-3 flex h-10 w-full items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+            >
+              {gardenBusy ? 'Updating…' : 'Update walled garden'}
+            </button>
+            {garden?.ok ? (
+              <div className="mt-2 text-xs text-emerald-300">
+                <p>
+                  Allowed {garden.addedHosts?.length || 0} site{garden.addedHosts?.length === 1 ? '' : 's'} before login
+                  {garden.httpsHostRules != null && garden.httpsHostRules < (garden.addedHosts?.length || 0)
+                    ? ` (only ${garden.httpsHostRules} for HTTPS; the router refused the rest)`
+                    : ''}
+                  .
+                </p>
+                {garden.addedHosts?.length ? (
+                  <p className="mt-1 break-words font-mono text-[11px] text-slate-400">{garden.addedHosts.join(' · ')}</p>
+                ) : null}
+              </div>
+            ) : null}
+            {garden && !garden.ok ? (
+              <p className="mt-2 break-words rounded-lg border border-amber-500/25 bg-amber-950/20 px-3 py-2 text-xs text-amber-100">
+                Walled garden not updated: {garden.error || 'unknown error'}
+              </p>
+            ) : null}
+          </div>
         </div>
       )}
 
