@@ -8,6 +8,7 @@ import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { publicPortalRouter } from './routes/publicPortal.js';
 import { hubtelPaymentsRouter } from './routes/hubtelPayments.js';
+import { paystackPaymentsRouter } from './routes/paystackPayments.js';
 import { wireguardRegisterRouter } from './routes/wireguardRegister.js';
 import { protectedApiRouter } from './routes/protectedApi.js';
 import { superAdminApiRouter } from './routes/superAdminApi.js';
@@ -92,6 +93,10 @@ app.use(
 app.use(
   express.json({
     limit: '1mb',
+    /* Raw bytes for webhook signatures (Paystack signs the exact body). */
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
     type: (req) => {
       const ct = String(req.headers['content-type'] || '').toLowerCase();
       if (!ct) return true;
@@ -113,6 +118,7 @@ app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/public', limits.publicApi, publicPortalRouter);
 app.use('/api/payments/hubtel', hubtelPaymentsRouter);
+app.use('/api/payments/paystack', paystackPaymentsRouter);
 /** Legacy path kept so old MTN callback registrations still hit a handler if needed. */
 app.use('/api/payments/momo', hubtelPaymentsRouter);
 /**

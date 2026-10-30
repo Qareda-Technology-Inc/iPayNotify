@@ -3,7 +3,11 @@ import mongoose from 'mongoose';
 import { Transaction } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
-import { checkTransactionStatusWithHubtel, releaseHeldCallbackPayment } from '../services/paymentService.js';
+import {
+  checkTransactionStatusWithHubtel,
+  reconcilePaystackPayment,
+  releaseHeldCallbackPayment,
+} from '../services/paymentService.js';
 import { listStuckPayments, retryStuckPayment } from '../services/stuckPaymentService.js';
 
 export const transactionsRouter = express.Router();
@@ -148,7 +152,7 @@ transactionsRouter.post(
       return res.status(400).json({ error: 'clientReference required' });
     }
 
-    const tx = await Transaction.findOne({ clientReference }).select('organizationId').lean();
+    const tx = await Transaction.findOne({ clientReference }).select('organizationId provider').lean();
     if (!tx) return res.status(404).json({ error: 'Transaction not found' });
 
     const orgId = req.organizationId != null ? String(req.organizationId) : '';
@@ -166,10 +170,13 @@ transactionsRouter.post(
     /** Admin check: Unpaid (cancelled/abandoned) → mark failed so it does not stay “pending”. */
     const applyUnpaidAsFailed =
       req.body?.applyUnpaidAsFailed !== false && req.body?.applyUnpaidAsFailed !== 'false';
-    const result = await checkTransactionStatusWithHubtel(clientReference, {
-      apply,
-      applyUnpaidAsFailed,
-    });
+    const result =
+      tx.provider === 'paystack'
+        ? await reconcilePaystackPayment(clientReference)
+        : await checkTransactionStatusWithHubtel(clientReference, {
+            apply,
+            applyUnpaidAsFailed,
+          });
     const status =
       result.reason === 'not_found'
         ? 404

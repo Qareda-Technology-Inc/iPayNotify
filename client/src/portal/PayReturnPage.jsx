@@ -155,11 +155,16 @@ export function PayReturnPage() {
         </p>
         <p className="mt-2 text-sm text-slate-500">
           {timedOut
-            ? 'If you already paid, your service will activate automatically once Hubtel confirms — we keep checking in the background. You can check again or contact your ISP with this reference.'
+            ? 'If you already paid, your service will activate automatically once the payment is confirmed — we keep checking in the background. You can check again or contact your ISP with this reference.'
             : closedEarly
-              ? 'If you approved the MoMo prompt on your phone, keep this page open — we are confirming with Hubtel.'
+              ? 'If you approved the MoMo prompt on your phone, keep this page open — we are confirming the payment.'
               : 'Approve the prompt on your phone if you have not yet. This can take a minute — keep this page open.'}
         </p>
+        {!timedOut && status.displayText ? (
+          <p className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-100">
+            {status.displayText}
+          </p>
+        ) : null}
         {netTrouble ? (
           <p className="mt-2 text-xs text-amber-300">Connection is slow — still trying…</p>
         ) : null}
@@ -190,8 +195,8 @@ export function PayReturnPage() {
         </p>
         <p className="mt-2 text-sm text-slate-500">
           {stillChecking
-            ? 'Checking with Hubtel in case the MoMo approval went through…'
-            : 'If money left your wallet, it will be applied automatically once Hubtel confirms. Keep this reference.'}
+            ? 'Checking again in case the MoMo approval went through…'
+            : 'If money left your wallet, it will be applied automatically once the payment is confirmed. Keep this reference.'}
         </p>
         <p className="mt-4 font-mono text-xs text-slate-500 break-all">{ref}</p>
         {!stillChecking ? (

@@ -8,7 +8,7 @@ import { alertRecipients } from './routerMonitorService.js';
 import { resolveSmsBranding } from './smsRouterBranding.js';
 import {
   fulfillPaidTransaction,
-  reconcilePaymentFromHubtelStatus,
+  reconcilePaymentStatus,
   syncRenewalToRouter,
 } from './paymentService.js';
 import { settlePaidTransactionToWallet } from './orgWalletService.js';
@@ -43,12 +43,12 @@ const STUCK_SHORT = {
 };
 
 /**
- * Online (Hubtel) checkouts only: balance-paid auto-renewals and admin renewals have a different
+ * Online (Hubtel / Paystack) checkouts only: balance-paid auto-renewals and admin renewals have a different
  * shape and are never "stuck" in this sense.
  */
 function stuckQuery({ organizationId, olderThan, newerThan }) {
   const q = {
-    'meta.hubtelCheckout': true,
+    $and: [{ $or: [{ 'meta.hubtelCheckout': true }, { provider: 'paystack' }] }],
     createdAt: { $gte: newerThan, $lte: olderThan },
     $or: [
       { status: 'pending', 'meta.callbackUnverified': { $exists: true } },
@@ -211,7 +211,7 @@ export async function retryStuckPayment(txId, { organizationId } = {}) {
   if (!tx) return { ok: false, reason: 'not_found' };
 
   if (tx.status === 'pending') {
-    await reconcilePaymentFromHubtelStatus(tx.clientReference);
+    await reconcilePaymentStatus(tx.clientReference);
   } else if (tx.status === 'paid') {
     if (tx.kind === 'renewal' && !tx.meta?.renewedUntil) {
       /* A crashed attempt leaves a claim that blocks fulfilment; take it over once it is stale. */

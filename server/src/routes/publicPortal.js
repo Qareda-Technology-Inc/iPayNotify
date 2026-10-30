@@ -10,8 +10,9 @@ import {
   getTransactionByReference,
   fulfillPaidTransaction,
   markTransactionPaidByReference,
-  reconcilePaymentFromHubtelStatus,
+  reconcilePaymentStatus,
   recordHubtelClientCheckoutEvent,
+  submitPaystackOtp,
 } from '../services/paymentService.js';
 import {
   loadPortalPlans,
@@ -129,7 +130,11 @@ publicPortalRouter.get(
   asyncHandler(async (req, res) => {
     const slug = req.query.r ?? req.query.router ?? req.query.site;
     const ctx = await resolvePortalRouter(req, slug);
-    res.json(ctx);
+    /* Tells the buy page whether to ask for the MoMo network (Paystack) or open Hubtel checkout. */
+    res.json({
+      ...ctx,
+      hotspotPayment: config.hotspotPaymentProvider === 'paystack' && !config.paymentDraftCheckout ? 'paystack' : 'hubtel',
+    });
   })
 );
 
@@ -260,7 +265,7 @@ publicPortalRouter.post(
   limits.checkoutPerIp,
   limits.checkoutPerPhone,
   asyncHandler(async (req, res) => {
-    const { packageId, customerMsisdn, customerName, portalSlug, hotspotServer } = req.body;
+    const { packageId, customerMsisdn, customerName, portalSlug, hotspotServer, momoProvider } = req.body;
     if (!packageId) {
       return res.status(400).json({ error: 'packageId is required' });
     }
@@ -280,8 +285,18 @@ publicPortalRouter.post(
       hotspotServer,
       customerMsisdn: customerMsisdn ? String(customerMsisdn).replace(/\s/g, '') : undefined,
       customerName,
+      momoProvider,
     });
     res.json(out);
+  })
+);
+
+/** Paystack MoMo: the code the customer received by SMS, when the network asks for one. */
+publicPortalRouter.post(
+  '/payment/:ref/otp',
+  limits.statusPerRef,
+  asyncHandler(async (req, res) => {
+    res.json(await submitPaystackOtp(req.params.ref, req.body?.otp));
   })
 );
 
@@ -302,10 +317,11 @@ publicPortalRouter.get(
       Date.now() - new Date(tx.createdAt || 0).getTime() < 6 * 60 * 60 * 1000;
     if (tx.status === 'pending' || recentClientFailure) {
       const lastCheck = tx.meta?.statusCheckAt ? new Date(tx.meta.statusCheckAt).getTime() : 0;
-      const due = !lastCheck || Date.now() - lastCheck >= 12_000;
+      const every = tx.provider === 'paystack' ? 5_000 : 12_000;
+      const due = !lastCheck || Date.now() - lastCheck >= every;
       if (due) {
         try {
-          await reconcilePaymentFromHubtelStatus(req.params.ref);
+          await reconcilePaymentStatus(req.params.ref);
           tx = await getTransactionByReference(req.params.ref);
         } catch (e) {
           console.warn('[hubtel.reconcile] status poll failed', req.params.ref, e?.message || e);
@@ -334,6 +350,9 @@ publicPortalRouter.get(
       renewedUntil: tx.meta?.renewedUntil,
       fulfillment: tx.meta?.fulfillment,
       hubtelStatus: tx.meta?.statusCheckResult?.hubtelStatus || null,
+      provider: tx.provider || 'hubtel',
+      /* Paystack's instruction for the customer while they approve, e.g. "Dial *170#…". */
+      displayText: tx.status === 'pending' ? tx.meta?.paystackCharge?.displayText || '' : '',
     });
   })
 );

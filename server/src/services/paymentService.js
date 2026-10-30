@@ -14,6 +14,13 @@ import {
   hubtelProviderReference,
   resolveHubtelCallbackUrl,
 } from '../integrations/hubtel.js';
+import {
+  chargeMobileMoney,
+  momoProviderForMsisdn,
+  normalizeMomoProvider,
+  submitChargeOtp,
+  verifyTransaction as verifyPaystackTransaction,
+} from '../integrations/paystack.js';
 import { extendPaidUntilByPackage } from '../utils/duration.js';
 import { notifyTransactionPaidSms } from './paymentSmsService.js';
 import { notifyTransactionPaidAdminEmail } from './paymentAdminNotifyService.js';
@@ -319,6 +326,7 @@ export async function createHotspotPurchaseCheckout({
   hotspotServer,
   customerMsisdn,
   customerName,
+  momoProvider,
 }) {
   const pkg = await PlanPackage.findById(packageId);
   if (!pkg || pkg.kind !== 'hotspot') {
@@ -368,6 +376,13 @@ export async function createHotspotPurchaseCheckout({
   const resolvedPhone =
     normalizeGhanaMsisdn(customerMsisdn) || String(customerMsisdn || '').trim() || '';
   const resolvedName = String(customerName || '').trim() || undefined;
+  const usePaystack = config.hotspotPaymentProvider === 'paystack' && !config.paymentDraftCheckout;
+  const network = usePaystack ? normalizeMomoProvider(momoProvider) || momoProviderForMsisdn(resolvedPhone) : '';
+  if (usePaystack && !network) {
+    const err = new Error('Choose your mobile money network (MTN, Telecel or AirtelTigo).');
+    err.status = 400;
+    throw err;
+  }
   const tx = await Transaction.create({
     ...(orgId ? { organizationId: orgId } : {}),
     packageId: pkg._id,
@@ -376,10 +391,11 @@ export async function createHotspotPurchaseCheckout({
     status: 'pending',
     kind: 'voucher',
     clientReference,
-    provider: 'hubtel',
+    provider: usePaystack ? 'paystack' : 'hubtel',
     customerPhone: resolvedPhone || undefined,
     customerName: resolvedName,
     meta: {
+      ...(usePaystack ? { momoProvider: network } : {}),
       routerId: String(routerId),
       hotspotServer:
         cleanHotspotServerName(hotspotServer) ||
@@ -421,6 +437,15 @@ export async function createHotspotPurchaseCheckout({
     });
   }
 
+  if (usePaystack) {
+    return startPaystackCharge(tx, {
+      msisdn: resolvedPhone,
+      provider: network,
+      metadata: { kind: 'voucher', packageName: pkg.name, merchant: billing.merchantDisplayName },
+      extras: { amountCents, currency: tx.currency, packageName: pkg.name },
+    });
+  }
+
   const session = buildHubtelCheckoutSession({
     amountGhs,
     description: `${billing.merchantDisplayName} - Wi-Fi ticket - ${pkg.name}`,
@@ -447,6 +472,161 @@ export async function createHotspotPurchaseCheckout({
     currency: tx.currency,
     packageName: pkg.name,
   });
+}
+
+/* ---------------- Paystack (hotspot Mobile Money) ---------------- */
+
+function paystackCheckoutResponse(tx, charge, extras = {}) {
+  return {
+    mode: 'paystack_momo',
+    clientReference: tx.clientReference,
+    next: charge.state === 'otp' ? 'otp' : charge.state === 'paid' ? 'done' : 'approve',
+    displayText: charge.displayText,
+    momoProvider: tx.meta?.momoProvider || '',
+    ...extras,
+  };
+}
+
+async function startPaystackCharge(tx, { msisdn, provider, metadata, extras }) {
+  let charge;
+  try {
+    charge = await chargeMobileMoney({
+      reference: tx.clientReference,
+      amountCents: tx.amountCents,
+      currency: tx.currency || 'GHS',
+      msisdn,
+      provider,
+      metadata: { ...metadata, clientReference: tx.clientReference },
+    });
+  } catch (e) {
+    tx.status = 'failed';
+    mergeTxMeta(tx, { paystackError: e.message, paymentFailed: true });
+    await tx.save();
+    throw e;
+  }
+  mergeTxMeta(tx, {
+    paystackCharge: { state: charge.state, displayText: charge.displayText, at: new Date().toISOString(), ...charge.raw },
+  });
+  if (charge.state === 'failed') {
+    tx.status = 'failed';
+    mergeTxMeta(tx, { paymentFailed: true });
+    await tx.save();
+    const err = new Error(charge.displayText || 'The mobile money payment could not start. Check the number and try again.');
+    err.status = 402;
+    throw err;
+  }
+  await tx.save();
+  if (charge.state === 'paid') await reconcilePaystackPayment(tx.clientReference);
+  return paystackCheckoutResponse(tx, charge, extras);
+}
+
+/** Customer typed the code Paystack sent by SMS (some numbers / networks need it). */
+export async function submitPaystackOtp(clientReference, otp) {
+  const tx = await Transaction.findOne({ clientReference, provider: 'paystack' });
+  if (!tx) {
+    const err = new Error('Payment not found');
+    err.status = 404;
+    throw err;
+  }
+  if (tx.status !== 'pending') return { mode: 'paystack_momo', clientReference, next: 'done', status: tx.status };
+  if (!/^\d{4,8}$/.test(String(otp || '').trim())) {
+    const err = new Error('Enter the code from the SMS.');
+    err.status = 400;
+    throw err;
+  }
+  const charge = await submitChargeOtp({ reference: clientReference, otp });
+  mergeTxMeta(tx, {
+    paystackCharge: { state: charge.state, displayText: charge.displayText, at: new Date().toISOString(), ...charge.raw },
+  });
+  await tx.save();
+  if (charge.state === 'failed') {
+    const err = new Error(charge.displayText || 'That code did not work. Check the SMS and try again.');
+    err.status = 400;
+    throw err;
+  }
+  if (charge.state === 'paid') await reconcilePaystackPayment(clientReference);
+  return paystackCheckoutResponse(tx, charge);
+}
+
+/**
+ * Ask Paystack whether a payment went through and apply it. Paystack's verify answer is the only
+ * thing that marks a Paystack payment paid (webhooks just trigger this check).
+ */
+export async function reconcilePaystackPayment(clientReference) {
+  const tx = await Transaction.findOne({ clientReference, provider: 'paystack' }).lean();
+  if (!tx) return { ok: false, reason: 'not_found' };
+  if (tx.status === 'paid') return { ok: true, status: 'paid', applied: false };
+  let v;
+  try {
+    v = await verifyPaystackTransaction(clientReference);
+  } catch (e) {
+    return { ok: false, reason: 'paystack_unreachable', error: e.message };
+  }
+  await Transaction.updateOne(
+    { _id: tx._id },
+    { $set: { 'meta.statusCheckAt': new Date(), 'meta.paystackVerify': { state: v.state, ...v.raw } } }
+  );
+  if (v.state === 'paid') {
+    const currencyOk = !v.currency || String(v.currency).toUpperCase() === String(tx.currency || 'GHS').toUpperCase();
+    if (v.amountCents == null || v.amountCents < tx.amountCents || !currencyOk) {
+      await Transaction.updateOne(
+        { _id: tx._id },
+        { $set: { 'meta.paystackAmountMismatch': { amountCents: v.amountCents, currency: v.currency } } }
+      );
+      return { ok: true, status: 'pending', reason: 'amount_mismatch' };
+    }
+    const r = await markTransactionPaidByReference(clientReference, {
+      provider: 'paystack',
+      TransactionId: v.paystackId || clientReference,
+      amountCents: v.amountCents,
+      currency: v.currency,
+      gatewayResponse: v.raw?.gateway_response || null,
+    });
+    return { ok: true, status: 'paid', applied: Boolean(r.ok && !r.duplicate) };
+  }
+  if (v.state === 'failed' && tx.status === 'pending') {
+    await markTransactionFailedByReference(clientReference, {
+      provider: 'paystack',
+      failedVia: 'paystack_verify',
+      Message: v.displayText || 'Payment failed',
+    });
+    return { ok: true, status: 'failed' };
+  }
+  return { ok: true, status: tx.status };
+}
+
+/** Background safety net: check recent unpaid Paystack charges (missed or delayed webhooks). */
+export async function reconcileRecentPaystackPayments({ limit = 25 } = {}) {
+  const now = Date.now();
+  const rows = await Transaction.find({
+    provider: 'paystack',
+    status: 'pending',
+    createdAt: { $gte: new Date(now - RECONCILE_WINDOW_MS), $lte: new Date(now - 30 * 1000) },
+  })
+    .sort({ createdAt: -1 })
+    .limit(200)
+    .select('clientReference createdAt meta.statusCheckAt')
+    .lean();
+  const summary = { candidates: rows.length, checked: 0, paid: 0 };
+  for (const row of rows) {
+    if (summary.checked >= limit) break;
+    const age = now - new Date(row.createdAt).getTime();
+    const last = row.meta?.statusCheckAt ? new Date(row.meta.statusCheckAt).getTime() : 0;
+    if (last && now - last < statusCheckIntervalMs(age)) continue;
+    summary.checked += 1;
+    const out = await reconcilePaystackPayment(row.clientReference);
+    if (out.status === 'paid' && out.applied) summary.paid += 1;
+    if (out.reason === 'paystack_unreachable') break;
+  }
+  if (summary.paid) console.log('[paystack.reconcile] background', summary);
+  return summary;
+}
+
+/** Status check for whichever provider took this payment. */
+export async function reconcilePaymentStatus(clientReference) {
+  const tx = await Transaction.findOne({ clientReference }).select('provider').lean();
+  if (tx?.provider === 'paystack') return reconcilePaystackPayment(clientReference);
+  return reconcilePaymentFromHubtelStatus(clientReference);
 }
 
 export async function getTransactionByReference(clientReference) {
@@ -1205,7 +1385,7 @@ export async function expireStalePendingPayments({ maxAgeHours = 24, limit = 200
     /* A paid-but-unconfirmed checkout must never be expired: ask Hubtel first. */
     let checked = false;
     try {
-      const chk = await reconcilePaymentFromHubtelStatus(row.clientReference);
+      const chk = await reconcilePaymentStatus(row.clientReference);
       if (chk.status === 'paid') {
         rescued += 1;
         continue;

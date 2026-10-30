@@ -62,6 +62,21 @@ export const config = {
   merchant: {
     displayName: (process.env.MERCHANT_DISPLAY_NAME || 'QareFi Billing').trim(),
   },
+  /**
+   * Paystack Mobile Money (Charge API) for hotspot ticket purchases. PPPoE renewals stay on Hubtel.
+   * HOTSPOT_PAYMENT_PROVIDER=hubtel switches hotspot back; it defaults to paystack once a key is set.
+   */
+  paystack: {
+    secretKey: (process.env.PAYSTACK_SECRET_KEY || '').trim(),
+    baseUrl: (process.env.PAYSTACK_BASE_URL || 'https://api.paystack.co').trim().replace(/\/$/, ''),
+    /** Paystack requires an email; MoMo customers get <number>@this-domain. */
+    customerEmailDomain: (process.env.PAYSTACK_CUSTOMER_EMAIL_DOMAIN || 'customers.qarefi.app').trim(),
+  },
+  hotspotPaymentProvider: (
+    process.env.HOTSPOT_PAYMENT_PROVIDER || (process.env.PAYSTACK_SECRET_KEY ? 'paystack' : 'hubtel')
+  )
+    .trim()
+    .toLowerCase(),
   /** Hubtel Online Checkout — https://developers.hubtel.com / unified-pay SDK */
   hubtel: {
     merchantAccount: (process.env.HUBTEL_MERCHANT_ACCOUNT || '').trim(),

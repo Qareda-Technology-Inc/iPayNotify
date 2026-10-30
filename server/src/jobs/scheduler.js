@@ -8,6 +8,7 @@ import { runExpiryReminderSmsJob } from '../services/expiryReminderSmsService.js
 import {
   expireStalePendingPayments,
   reconcileRecentHubtelPayments,
+  reconcileRecentPaystackPayments,
   retryPaidFulfillments,
 } from '../services/paymentService.js';
 import { enforceRemoteAccessRouters } from '../services/remoteAccessService.js';
@@ -176,10 +177,15 @@ export function startBillingScheduler() {
         } catch (e) {
           console.error('[hubtel.reconcile] background tick failed', e?.message || e);
         }
+        try {
+          await reconcileRecentPaystackPayments({ limit: 25 });
+        } catch (e) {
+          console.error('[paystack.reconcile] background tick failed', e?.message || e);
+        }
       },
       { timezone: config.cronTz }
     );
-    console.log(`[billing] Hubtel unconfirmed-payment check every minute (${config.cronTz})`);
+    console.log(`[billing] Hubtel + Paystack unconfirmed-payment check every minute (${config.cronTz})`);
   }
 
   if (!stuckPaymentTask) {

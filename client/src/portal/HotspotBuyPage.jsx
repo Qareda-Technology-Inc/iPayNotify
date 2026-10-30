@@ -30,6 +30,23 @@ function formatSession(seconds) {
   return `${(n / 86400).toFixed(n % 86400 === 0 ? 0 : 1)} day online`;
 }
 
+const NETWORKS = [
+  { id: 'mtn', label: 'MTN' },
+  { id: 'vod', label: 'Telecel' },
+  { id: 'atl', label: 'AirtelTigo' },
+];
+
+/** Network from a Ghana number (Paystack codes); '' when the prefix is unknown. */
+function networkForNumber(raw) {
+  const d = String(raw || '').replace(/\D/g, '');
+  const local = d.startsWith('233') ? `0${d.slice(3)}` : d.length === 9 ? `0${d}` : d;
+  const p = local.slice(0, 3);
+  if (['024', '025', '053', '054', '055', '059'].includes(p)) return 'mtn';
+  if (['020', '050'].includes(p)) return 'vod';
+  if (['026', '027', '056', '057'].includes(p)) return 'atl';
+  return '';
+}
+
 /**
  * Hotspot buy is always bound to the current site:
  * - captive / QR link `?r=site-slug`, or
@@ -55,8 +72,14 @@ export function HotspotBuyPage() {
   const [loading, setLoading] = useState(false);
   const [draftCheckout, setDraftCheckout] = useState(null);
   const [hubtelSession, setHubtelSession] = useState(null);
+  /* Paystack: network picked by the customer ('' = from the number), and the OTP step if asked. */
+  const [network, setNetwork] = useState('');
+  const [otpStep, setOtpStep] = useState(null);
+  const [otp, setOtp] = useState('');
 
   const siteReady = Boolean(ctx?.resolved && ctx.router?.id);
+  const paystack = ctx?.hotspotPayment === 'paystack';
+  const chosenNetwork = network || networkForNumber(msisdn);
   const slug = getPortalSlugFromLocation();
   const hotspotServer = new URLSearchParams(window.location.search).get('s') || '';
   const brandName = String(ctx?.branding?.displayName || '').trim() || 'Wi‑Fi';
@@ -109,6 +132,10 @@ export function HotspotBuyPage() {
       setError('Enter your mobile money number, e.g. 024 123 4567.');
       return;
     }
+    if (paystack && !chosenNetwork) {
+      setError('Choose your mobile money network.');
+      return;
+    }
     try {
       localStorage.setItem('wifiMomoNumber', msisdn.trim());
     } catch {
@@ -124,8 +151,18 @@ export function HotspotBuyPage() {
           hotspotServer: hotspotServer || undefined,
           customerMsisdn: digits,
           customerName: undefined,
+          momoProvider: paystack ? chosenNetwork : undefined,
         }),
       });
+      if (data.mode === 'paystack_momo') {
+        if (data.next === 'otp') {
+          setOtp('');
+          setOtpStep({ ref: data.clientReference, text: data.displayText || '' });
+        } else {
+          navigate(returnPath(data.clientReference));
+        }
+        return;
+      }
       if (data.mode === 'draft_hubtel') {
         setDraftCheckout(data);
         return;
@@ -139,6 +176,28 @@ export function HotspotBuyPage() {
         return;
       }
       window.location.href = data.checkoutUrl;
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onOtp(e) {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const data = await publicFetch(`/api/public/payment/${encodeURIComponent(otpStep.ref)}/otp`, {
+        method: 'POST',
+        body: JSON.stringify({ otp: otp.trim() }),
+      });
+      if (data.next === 'otp') {
+        setOtp('');
+        setOtpStep((s) => ({ ...s, text: data.displayText || s.text }));
+        return;
+      }
+      navigate(returnPath(otpStep.ref));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -232,7 +291,45 @@ export function HotspotBuyPage() {
           </div>
         )}
 
-        {siteReady && (
+        {siteReady && otpStep ? (
+          <form onSubmit={onOtp} className="mt-8 space-y-4">
+            <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-100">
+              {otpStep.text || 'We sent a code by SMS to your mobile money number.'}
+            </div>
+            <label className="block text-sm font-medium text-slate-300">
+              Code from the SMS
+              <input
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoFocus
+                maxLength={8}
+                className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-center font-mono text-lg tracking-widest text-white outline-none focus:border-emerald-500"
+              />
+            </label>
+            {error && (
+              <p className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</p>
+            )}
+            <button
+              type="submit"
+              disabled={loading || otp.length < 4}
+              className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {loading ? 'Please wait…' : 'Continue'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOtpStep(null);
+                setError('');
+              }}
+              className="w-full text-xs text-slate-400 hover:text-white"
+            >
+              Start again
+            </button>
+          </form>
+        ) : siteReady && (
           <form onSubmit={onPay} className="mt-8 space-y-4">
             {focusedPlan && selectedPlan ? (
               <div className="rounded-xl border border-emerald-500/60 bg-emerald-950/30 px-4 py-3 ring-1 ring-emerald-500/40">
@@ -313,9 +410,31 @@ export function HotspotBuyPage() {
                 className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 font-mono text-white outline-none focus:border-emerald-500"
               />
               <span className="mt-1 block text-xs font-normal text-slate-500">
-                The number you will pay with. Hubtel sends the payment prompt to it.
+                The number you will pay with. The payment prompt is sent to it.
               </span>
             </label>
+            {paystack ? (
+              <div>
+                <p className="text-sm font-medium text-slate-300">Network</p>
+                <div className="mt-1.5 grid grid-cols-3 gap-2">
+                  {NETWORKS.map((n) => (
+                    <button
+                      key={n.id}
+                      type="button"
+                      onClick={() => setNetwork(n.id)}
+                      aria-pressed={chosenNetwork === n.id}
+                      className={`rounded-lg border px-2 py-2 text-sm font-medium ${
+                        chosenNetwork === n.id
+                          ? 'border-emerald-500 bg-emerald-950/40 text-white'
+                          : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      {n.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             {error && (
               <p className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                 {error}
