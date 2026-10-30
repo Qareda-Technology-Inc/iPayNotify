@@ -28,6 +28,13 @@ describe('hotspot walled garden', () => {
     expect(buildPaymentWalledGardenTargets().hosts).toContain('api.example.test');
   });
 
+  it('lets Hubtel\'s checkout page load its scripts and security check', () => {
+    const { hosts } = buildPaymentWalledGardenTargets();
+    for (const h of ['unified-pay.hubtel.com', 'challenges.cloudflare.com', 'designs.hubtel.com', 'code.jquery.com']) {
+      expect(hosts).toContain(h);
+    }
+  });
+
   it('uses the Render host when no API URL is configured', () => {
     config.publicApiUrl = '';
     process.env.RENDER_EXTERNAL_HOSTNAME = 'billing-api.onrender.com';

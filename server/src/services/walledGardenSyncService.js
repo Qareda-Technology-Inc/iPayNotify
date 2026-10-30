@@ -54,6 +54,20 @@ export function buildPaymentWalledGardenTargets() {
     'checkout.hubtel.com',
     'api.hubtel.com',
     'smsc.hubtel.com',
+    /* What Hubtel's checkout page itself loads. Without these the page opens but stays empty after
+     * choosing Mobile Money: no number field, no Pay button (Cloudflare check, scripts, styles). */
+    'realtime-socket.hubtel.com',
+    'designs.hubtel.com',
+    'tools.hubtel.com',
+    'challenges.cloudflare.com',
+    'static.cloudflareinsights.com',
+    'code.jquery.com',
+    'cdn.jsdelivr.net',
+    'unpkg.com',
+    'cdnjs.cloudflare.com',
+    'fonts.googleapis.com',
+    'fonts.gstatic.com',
+    'use.fontawesome.com',
   ]) {
     addHost(h);
   }
