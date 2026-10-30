@@ -176,7 +176,6 @@ export async function pushHotspotPackageProfile(pkg, router) {
       speedDownMbps: pkg.speedDownMbps,
       speedUpMbps: pkg.speedUpMbps,
       sharedUsers: pkg.usersPerTicket,
-      comment: `QareFi:${pkg.name || profileName}`,
       onLogin,
     });
     return { ...result, profileName };

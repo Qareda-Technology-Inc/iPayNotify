@@ -188,10 +188,8 @@ export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
     opts.sharedUsers != null && Number(opts.sharedUsers) > 0
       ? String(Math.floor(Number(opts.sharedUsers)))
       : undefined;
-  /* Avoid ":" in unquoted comments — some ROS builds split on it */
-  const comment = String(opts.comment || 'QareFi hotspot package')
-    .trim()
-    .replace(/:/g, '-');
+  /* No comment: hotspot user profiles have no `comment` property, and RouterOS rejects the whole
+   * add/set with "expected end of command" when one is sent. */
   const nameLit = cliEscapeValue(name);
   /* Always quote inside [find]: an unquoted `5-Hours` is read as an expression and matches nothing,
    * so `set` silently changes no profile and the speed never reaches the router. */
@@ -206,7 +204,6 @@ export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
     const props = [];
     if (rateLimit) props.push(`rate-limit=${cliEscapeValue(rateLimit)}`);
     if (shared) props.push(`shared-users=${cliEscapeValue(shared)}`);
-    if (comment) props.push(`comment=${cliEscapeValue(comment)}`);
     const propStr = props.join(' ');
     const outputs = [];
     const run = async (line, context) => {
@@ -315,7 +312,6 @@ export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
   const props = {
     ...(rateLimit ? { 'rate-limit': rateLimit } : {}),
     ...(shared ? { 'shared-users': shared } : {}),
-    ...(comment ? { comment } : {}),
     ...(onLogin ? { 'on-login': onLogin } : {}),
   };
   if (exists) {
