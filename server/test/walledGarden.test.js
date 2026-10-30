@@ -1,6 +1,19 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Organization, Router } from '../src/models/index.js';
 import { config } from '../src/config.js';
-import { buildPaymentWalledGardenTargets } from '../src/services/walledGardenSyncService.js';
+
+const writes = [];
+vi.mock('../src/mikrotik/routeros.js', async (orig) => ({
+  ...(await orig()),
+  withRouterMikrotik: async (_router, fn) =>
+    fn({
+      write: async (cmd) => {
+        writes.push(Array.isArray(cmd) ? cmd : [cmd]);
+        return [];
+      },
+    }),
+}));
+import { buildPaymentWalledGardenTargets, syncPaymentWalledGarden } from '../src/services/walledGardenSyncService.js';
 
 describe('hotspot walled garden', () => {
   const saved = { api: config.publicApiUrl, render: process.env.RENDER_EXTERNAL_HOSTNAME };
@@ -19,5 +32,18 @@ describe('hotspot walled garden', () => {
     config.publicApiUrl = '';
     process.env.RENDER_EXTERNAL_HOSTNAME = 'billing-api.onrender.com';
     expect(buildPaymentWalledGardenTargets().hosts).toContain('billing-api.onrender.com');
+  });
+});
+
+describe('hotspot walled garden sync', () => {
+  it('opens each host for HTTPS too, not only HTTP', async () => {
+    const org = await Organization.create({ name: 'WG Org', slug: `wg-${Date.now()}` });
+    const router = await Router.create({ organizationId: org._id, name: 'wg-router', host: '10.0.0.9', apiUser: 'qf', apiPassword: 'test-only' });
+    writes.length = 0;
+    const out = await syncPaymentWalledGarden(router._id, org._id);
+    const ipRules = writes.filter((c) => c[0] === '/ip/hotspot/walled-garden/ip/add');
+    expect(ipRules.length).toBeGreaterThan(0);
+    expect(ipRules.some((c) => c.includes('=dst-host=pay.hubtel.com') && c.includes('=action=accept'))).toBe(true);
+    expect(out.httpsHostRules).toBe(out.addedHosts.length);
   });
 });

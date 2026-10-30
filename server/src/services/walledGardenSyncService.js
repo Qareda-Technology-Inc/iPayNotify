@@ -140,6 +140,24 @@ export async function syncPaymentWalledGarden(routerId, organizationId) {
         }),
       ]);
     }
+    /* The host list above only works for plain HTTP (hotspot proxy). The billing site, this API
+     * and Hubtel are HTTPS, which only passes before login through `walled-garden ip` rules. */
+    let httpsHosts = 0;
+    for (const dst of hosts) {
+      try {
+        await api.write([
+          '/ip/hotspot/walled-garden/ip/add',
+          ...rosPairs({
+            action: 'accept',
+            'dst-host': dst,
+            comment: `${QAREFI_PREFIX}${dst}`,
+          }),
+        ]);
+        httpsHosts += 1;
+      } catch (e) {
+        console.error('[walled-garden] ip rule not added', dst, e?.message || e);
+      }
+    }
     for (const address of ips) {
       await api.write([
         '/ip/hotspot/walled-garden/ip/add',
@@ -154,6 +172,7 @@ export async function syncPaymentWalledGarden(routerId, organizationId) {
       ok: true,
       removed,
       addedHosts: hosts,
+      httpsHostRules: httpsHosts,
       addedIps: ips,
     };
   });
