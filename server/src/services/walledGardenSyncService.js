@@ -35,6 +35,19 @@ export function buildPaymentWalledGardenTargets() {
     /* ignore invalid PUBLIC_APP_URL */
   }
 
+  /* The portal calls this API before login (site detection, plans, checkout, payment status).
+   * Without it the buy page fails with "Failed to fetch" and "Location not detected". */
+  for (const raw of [config.publicApiUrl, process.env.RENDER_EXTERNAL_URL, process.env.RENDER_EXTERNAL_HOSTNAME]) {
+    const v = String(raw || '').trim();
+    if (!v) continue;
+    try {
+      const u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+      if (u.hostname) addHost(u.hostname);
+    } catch {
+      /* ignore invalid URL */
+    }
+  }
+
   for (const h of [
     'pay.hubtel.com',
     'unified-pay.hubtel.com',
