@@ -18,6 +18,23 @@ function Spinner() {
   );
 }
 
+/**
+ * Logs the guest in with their new code. With the router's login address (passed through from its
+ * login page) the code goes straight in; without it, any plain-http page makes the hotspot show its
+ * login page.
+ */
+function connectHref(routerLogin, code) {
+  let url;
+  try {
+    url = new URL(routerLogin);
+  } catch {
+    return 'http://neverssl.com/';
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return 'http://neverssl.com/';
+  url.search = new URLSearchParams({ username: code, password: '' }).toString();
+  return url.toString();
+}
+
 function voucherActivating(data) {
   return data?.status === 'paid' && data?.kind === 'voucher' && data?.fulfillment !== 'done';
 }
@@ -30,9 +47,12 @@ export function PayReturnPage() {
     ? `/portal/renew?r=${encodeURIComponent(siteSlug)}`
     : '/portal/renew';
   const serverName = params.get('s');
-  const hotspotHref = `/portal/hotspot${siteSlug ? `?r=${encodeURIComponent(siteSlug)}` : ''}${
-    serverName ? `${siteSlug ? '&' : '?'}s=${encodeURIComponent(serverName)}` : ''
-  }`;
+  const routerLogin = params.get('login') || '';
+  const hotspotQuery = new URLSearchParams();
+  if (siteSlug) hotspotQuery.set('r', siteSlug);
+  if (serverName) hotspotQuery.set('s', serverName);
+  if (routerLogin) hotspotQuery.set('login', routerLogin);
+  const hotspotHref = `/portal/hotspot${hotspotQuery.size ? `?${hotspotQuery}` : ''}`;
   const [status, setStatus] = useState(null);
   const [error, setError] = useState('');
   const [timedOut, setTimedOut] = useState(false);
@@ -265,10 +285,26 @@ export function PayReturnPage() {
             </button>
           </div>
         ) : null}
-        <p className="mt-6 text-sm text-slate-500">
-          Go back to the Wi‑Fi login page and enter this code to connect. Keep it until your plan runs out.
+        <a
+          href={connectHref(routerLogin, status.voucherCode)}
+          className={`mt-6 block w-full rounded-xl px-4 py-3 text-base font-semibold ${
+            activating
+              ? 'pointer-events-none bg-slate-800 text-slate-500'
+              : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400'
+          }`}
+          aria-disabled={activating || undefined}
+        >
+          {routerLogin ? 'Connect now' : 'Enter code to connect'}
+        </a>
+        <p className="mt-3 text-sm text-slate-500">
+          {routerLogin
+            ? 'Connects this phone with your code. Keep the code until your plan runs out.'
+            : 'Opens the Wi‑Fi login page: enter the code there. Keep it until your plan runs out.'}
         </p>
-        <Link to={hotspotHref} className="mt-8 inline-block text-emerald-400">
+        <Link
+          to={hotspotHref}
+          className="mt-4 block w-full rounded-xl border border-slate-700 px-4 py-3 text-sm text-slate-200 hover:border-slate-500"
+        >
           Buy another
         </Link>
       </div>

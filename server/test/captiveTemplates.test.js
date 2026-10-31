@@ -33,7 +33,7 @@ describe('login page designs', () => {
   it.each(showcase)('%s shows plan tiles that link to buying that plan at this site', (id) => {
     const html = renderLoginPage({ ...base, designId: id, mode: 'router' });
     expect(html).toContain('class="tile"');
-    expect(html).toContain('href="https://app.test/portal/hotspot?r=accra&amp;package=6650a1b2c3d4e5f6a7b8c9d0&amp;s=$(server-name)"');
+    expect(html).toContain('href="https://app.test/portal/hotspot?r=accra&amp;package=6650a1b2c3d4e5f6a7b8c9d0&amp;s=$(server-name)&amp;login=$(link-login-only)"');
     expect(html).toContain('GHS 25');
     expect(html).toContain('Accra Mall');
   });

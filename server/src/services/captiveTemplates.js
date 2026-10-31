@@ -461,8 +461,13 @@ export function renderLoginPage(o = {}) {
   /* Left unescaped so the router fills in $(server-name) for the server the guest is on. */
   const serverQuery =
     mode === 'router' ? 's=$(server-name)' : webServer ? `s=${esc(encodeURIComponent(webServer))}` : '';
+  /* Where this router logs guests in, so the buy page can offer "Connect now" once paid. */
+  const webLogin = mode === 'web' && /^https?:\/\//i.test(String(web.action || '')) ? String(web.action) : '';
+  const loginQuery =
+    mode === 'router' ? 'login=$(link-login-only)' : webLogin ? `login=${esc(encodeURIComponent(webLogin))}` : '';
+  const buyQuery = [serverQuery, loginQuery].filter(Boolean).join('&amp;');
   const buyHref = (url) =>
-    serverQuery ? `${esc(url)}${url.includes('?') ? '&amp;' : '?'}${serverQuery}` : esc(url);
+    buyQuery ? `${esc(url)}${url.includes('?') ? '&amp;' : '?'}${buyQuery}` : esc(url);
 
   let action = '$(link-login-only)';
   let dst = '$(link-orig)';

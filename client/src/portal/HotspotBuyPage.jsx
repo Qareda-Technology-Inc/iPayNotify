@@ -82,13 +82,15 @@ export function HotspotBuyPage() {
   const chosenNetwork = network || networkForNumber(msisdn);
   const slug = getPortalSlugFromLocation();
   const hotspotServer = new URLSearchParams(window.location.search).get('s') || '';
+  /* The router's login address, passed by its login page, for "Connect now" after paying. */
+  const routerLogin = new URLSearchParams(window.location.search).get('login') || '';
   const brandName = String(ctx?.branding?.displayName || '').trim() || 'Wi‑Fi';
   const footerText = String(ctx?.branding?.portalFooter || '').trim();
   const supportPhone = String(ctx?.branding?.portalSupportPhone || '').trim();
   const returnPath = (ref) =>
     `/portal/pay/return?ref=${encodeURIComponent(ref)}&flow=hotspot${slug ? `&r=${encodeURIComponent(slug)}` : ''}${
       hotspotServer ? `&s=${encodeURIComponent(hotspotServer)}` : ''
-    }`;
+    }${routerLogin ? `&login=${encodeURIComponent(routerLogin)}` : ''}`;
 
   useEffect(() => {
     if (!siteReady) {
