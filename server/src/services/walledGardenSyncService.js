@@ -48,6 +48,27 @@ export function buildPaymentWalledGardenTargets() {
     }
   }
 
+  /* The billing site's own web fonts. */
+  addHost('fonts.googleapis.com');
+  addHost('fonts.gstatic.com');
+
+  /* With Paystack the customer pays from our own buy page (the prompt arrives on their phone), so
+   * nothing else needs opening. Hubtel's checkout is a separate site that loads from many hosts. */
+  if (config.hotspotPaymentProvider === 'hubtel') {
+    addHubtelCheckoutHosts(addHost);
+  }
+
+  for (const h of config.walledGarden.extraDstHosts) {
+    addHost(h);
+  }
+
+  return {
+    hosts: [...new Set(hosts)],
+    ips: [...new Set(ips)],
+  };
+}
+
+function addHubtelCheckoutHosts(addHost) {
   for (const h of [
     'pay.hubtel.com',
     'unified-pay.hubtel.com',
@@ -65,34 +86,23 @@ export function buildPaymentWalledGardenTargets() {
     'cdn.jsdelivr.net',
     'unpkg.com',
     'cdnjs.cloudflare.com',
-    'fonts.googleapis.com',
-    'fonts.gstatic.com',
     'use.fontawesome.com',
   ]) {
     addHost(h);
   }
-
-  const cb = String(config.hubtel?.callbackUrl || '').trim();
-  if (cb) {
-    try {
-      const u = new URL(cb);
-      if (u.hostname) addHost(u.hostname);
-    } catch {
-      /* ignore invalid callback URL */
-    }
-  }
-
-  for (const h of config.walledGarden.extraDstHosts) {
-    addHost(h);
-  }
-
-  return {
-    hosts: [...new Set(hosts)],
-    ips: [...new Set(ips)],
-  };
 }
 
 async function removeMarked(api, printCmd, removeBase) {
+  /* Over SSH a walled-garden `print` rarely parses into rows with `.id` and `comment`, so nothing was
+   * removed and every sync stacked another copy of each rule. Remove in one command on the router. */
+  if (typeof api.execCli === 'function') {
+    const menu = removeBase.split('/').filter(Boolean).join(' ');
+    const where = `where comment~"^${QAREFI_PREFIX}"`;
+    const cnt = await api.execCli(`/${menu} print count-only ${where}`);
+    const n = parseInt(String(cnt).trim().split(/\s+/)[0] || '0', 10);
+    await api.execCli(`/${menu} remove [find ${where}]`);
+    return Number.isNaN(n) ? 0 : n;
+  }
   const raw = await api.write(printCmd);
   const rows = normalizePrintRows(raw);
   const marked = rows.filter((r) => String(r.comment ?? '').startsWith(QAREFI_PREFIX));
