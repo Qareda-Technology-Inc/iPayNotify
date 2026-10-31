@@ -169,11 +169,13 @@ export async function resolvePortalRouter(req, slugQuery) {
 
 /**
  * Query for the hotspot plans sold at one site: the router's chosen plans, or every active
- * hotspot plan of the organisation when none are chosen — minus plans unticked under
- * "Plans & prices", so the login page, buy page and checkout always offer the same plans.
+ * hotspot plan of the organisation when none are chosen, so the login page, buy page and checkout
+ * always offer the same plans. Which plans a site sells is decided per site only: the old
+ * organisation-wide "show online" tick (`showOnPortal`) is ignored, because unticking it for one
+ * site emptied every other site that sold that plan.
  */
 export async function sitePlanQuery(organizationId, routerId) {
-  const q = { organizationId, kind: 'hotspot', isActive: true, showOnPortal: { $ne: false } };
+  const q = { organizationId, kind: 'hotspot', isActive: true };
   if (!routerId) return q;
   const router = await MikrotikRouter.findOne({ _id: routerId, organizationId })
     .select('portalPackageIds')

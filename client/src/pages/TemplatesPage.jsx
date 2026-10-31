@@ -239,7 +239,6 @@ function planDraft(p) {
   return {
     name: p.name || '',
     price: p.priceCents != null ? String(Number(p.priceCents) / 100) : '0',
-    showOnPortal: p.showOnPortal !== false,
   };
 }
 
@@ -273,11 +272,11 @@ function PlansEditor({ onChanged }) {
   function isDirty(p) {
     const d = drafts[p._id];
     const base = planDraft(p);
-    return d && (d.name.trim() !== base.name || Number(d.price) !== Number(base.price) || d.showOnPortal !== base.showOnPortal);
+    return d && (d.name.trim() !== base.name || Number(d.price) !== Number(base.price));
   }
 
-  async function save(p, overrides = {}) {
-    const d = { ...drafts[p._id], ...overrides };
+  async function save(p) {
+    const d = drafts[p._id];
     const name = d.name.trim();
     const price = Number(d.price);
     if (!name) return setMsg('Plan name cannot be empty.');
@@ -287,7 +286,7 @@ function PlansEditor({ onChanged }) {
     try {
       const updated = await apiFetch(`/api/packages/${p._id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ name, priceCents: Math.round(price * 100), showOnPortal: d.showOnPortal }),
+        body: JSON.stringify({ name, priceCents: Math.round(price * 100) }),
       });
       setPlans((list) => list.map((x) => (x._id === p._id ? { ...x, ...updated } : x)));
       setDrafts((all) => ({ ...all, [p._id]: planDraft(updated) }));
@@ -308,8 +307,8 @@ function PlansEditor({ onChanged }) {
         </Link>
       </div>
       <p className="text-xs text-slate-500">
-        These are your plans and their usual price at every site. To charge a different price at one site, set it under
-        Push to router → Plans at this site. Untick to stop selling a plan online at every site.
+        Every plan in your organisation and its usual price. Choose which plans each site sells, and any price just for that
+        site, under Push to router → Plans at this site.
       </p>
       {state === 'loading' ? <p className="text-xs text-slate-500">Loading plans…</p> : null}
       {state === 'idle' && plans.length === 0 ? (
@@ -327,17 +326,6 @@ function PlansEditor({ onChanged }) {
           const dirty = isDirty(p);
           return (
             <li key={p._id} className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                title="Show on login page"
-                checked={d.showOnPortal}
-                disabled={savingId === p._id}
-                onChange={(e) => {
-                  setDraft(p._id, 'showOnPortal', e.target.checked);
-                  if (!dirty) save(p, { showOnPortal: e.target.checked });
-                }}
-                className="rounded border-slate-600"
-              />
               <input
                 value={d.name}
                 onChange={(e) => setDraft(p._id, 'name', e.target.value)}
@@ -418,19 +406,15 @@ function SitePlansPicker({ router, onSaved, plansVersion }) {
     setPrices(savedPrices);
   }, [routerKey, savedPrices]);
 
-  /* What customers at this site can buy right now (saved choice, active, ticked in Plans & prices). */
-  const soldCount = plans.filter(
-    (p) => p.showOnPortal !== false && (savedIds.length === 0 || savedIds.includes(String(p._id)))
-  ).length;
+  /* What customers at this site can buy right now (saved choice of active plans). */
+  const soldCount = plans.filter((p) => savedIds.length === 0 || savedIds.includes(String(p._id))).length;
   let nothingSoldReason = '';
   if (state === 'idle' && soldCount === 0) {
     if (plans.length === 0) {
       nothingSoldReason = 'There are no active hotspot plans. Add one under All plan settings.';
-    } else if (savedIds.length > 0 && !plans.some((p) => savedIds.includes(String(p._id)))) {
+    } else {
       nothingSoldReason =
         'The plans chosen for this site have been switched off or deleted. Choose All plans, or tick the plans this site sells.';
-    } else {
-      nothingSoldReason = 'Every plan offered here is unticked in Plans & prices above. Tick the plans to sell online.';
     }
   }
 

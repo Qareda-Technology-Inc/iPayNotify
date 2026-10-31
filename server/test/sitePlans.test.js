@@ -96,13 +96,23 @@ describe('plans per captive portal site', () => {
     expect(await buyList(mall)).toHaveLength(3);
   });
 
-  it('keeps the buy page in step with the login page when a plan is unticked', async () => {
+  it('setting up one site never empties another (old shared "show online" tick is ignored)', async () => {
+    /* Site A sells Daily + Weekly, site B sells Monthly; then plans are hidden the old way. */
+    await choosePlans(mall, [daily, weekly]);
+    await choosePlans(campus, [monthly]);
     await monthly.updateOne({ showOnPortal: false });
+    await daily.updateOne({ showOnPortal: false });
+    await weekly.updateOne({ showOnPortal: false });
+
     expect(await buyList(mall)).toEqual(['Daily Pass', 'Weekly Pass']);
+    expect(await buyList(campus)).toEqual(['Monthly Pass']);
     expect(await loginPage(mall)).not.toContain('Monthly Pass');
     await expect(
       createHotspotPurchaseCheckout({ packageId: monthly._id, routerId: mall._id, customerMsisdn: '0241234567' })
     ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      createHotspotPurchaseCheckout({ packageId: monthly._id, routerId: campus._id, customerMsisdn: '0241234567' })
+    ).resolves.toMatchObject({ mode: 'hubtel_checkout' });
   });
 
   it('lists buy-page plans cheapest first with the same line the login page shows', async () => {
