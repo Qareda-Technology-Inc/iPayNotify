@@ -40,6 +40,14 @@ const routerSchema = new mongoose.Schema(
      * Empty = every active hotspot plan of the organisation.
      */
     portalPackageIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'PlanPackage' }],
+    /** This site's own price for a plan; plans not listed sell at the plan's own price. */
+    portalPrices: [
+      {
+        _id: false,
+        packageId: { type: mongoose.Schema.Types.ObjectId, ref: 'PlanPackage', required: true },
+        priceCents: { type: Number, required: true, min: 1 },
+      },
+    ],
     /** Shared secret the hotspot on-login script sends back to /api/public/hotspot/login-event. */
     hotspotHookKey: { type: String, select: false, sparse: true, unique: true },
     /** Last successful login-page push (Templates & designs). */

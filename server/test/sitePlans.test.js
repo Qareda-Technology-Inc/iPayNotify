@@ -122,4 +122,52 @@ describe('plans per captive portal site', () => {
     }
     expect((await Router.findById(mall._id).lean()).portalPackageIds).toEqual([]);
   });
+
+  describe('prices per site', () => {
+    const setPrices = (router, rows) =>
+      fetch(`${base}/api/routers/${router._id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          portalPrices: rows.map(([pkg, priceCents]) => ({ packageId: String(pkg._id ?? pkg), priceCents })),
+        }),
+      });
+    const buyPrices = (router) =>
+      fetch(`${base}/api/public/packages/hotspot?r=${router.portalSlug}`)
+        .then((r) => r.json())
+        .then((list) => Object.fromEntries(list.map((p) => [p.name, p.priceCents])));
+    const checkout = (pkg, router) =>
+      createHotspotPurchaseCheckout({ packageId: pkg._id, routerId: router._id, customerMsisdn: '0241234567' });
+
+    it('sells the same plan at each site at that site\'s own price', async () => {
+      expect((await setPrices(mall, [[daily, 800]])).status).toBe(200);
+      expect((await setPrices(campus, [[daily, 700]])).status).toBe(200);
+
+      expect(await buyPrices(mall)).toMatchObject({ 'Daily Pass': 800, 'Weekly Pass': 1500 });
+      expect(await buyPrices(campus)).toMatchObject({ 'Daily Pass': 700, 'Weekly Pass': 1500 });
+      expect(await loginPage(mall)).toContain('GHS 8');
+      expect(await loginPage(mall)).not.toContain('GHS 7');
+      expect(await loginPage(campus)).toContain('GHS 7');
+
+      const { Transaction } = await import('../src/models/index.js');
+      const a = await checkout(daily, mall);
+      const b = await checkout(daily, campus);
+      expect((await Transaction.findOne({ clientReference: a.clientReference }).lean()).amountCents).toBe(800);
+      expect((await Transaction.findOne({ clientReference: b.clientReference }).lean()).amountCents).toBe(700);
+    });
+
+    it('goes back to the plan price when a site price is cleared', async () => {
+      await setPrices(mall, [[daily, 800]]);
+      await setPrices(mall, []);
+      expect((await buyPrices(mall))['Daily Pass']).toBe(300);
+    });
+
+    it('refuses a zero price, a duplicate plan or another organisation\'s plan', async () => {
+      const otherOrgPlan = await createHotspotPackage(await createOrg(), { name: 'Rival Pass' });
+      for (const bad of [[[daily, 0]], [[daily, 500], [daily, 600]], [[otherOrgPlan, 500]]]) {
+        expect((await setPrices(mall, bad)).status).toBe(400);
+      }
+      expect((await Router.findById(mall._id).lean()).portalPrices).toEqual([]);
+    });
+  });
 });

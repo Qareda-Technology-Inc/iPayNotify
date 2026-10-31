@@ -15,8 +15,10 @@ import {
   submitPaystackOtp,
 } from '../services/paymentService.js';
 import {
+  applySitePrices,
   loadPortalPlans,
   sitePlanQuery,
+  sitePriceMap,
   resolvePortalRouter,
   resolvePortalSiteFromRequest,
 } from '../services/portalContextService.js';
@@ -154,10 +156,10 @@ publicPortalRouter.get(
       .select(
         'name priceCents currency activeProfile durationDays durationAmount durationUnit dataLimitBytes timeLimitSeconds elapsedSeconds pausedSeconds ticketDurationType usersPerTicket speedUpMbps speedDownMbps description'
       )
-      .sort({ priceCents: 1, name: 1 })
       .lean();
+    const priced = applySitePrices(list, await sitePriceMap(ctx.router.id));
     /* `detail` is the same "1 day · Unlimited" line the login page shows for the plan. */
-    res.json(list.map((p) => ({ ...p, detail: planDetail(p) })));
+    res.json(priced.map((p) => ({ ...p, detail: planDetail(p) })));
   })
 );
 

@@ -575,6 +575,7 @@ routersApi.patch(
       smsSenderId,
       monitorAlerts,
       portalPackageIds,
+      portalPrices,
     } = req.body;
     if (monitorAlerts !== undefined) {
       doc.set('monitor.alertsEnabled', Boolean(monitorAlerts));
@@ -658,6 +659,34 @@ routersApi.patch(
       }
       doc.portalPackageIds = ids;
     }
+    if (portalPrices !== undefined) {
+      /* [{ packageId, priceCents }]: this site's own prices. A plan left out sells at its own price. */
+      if (!Array.isArray(portalPrices)) {
+        return res.status(400).json({ error: 'portalPrices must be an array' });
+      }
+      const rows = [];
+      for (const row of portalPrices) {
+        const id = String(row?.packageId || '');
+        const cents = Math.round(Number(row?.priceCents));
+        if (!mongoose.isValidObjectId(id)) {
+          return res.status(400).json({ error: 'portalPrices contains an invalid plan id' });
+        }
+        if (!Number.isFinite(cents) || cents < 1) {
+          return res.status(400).json({ error: 'Each site price must be more than 0' });
+        }
+        rows.push({ packageId: id, priceCents: cents });
+      }
+      const ids = [...new Set(rows.map((r) => r.packageId))];
+      const found = await PlanPackage.countDocuments({
+        _id: { $in: ids },
+        organizationId: doc.organizationId,
+        kind: 'hotspot',
+      });
+      if (found !== ids.length || ids.length !== rows.length) {
+        return res.status(400).json({ error: 'Each site price must be for a different hotspot plan of this organisation' });
+      }
+      doc.portalPrices = rows;
+    }
     await doc.save();
     void logOrgAudit({
       organizationId: req.organizationId,
@@ -682,6 +711,7 @@ routersApi.patch(
       smsBrandName: doc.smsBrandName || '',
       smsSenderId: doc.smsSenderId || '',
       portalPackageIds: (doc.portalPackageIds || []).map(String),
+      portalPrices: (doc.portalPrices || []).map((x) => ({ packageId: String(x.packageId), priceCents: x.priceCents })),
       monitor: doc.monitor,
     });
   })

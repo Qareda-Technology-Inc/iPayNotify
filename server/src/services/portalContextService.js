@@ -183,17 +183,30 @@ export async function sitePlanQuery(organizationId, routerId) {
   return q;
 }
 
-/** Active hotspot plans shown on a site's login page, cheapest first. */
+/** packageId → this site's own price in pesewas (only plans the site prices differently). */
+export async function sitePriceMap(routerId) {
+  if (!routerId) return new Map();
+  const router = await MikrotikRouter.findById(routerId).select('portalPrices').lean();
+  return new Map((router?.portalPrices || []).map((x) => [String(x.packageId), x.priceCents]));
+}
+
+/** Plans with this site's prices applied, cheapest first. */
+export function applySitePrices(plans, prices) {
+  return plans
+    .map((p) => (prices.has(String(p._id)) ? { ...p, priceCents: prices.get(String(p._id)) } : p))
+    .sort((a, b) => (a.priceCents ?? 0) - (b.priceCents ?? 0) || String(a.name).localeCompare(String(b.name)));
+}
+
+/** Active hotspot plans shown on a site's login page, cheapest first, at this site's prices. */
 export async function loadPortalPlans(organizationId, routerId) {
   if (!organizationId) return [];
   const q = await sitePlanQuery(organizationId, routerId);
-  return PlanPackage.find(q)
+  const plans = await PlanPackage.find(q)
     .select(
       'name priceCents currency dataLimitBytes timeLimitSeconds elapsedSeconds pausedSeconds ticketDurationType usersPerTicket speedDownMbps'
     )
-    .sort({ priceCents: 1, name: 1 })
-    .limit(12)
     .lean();
+  return applySitePrices(plans, await sitePriceMap(routerId)).slice(0, 12);
 }
 
 /** Shared portal-site resolution for public POST bodies (`portalSlug` or query `r`). */

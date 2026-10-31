@@ -26,7 +26,7 @@ import { notifyTransactionPaidSms } from './paymentSmsService.js';
 import { notifyTransactionPaidAdminEmail } from './paymentAdminNotifyService.js';
 import { resolveOrgBilling } from './orgBillingService.js';
 import { settlePaidTransactionToWallet } from './orgWalletService.js';
-import { sitePlanQuery } from './portalContextService.js';
+import { sitePlanQuery, sitePriceMap } from './portalContextService.js';
 import { applyOrgBillPayment } from './orgPlatformBillingService.js';
 
 function newClientReference() {
@@ -340,7 +340,8 @@ export async function createHotspotPurchaseCheckout({
     err.status = 400;
     throw err;
   }
-  const amountCents = pkg.priceCents ?? 0;
+  /* This site's own price when it has one, so each site charges what its pages show. */
+  const amountCents = (await sitePriceMap(routerId)).get(String(pkg._id)) ?? pkg.priceCents ?? 0;
   if (amountCents <= 0) {
     const err = new Error('Package has no price set');
     err.status = 400;

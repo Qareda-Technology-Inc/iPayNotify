@@ -308,8 +308,8 @@ function PlansEditor({ onChanged }) {
         </Link>
       </div>
       <p className="text-xs text-slate-500">
-        These are your real plans — a new price is what customers pay when buying. Untick to stop selling a plan online
-        at every site (login page and buy page); choose which plans each site sells under Push to router.
+        These are your plans and their usual price at every site. To charge a different price at one site, set it under
+        Push to router → Plans at this site. Untick to stop selling a plan online at every site.
       </p>
       {state === 'loading' ? <p className="text-xs text-slate-500">Loading plans…</p> : null}
       {state === 'idle' && plans.length === 0 ? (
@@ -374,8 +374,9 @@ function PlansEditor({ onChanged }) {
 }
 
 /**
- * Which hotspot plans one site offers (login page, buy page, checkout).
+ * Which hotspot plans one site offers (login page, buy page, checkout), and at what price.
  * No plans chosen = every active plan, so existing sites keep working until someone picks.
+ * A blank site price = the plan's own price from Plans & prices.
  */
 function SitePlansPicker({ router, onSaved }) {
   const [plans, setPlans] = useState([]);
@@ -384,6 +385,7 @@ function SitePlansPicker({ router, onSaved }) {
   const [selected, setSelected] = useState(/** @type {string[]} */ ([]));
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [prices, setPrices] = useState(/** @type {Record<string, string>} */ ({}));
 
   useEffect(() => {
     apiFetch('/api/packages?kind=hotspot')
@@ -402,11 +404,46 @@ function SitePlansPicker({ router, onSaved }) {
 
   const routerKey = router?._id || '';
   const savedIds = useMemo(() => (router?.portalPackageIds || []).map(String), [router?.portalPackageIds]);
+  const savedPrices = useMemo(() => {
+    const out = /** @type {Record<string, string>} */ ({});
+    for (const x of router?.portalPrices || []) out[String(x.packageId)] = (Number(x.priceCents) / 100).toFixed(2);
+    return out;
+  }, [router?.portalPrices]);
   useEffect(() => {
     setSelected(savedIds);
     setOnlySelected(savedIds.length > 0);
     setMsg('');
   }, [routerKey, savedIds]);
+  useEffect(() => {
+    setPrices(savedPrices);
+  }, [routerKey, savedPrices]);
+
+  async function savePrice(id) {
+    const raw = String(prices[id] ?? '').trim();
+    if (raw === (savedPrices[id] ?? '')) return;
+    const value = raw === '' ? null : Number(raw);
+    if (value !== null && (!Number.isFinite(value) || value <= 0)) {
+      setMsg('Enter a price above 0, or leave it blank for the plan price.');
+      return;
+    }
+    const next = { ...savedPrices };
+    if (value === null) delete next[id];
+    else next[id] = value.toFixed(2);
+    const body = Object.entries(next).map(([packageId, v]) => ({ packageId, priceCents: Math.round(Number(v) * 100) }));
+    setSaving(true);
+    setMsg('');
+    try {
+      const updated = await apiFetch(`/api/routers/${routerKey}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ portalPrices: body }),
+      });
+      onSaved(routerKey, { portalPrices: updated?.portalPrices || body });
+    } catch (e) {
+      setMsg(e.message || 'Could not save the price for this site');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function save(ids) {
     if (!routerKey) return;
@@ -417,7 +454,7 @@ function SitePlansPicker({ router, onSaved }) {
         method: 'PATCH',
         body: JSON.stringify({ portalPackageIds: ids }),
       });
-      onSaved(routerKey, (updated?.portalPackageIds || ids).map(String));
+      onSaved(routerKey, { portalPackageIds: (updated?.portalPackageIds || ids).map(String) });
     } catch (e) {
       setMsg(e.message || 'Could not save plans for this site');
     } finally {
@@ -453,37 +490,56 @@ function SitePlansPicker({ router, onSaved }) {
           Only selected plans
         </label>
       </div>
-      {onlySelected ? (
-        state === 'loading' ? (
-          <p className="text-xs text-slate-500">Loading plans…</p>
-        ) : plans.length === 0 ? (
-          <p className="text-xs text-slate-400">No active hotspot plans yet.</p>
-        ) : (
-          <ul className="max-h-48 space-y-1 overflow-y-auto">
-            {plans.map((p) => (
-              <li key={p._id}>
-                <label className="flex items-center gap-2 text-sm text-slate-200">
+      {state === 'loading' ? (
+        <p className="text-xs text-slate-500">Loading plans…</p>
+      ) : plans.length === 0 ? (
+        <p className="text-xs text-slate-400">No active hotspot plans yet.</p>
+      ) : (
+        <ul className="max-h-64 space-y-1 overflow-y-auto">
+          {plans.map((p) => {
+            const id = String(p._id);
+            const offered = !onlySelected || selected.includes(id);
+            const planPrice = (Number(p.priceCents || 0) / 100).toFixed(2);
+            return (
+              <li key={p._id} className="flex items-center gap-2 text-sm text-slate-200">
+                {onlySelected ? (
                   <input
                     type="checkbox"
+                    aria-label={`Sell ${p.name} at this site`}
                     className="rounded border-slate-600"
-                    checked={selected.includes(String(p._id))}
+                    checked={selected.includes(id)}
                     disabled={saving}
-                    onChange={(e) => toggle(String(p._id), e.target.checked)}
+                    onChange={(e) => toggle(id, e.target.checked)}
                   />
-                  <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                  <span className="text-xs text-slate-500">
-                    {p.currency || 'GHS'} {(Number(p.priceCents || 0) / 100).toFixed(2)}
-                  </span>
+                ) : null}
+                <span className={`min-w-0 flex-1 truncate ${offered ? '' : 'text-slate-500'}`}>{p.name}</span>
+                <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+                  {p.currency || 'GHS'}
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0.01"
+                    step="0.01"
+                    aria-label={`Price of ${p.name} at this site`}
+                    value={prices[id] ?? ''}
+                    placeholder={planPrice}
+                    disabled={saving || !offered}
+                    onChange={(e) => setPrices((m) => ({ ...m, [id]: e.target.value }))}
+                    onBlur={() => savePrice(id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
+                    className="w-20 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-right text-sm text-slate-100 placeholder:text-slate-500 disabled:opacity-50"
+                  />
                 </label>
               </li>
-            ))}
-          </ul>
-        )
-      ) : (
-        <p className="text-xs text-slate-500">Every active hotspot plan is offered here.</p>
+            );
+          })}
+        </ul>
       )}
       <p className="text-[11px] text-slate-500">
-        Applies to the login page, the buy page and checkout at this site. Push again to update the router&apos;s login page.
+        Prices here are for this site only; leave one blank to use the plan&apos;s own price. Applies to the login page,
+        the buy page and checkout at this site. Push again to update the router&apos;s login page.
       </p>
       {saving ? <p className="text-xs text-slate-400">Saving…</p> : null}
       {msg ? <p className="text-xs text-amber-300">{msg}</p> : null}
@@ -900,8 +956,8 @@ export function TemplatesPage() {
               </label>
               <SitePlansPicker
                 router={routers.find((r) => r._id === routerId)}
-                onSaved={(id, ids) => {
-                  setRouters((list) => list.map((r) => (r._id === id ? { ...r, portalPackageIds: ids } : r)));
+                onSaved={(id, patch) => {
+                  setRouters((list) => list.map((r) => (r._id === id ? { ...r, ...patch } : r)));
                   setPlansVersion((v) => v + 1);
                 }}
               />
