@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../api.js';
 import { routerDisplayName as routerLabel } from '../utils/routerDisplayName.js';
 import { AddRouterWizard } from './AddRouterWizard.jsx';
+import { SyncAllRoutersCard } from './SyncAllRoutersCard.jsx';
 import { routerMonitorStatus } from '../utils/routerMonitor.js';
 
 function connectDisplay(r) {
@@ -390,6 +391,8 @@ export function RoutersPanel() {
           {listError}
         </p>
       ) : null}
+
+      {!listLoading ? <SyncAllRoutersCard routerCount={routers.length} /> : null}
 
       {!listLoading && offlineCount ? (
         <div className="rounded-xl border border-red-500/30 bg-red-950/30 px-3 py-2.5 text-sm text-red-100">

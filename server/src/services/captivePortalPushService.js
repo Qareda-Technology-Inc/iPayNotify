@@ -240,3 +240,62 @@ export async function pushCaptivePortalToRouter(routerId, organizationId, { hots
     walledGarden,
   };
 }
+
+/** Host customers buy on (PUBLIC_APP_URL), shown so admins can see which domain a sync applies. */
+export function customerSiteHost() {
+  try {
+    return new URL(config.publicAppUrl).host;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Bring every router of an organisation onto the current customer domain (PUBLIC_APP_URL):
+ * re-push the login page where one was pushed before (its buy links carry the domain), and
+ * rebuild the walled garden, which drops the old domain's QareFi: rows and adds the new ones.
+ * One router failing (offline, wrong password) never stops the others.
+ */
+export async function syncAllRoutersToCurrentDomain(organizationId, { concurrency = 3 } = {}) {
+  if (!organizationId || !mongoose.isValidObjectId(String(organizationId))) {
+    throw fail('Choose an organisation first.');
+  }
+  const routers = await Router.find({ organizationId })
+    .select('name comment host captivePortal.hotspotServer')
+    .sort({ name: 1 })
+    .lean();
+  const results = new Array(routers.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < routers.length) {
+      const i = next++;
+      const r = routers[i];
+      const row = { routerId: String(r._id), name: r.comment || r.name || r.host };
+      const server = String(r.captivePortal?.hotspotServer || '').trim();
+      try {
+        if (server) {
+          const out = await pushCaptivePortalToRouter(r._id, organizationId, { hotspotServer: server });
+          row.loginPage = 'updated';
+          row.walledGarden = out.walledGarden?.ok ? 'updated' : 'failed';
+          if (!out.walledGarden?.ok) row.error = out.walledGarden?.error || 'Walled garden sync failed';
+        } else {
+          await syncPaymentWalledGarden(r._id, organizationId);
+          row.loginPage = 'never_pushed';
+          row.walledGarden = 'updated';
+        }
+        row.ok = row.walledGarden === 'updated';
+      } catch (e) {
+        row.ok = false;
+        row.error = e?.message || 'Could not reach the router';
+      }
+      results[i] = row;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, routers.length)) }, worker));
+  return {
+    domain: customerSiteHost(),
+    total: routers.length,
+    updated: results.filter((r) => r.ok).length,
+    routers: results,
+  };
+}

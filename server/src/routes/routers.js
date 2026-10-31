@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { PlanPackage, Router as MikrotikRouter } from '../models/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { requireRoles } from '../middleware/requireRoles.js';
+import { customerSiteHost, syncAllRoutersToCurrentDomain } from '../services/captivePortalPushService.js';
 import {
   getRouterPppProfiles,
   getRouterPppSecrets,
@@ -520,6 +521,22 @@ routersApi.get(
   asyncHandler(async (req, res) => {
     const snap = await getRouterLiveSnapshot(req.params.id, req.organizationId);
     res.json(snap);
+  })
+);
+
+/**
+ * After the customer domain changes (PUBLIC_APP_URL): every router gets the new login page links
+ * and walled garden, and the old domain is removed. GET tells the page which domain is current.
+ */
+routersApi.get('/portal-sync-all', (_req, res) => {
+  res.json({ domain: customerSiteHost() });
+});
+
+routersApi.post(
+  '/portal-sync-all',
+  requireRoles('super_admin', 'org_admin'),
+  asyncHandler(async (req, res) => {
+    res.json(await syncAllRoutersToCurrentDomain(req.organizationId));
   })
 );
 
