@@ -33,8 +33,12 @@ export const config = {
     defaultPpp: process.env.MIKROTIK_DEFAULT_PPP_PROFILE || 'default',
     expiredPpp: process.env.MIKROTIK_EXPIRED_PPP_PROFILE || 'nonpayment',
   },
+  /* One URL only: CLIENT_ORIGIN (and sometimes PUBLIC_APP_URL by mistake) is a comma-separated list. */
   publicAppUrl:
-    process.env.PUBLIC_APP_URL || process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+    String(process.env.PUBLIC_APP_URL || process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+      .split(',')[0]
+      .trim()
+      .replace(/\/+$/, ''),
   /**
    * Public origin of THIS API (Render). Used for Hubtel callback fallback.
    * Never use PUBLIC_APP_URL (Vercel SPA) — Hubtel posts must hit the API host.
