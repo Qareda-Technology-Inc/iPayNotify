@@ -378,7 +378,7 @@ function PlansEditor({ onChanged }) {
  * No plans chosen = every active plan, so existing sites keep working until someone picks.
  * A blank site price = the plan's own price from Plans & prices.
  */
-function SitePlansPicker({ router, onSaved }) {
+function SitePlansPicker({ router, onSaved, plansVersion }) {
   const [plans, setPlans] = useState([]);
   const [state, setState] = useState(/** @type {'loading' | 'idle' | 'error'} */ ('loading'));
   const [onlySelected, setOnlySelected] = useState(false);
@@ -400,7 +400,7 @@ function SitePlansPicker({ router, onSaved }) {
         setMsg(e.message || 'Could not load plans');
         setState('error');
       });
-  }, []);
+  }, [plansVersion]);
 
   const routerKey = router?._id || '';
   const savedIds = useMemo(() => (router?.portalPackageIds || []).map(String), [router?.portalPackageIds]);
@@ -417,6 +417,22 @@ function SitePlansPicker({ router, onSaved }) {
   useEffect(() => {
     setPrices(savedPrices);
   }, [routerKey, savedPrices]);
+
+  /* What customers at this site can buy right now (saved choice, active, ticked in Plans & prices). */
+  const soldCount = plans.filter(
+    (p) => p.showOnPortal !== false && (savedIds.length === 0 || savedIds.includes(String(p._id)))
+  ).length;
+  let nothingSoldReason = '';
+  if (state === 'idle' && soldCount === 0) {
+    if (plans.length === 0) {
+      nothingSoldReason = 'There are no active hotspot plans. Add one under All plan settings.';
+    } else if (savedIds.length > 0 && !plans.some((p) => savedIds.includes(String(p._id)))) {
+      nothingSoldReason =
+        'The plans chosen for this site have been switched off or deleted. Choose All plans, or tick the plans this site sells.';
+    } else {
+      nothingSoldReason = 'Every plan offered here is unticked in Plans & prices above. Tick the plans to sell online.';
+    }
+  }
 
   async function savePrice(id) {
     const raw = String(prices[id] ?? '').trim();
@@ -480,6 +496,12 @@ function SitePlansPicker({ router, onSaved }) {
   return (
     <div className="space-y-2 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
       <p className="text-xs font-medium text-slate-300">Plans at this site</p>
+      {nothingSoldReason ? (
+        <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-950/30 px-3 py-2 text-xs text-amber-100">
+          <p className="font-semibold">Customers at this site can&apos;t buy anything right now.</p>
+          <p className="mt-0.5 text-amber-200/90">{nothingSoldReason}</p>
+        </div>
+      ) : null}
       <div className="flex flex-wrap gap-4 text-xs text-slate-300">
         <label className="flex items-center gap-1.5">
           <input type="radio" checked={!onlySelected} disabled={saving} onChange={chooseAll} />
@@ -955,6 +977,7 @@ export function TemplatesPage() {
                 </select>
               </label>
               <SitePlansPicker
+                plansVersion={plansVersion}
                 router={routers.find((r) => r._id === routerId)}
                 onSaved={(id, patch) => {
                   setRouters((list) => list.map((r) => (r._id === id ? { ...r, ...patch } : r)));
