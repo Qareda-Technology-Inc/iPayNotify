@@ -13,6 +13,11 @@ const organizationBillingSchema = new mongoose.Schema(
     platformFeeBps: { type: Number, default: null },
     /** Optional MoMo / bank hint for super-admin payouts. */
     payoutMomoNumber: { type: String, trim: true, default: '' },
+    /** When the payout number last changed: automatic payouts wait a while after a change. */
+    payoutMomoChangedAt: { type: Date, default: null },
+    /** Paystack transfer recipient for payoutMomoNumber (recreated when the number changes). */
+    payoutRecipientCode: { type: String, trim: true, default: '' },
+    payoutRecipientFor: { type: String, trim: true, default: '' },
     payoutNote: { type: String, trim: true, default: '' },
     /** Public HTTPS URL for portal / checkout logo (optional white-label). */
     logoUrl: { type: String, trim: true, default: '' },

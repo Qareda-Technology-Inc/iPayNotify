@@ -365,7 +365,9 @@ export function OrganizationSettingsPage() {
         <fieldset className="space-y-4 border-t border-slate-800 pt-6">
           <legend className="text-sm font-semibold text-white">Payout destination</legend>
           <p className="text-xs text-slate-500">
-            Where Qaretech should send your withdrawals (shown when you request payout in Wallet).
+            Withdrawals from Wallet are sent to this MoMo number. Only an organisation admin can change it, and
+            after a change withdrawals wait for approval for a while, to protect you if someone gets into your
+            account.
           </p>
           <label className="block text-sm text-slate-300">
             MoMo number

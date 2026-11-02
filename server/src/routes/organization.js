@@ -84,7 +84,7 @@ async function jsonWithPortal(doc) {
  * Apply `body.billing` onto a Mongoose organisation document (mutates).
  * Omitted credential fields keep existing values so PATCH can update labels only.
  */
-function applyBillingPatch(doc, billingBody, { isSuperAdmin = false } = {}) {
+function applyBillingPatch(doc, billingBody, { isSuperAdmin = false, canChangePayout = false } = {}) {
   if (!billingBody || typeof billingBody !== 'object') return;
   if (!doc.billing) doc.billing = {};
   const b = billingBody;
@@ -142,7 +142,20 @@ function applyBillingPatch(doc, billingBody, { isSuperAdmin = false } = {}) {
     doc.billing.portalShowPlans = Boolean(b.portalShowPlans);
   }
   if (b.payoutMomoNumber !== undefined) {
-    doc.billing.payoutMomoNumber = String(b.payoutMomoNumber || '').trim();
+    const next = String(b.payoutMomoNumber || '').trim();
+    if (next !== String(doc.billing.payoutMomoNumber || '').trim()) {
+      /* Payouts can go to this number automatically, so only an organisation admin may change it,
+       * and automatic payouts pause for a while after a change (see payoutService). */
+      if (!canChangePayout) {
+        const err = new Error('Only an organisation admin can change the payout MoMo number');
+        err.status = 403;
+        throw err;
+      }
+      doc.billing.payoutMomoNumber = next;
+      doc.billing.payoutMomoChangedAt = new Date();
+      doc.billing.payoutRecipientCode = '';
+      doc.billing.payoutRecipientFor = '';
+    }
   }
   if (b.payoutNote !== undefined) {
     doc.billing.payoutNote = String(b.payoutNote || '').trim();
@@ -353,7 +366,10 @@ organizationRouter.patch(
 
     if (body.billing != null) {
       try {
-        applyBillingPatch(doc, body.billing, { isSuperAdmin: role === 'super_admin' });
+        applyBillingPatch(doc, body.billing, {
+          isSuperAdmin: role === 'super_admin',
+          canChangePayout: role === 'super_admin' || role === 'org_admin',
+        });
       } catch (e) {
         return res.status(e.status || 400).json({ error: e.message || 'Invalid billing' });
       }

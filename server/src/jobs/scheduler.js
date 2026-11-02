@@ -15,6 +15,7 @@ import { enforceRemoteAccessRouters } from '../services/remoteAccessService.js';
 import { runRouterMonitor } from '../services/routerMonitorService.js';
 import { runStuckPaymentAlerts } from '../services/stuckPaymentService.js';
 import { runOrgBillingJob } from '../services/orgPlatformBillingService.js';
+import { reconcileProcessingWithdrawals } from '../services/payoutService.js';
 import { config } from '../config.js';
 
 let task;
@@ -24,6 +25,7 @@ let hotspotPlanTask;
 let expiryReminderSmsTask;
 let stalePaymentsTask;
 let voucherFulfillTask;
+let payoutCheckTask;
 let routerMonitorTask;
 let hubtelReconcileTask;
 let stuckPaymentTask;
@@ -46,6 +48,24 @@ export function startBillingScheduler() {
       { timezone: config.cronTz }
     );
     console.log(`[router.monitor] router online/offline check every minute (${config.cronTz})`);
+  }
+
+  if (!payoutCheckTask) {
+    payoutCheckTask = cron.schedule(
+      '*/5 * * * *',
+      async () => {
+        try {
+          const summary = await reconcileProcessingWithdrawals();
+          if (summary.checked > 0) {
+            console.log('[payout] check', new Date().toISOString(), summary);
+          }
+        } catch (e) {
+          console.error('[payout] check failed', e);
+        }
+      },
+      { timezone: config.cronTz }
+    );
+    console.log(`[payout] vendor payout check every 5 minutes (${config.cronTz})`);
   }
 
   if (!voucherFulfillTask) {
@@ -263,6 +283,10 @@ export function stopBillingScheduler() {
   if (stalePaymentsTask) {
     stalePaymentsTask.stop();
     stalePaymentsTask = null;
+  }
+  if (payoutCheckTask) {
+    payoutCheckTask.stop();
+    payoutCheckTask = null;
   }
   if (voucherFulfillTask) {
     voucherFulfillTask.stop();

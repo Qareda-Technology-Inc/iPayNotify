@@ -11,7 +11,7 @@ const orgLedgerEntrySchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['sale_credit', 'platform_fee', 'withdrawal', 'adjustment'],
+      enum: ['sale_credit', 'platform_fee', 'withdrawal', 'withdrawal_reversal', 'adjustment'],
       required: true,
     },
     /** Signed: credits +, debits − */

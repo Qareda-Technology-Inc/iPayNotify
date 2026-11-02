@@ -2,6 +2,7 @@ import express from 'express';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { verifyWebhookSignature } from '../integrations/paystack.js';
 import { reconcilePaystackPayment } from '../services/paymentService.js';
+import { reconcileWithdrawalTransfer } from '../services/payoutService.js';
 
 export const paystackPaymentsRouter = express.Router();
 
@@ -20,6 +21,11 @@ paystackPaymentsRouter.post(
     const reference = String(req.body?.data?.reference || '').trim();
     if (reference && /^charge\.(success|failed)$/.test(event)) {
       const out = await reconcilePaystackPayment(reference);
+      console.log('[paystack.webhook]', event, reference, out.status || out.reason);
+    }
+    /* Vendor payouts (references wd_<withdrawal>_<attempt>). */
+    if (reference.startsWith('wd_') && /^transfer\.(success|failed|reversed)$/.test(event)) {
+      const out = await reconcileWithdrawalTransfer(reference);
       console.log('[paystack.webhook]', event, reference, out.status || out.reason);
     }
     res.json({ ok: true });

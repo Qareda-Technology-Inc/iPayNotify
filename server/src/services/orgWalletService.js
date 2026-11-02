@@ -2,6 +2,9 @@ import mongoose from 'mongoose';
 import { Organization, OrgLedgerEntry, WithdrawalRequest, Transaction } from '../models/index.js';
 import { resolvePlatformFeeBps } from './platformSettingsService.js';
 
+/** Withdrawals that hold money back from the available balance until they finish. */
+export const RESERVED_WITHDRAWAL_STATUSES = ['pending', 'approved', 'processing'];
+
 export { resolvePlatformFeeBps } from './platformSettingsService.js';
 
 export function computeFeeSplit(amountCents, feeBps) {
@@ -172,7 +175,7 @@ export async function getWalletSummary(organizationId) {
       {
         $match: {
           organizationId: new mongoose.Types.ObjectId(oid),
-          status: { $in: ['pending', 'approved'] },
+          status: { $in: RESERVED_WITHDRAWAL_STATUSES },
         },
       },
       { $group: { _id: null, cents: { $sum: '$amountCents' }, count: { $sum: 1 } } },
@@ -249,7 +252,7 @@ export async function requestWithdrawal({
     {
       $match: {
         organizationId: new mongoose.Types.ObjectId(oid),
-        status: { $in: ['pending', 'approved'] },
+        status: { $in: RESERVED_WITHDRAWAL_STATUSES },
       },
     },
     { $group: { _id: null, cents: { $sum: '$amountCents' } } },
@@ -264,13 +267,30 @@ export async function requestWithdrawal({
     throw e;
   }
 
-  return WithdrawalRequest.create({
+  const doc = await WithdrawalRequest.create({
     organizationId: oid,
     amountCents: amount,
     status: 'pending',
     destinationNote: String(destinationNote || '').trim(),
     requestedByAdminId: requestedByAdminId || undefined,
   });
+  /* Two requests at the same moment can both pass the check above; recount with this one in. */
+  const after = await WithdrawalRequest.aggregate([
+    {
+      $match: {
+        organizationId: new mongoose.Types.ObjectId(oid),
+        status: { $in: RESERVED_WITHDRAWAL_STATUSES },
+      },
+    },
+    { $group: { _id: null, cents: { $sum: '$amountCents' } } },
+  ]);
+  if ((after[0]?.cents || 0) > balance) {
+    await WithdrawalRequest.updateOne({ _id: doc._id }, { $set: { status: 'cancelled', processNote: 'Over balance' } });
+    const e = new Error('Another withdrawal was just requested. Refresh and check your available balance.');
+    e.status = 409;
+    throw e;
+  }
+  return doc;
 }
 
 export async function markWithdrawalPaid(withdrawalId, { processedByAdminId, processNote } = {}) {
@@ -296,20 +316,33 @@ export async function markWithdrawalPaid(withdrawalId, { processedByAdminId, pro
     throw e;
   }
 
+  /* Claim it first so a double click (or an automatic payout) cannot debit the wallet twice. */
+  const claimed = await WithdrawalRequest.findOneAndUpdate(
+    { _id: doc._id, status: { $in: ['pending', 'approved'] } },
+    {
+      $set: {
+        status: 'paid',
+        payoutMethod: 'manual',
+        processedByAdminId: processedByAdminId || undefined,
+        processedAt: new Date(),
+        processNote: String(processNote || '').trim(),
+      },
+    },
+    { new: true }
+  );
+  if (!claimed) {
+    const e = new Error('This withdrawal changed meanwhile. Refresh and try again.');
+    e.status = 409;
+    throw e;
+  }
   await appendLedgerEntry({
-    organizationId: doc.organizationId,
+    organizationId: claimed.organizationId,
     type: 'withdrawal',
-    amountCents: -doc.amountCents,
-    withdrawalId: doc._id,
+    amountCents: -claimed.amountCents,
+    withdrawalId: claimed._id,
     note: processNote || 'Payout',
   });
-
-  doc.status = 'paid';
-  doc.processedByAdminId = processedByAdminId || undefined;
-  doc.processedAt = new Date();
-  doc.processNote = String(processNote || '').trim();
-  await doc.save();
-  return { ok: true, withdrawal: doc };
+  return { ok: true, withdrawal: claimed };
 }
 
 export async function rejectWithdrawal(withdrawalId, { processedByAdminId, processNote } = {}) {
@@ -326,6 +359,11 @@ export async function rejectWithdrawal(withdrawalId, { processedByAdminId, proce
   }
   if (doc.status === 'rejected' || doc.status === 'cancelled') {
     return { ok: true, duplicate: true, withdrawal: doc };
+  }
+  if (doc.status === 'processing') {
+    const e = new Error('This payout is already on its way to the MoMo wallet');
+    e.status = 400;
+    throw e;
   }
   doc.status = 'rejected';
   doc.processedByAdminId = processedByAdminId || undefined;

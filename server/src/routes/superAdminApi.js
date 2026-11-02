@@ -19,7 +19,10 @@ import { sanitizeBillingForClient } from '../services/orgBillingService.js';
 import {
   getPlatformSettingsPublic,
   updateDefaultPlatformFeeBps,
+  getPayoutSettings,
+  updatePayoutSettings,
 } from '../services/platformSettingsService.js';
+import { reconcileWithdrawalTransfer, sendWithdrawalToMomo } from '../services/payoutService.js';
 import {
   applyModulesPatch,
   normalizeOrgModules,
@@ -550,7 +553,7 @@ router.get(
     const rows = await WithdrawalRequest.find(q)
       .sort({ createdAt: -1 })
       .limit(limit)
-      .populate('organizationId', 'name slug')
+      .populate('organizationId', 'name slug billing.payoutMomoNumber billing.payoutMomoChangedAt')
       .lean();
     res.json(
       rows.map((w) => ({
@@ -559,6 +562,13 @@ router.get(
         status: w.status,
         destinationNote: w.destinationNote || '',
         processNote: w.processNote || '',
+        payoutMethod: w.payoutMethod || '',
+        payoutMsisdn: w.payoutMsisdn || '',
+        holdReason: w.holdReason || '',
+        failureReason: w.failureReason || '',
+        transferReference: w.transferReference || '',
+        payoutMomoNumber: w.organizationId?.billing?.payoutMomoNumber || '',
+        payoutMomoChangedAt: w.organizationId?.billing?.payoutMomoChangedAt || null,
         createdAt: w.createdAt,
         processedAt: w.processedAt || null,
         organization: w.organizationId
@@ -607,6 +617,69 @@ router.post(
     } catch (e) {
       const status = e.status && Number(e.status) >= 400 ? e.status : 500;
       return res.status(status).json({ error: e.message || 'Pay failed' });
+    }
+  })
+);
+
+router.get(
+  '/payout-settings',
+  asyncHandler(async (_req, res) => {
+    res.json(await getPayoutSettings());
+  })
+);
+
+router.patch(
+  '/payout-settings',
+  asyncHandler(async (req, res) => {
+    try {
+      res.json(await updatePayoutSettings(req.body || {}));
+    } catch (e) {
+      return res.status(e.status || 500).json({ error: e.message || 'Update failed' });
+    }
+  })
+);
+
+/** Approve a waiting withdrawal and send it to the organisation's payout MoMo number now. */
+router.post(
+  '/withdrawals/:id/send',
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    try {
+      const out = await sendWithdrawalToMomo(req.params.id, { method: 'manual', adminId: req.admin?.id });
+      void logOrgAudit({
+        organizationId: out.withdrawal.organizationId,
+        actorEmail: req.admin?.email,
+        action: 'wallet.withdrawal_sent',
+        meta: { withdrawalId: String(out.withdrawal._id), amountCents: out.withdrawal.amountCents },
+      });
+      res.json({
+        ok: true,
+        status: out.status,
+        holdReason: out.withdrawal.holdReason || '',
+        failureReason: out.withdrawal.failureReason || '',
+      });
+    } catch (e) {
+      return res.status(e.status && Number(e.status) >= 400 ? e.status : 500).json({ error: e.message || 'Send failed' });
+    }
+  })
+);
+
+/** Ask Paystack now how a payout on its way ended. */
+router.post(
+  '/withdrawals/:id/check',
+  asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    const w = await WithdrawalRequest.findById(req.params.id).select('transferReference status').lean();
+    if (!w) return res.status(404).json({ error: 'Withdrawal not found' });
+    if (!w.transferReference) return res.json({ ok: true, status: w.status });
+    try {
+      res.json(await reconcileWithdrawalTransfer(w.transferReference));
+    } catch (e) {
+      return res.status(e.status && Number(e.status) >= 400 ? e.status : 500).json({ error: e.message || 'Check failed' });
     }
   })
 );

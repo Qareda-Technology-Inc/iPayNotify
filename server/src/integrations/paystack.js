@@ -134,3 +134,78 @@ export function verifyWebhookSignature(rawBody, signature) {
   const b = Buffer.from(String(signature));
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
+
+/*
+ * Payouts to a vendor's MoMo wallet (Transfers API). Needs transfers enabled on the Paystack
+ * business and "Confirm transfers with OTP" turned off, or every transfer waits for an OTP.
+ */
+const TRANSFER_BANK_CODE = { mtn: 'MTN', vod: 'VOD', atl: 'ATL' };
+
+/** Normalised transfer state: paid | pending | otp | failed */
+function transferState(data) {
+  const s = String(data?.status || '').toLowerCase();
+  if (s === 'success') return 'paid';
+  if (s === 'otp') return 'otp';
+  if (s === 'failed' || s === 'reversed' || s === 'abandoned' || s === 'rejected' || s === 'blocked') return 'failed';
+  return 'pending';
+}
+
+function transferResult({ ok, json, httpStatus }) {
+  const data = json?.data || {};
+  return {
+    ok,
+    state: ok ? transferState(data) : 'failed',
+    rawStatus: String(data.status || ''),
+    httpStatus,
+    reference: data.reference || '',
+    transferCode: data.transfer_code || '',
+    amountCents: Number.isFinite(Number(data.amount)) ? Number(data.amount) : null,
+    message: String(data.reason && !ok ? data.reason : json?.message || data.gateway_response || '').trim(),
+  };
+}
+
+/** Save a MoMo number as a transfer recipient; returns its recipient_code. */
+export async function createMomoRecipient({ name, msisdn, provider, currency = 'GHS' }) {
+  const bank = TRANSFER_BANK_CODE[provider || momoProviderForMsisdn(msisdn)];
+  if (!bank) {
+    const e = new Error('Could not tell the network of this MoMo number.');
+    e.status = 400;
+    throw e;
+  }
+  const out = await call('POST', '/transferrecipient', {
+    type: 'mobile_money',
+    name: String(name || 'Vendor').slice(0, 100),
+    account_number: localGhanaNumber(msisdn),
+    bank_code: bank,
+    currency,
+  });
+  const code = out.json?.data?.recipient_code;
+  if (!out.ok || !code) {
+    const e = new Error(out.json?.message || 'Paystack did not accept this MoMo number.');
+    e.status = 400;
+    throw e;
+  }
+  return code;
+}
+
+export async function initiateTransfer({ reference, amountCents, recipientCode, reason, currency = 'GHS' }) {
+  return transferResult(
+    await call('POST', '/transfer', {
+      source: 'balance',
+      amount: Math.round(Number(amountCents)),
+      recipient: recipientCode,
+      reference,
+      reason: String(reason || 'Payout').slice(0, 100),
+      currency,
+    })
+  );
+}
+
+/** Source of truth for a transfer's outcome. */
+export async function verifyTransfer(reference) {
+  const out = await call('GET', `/transfer/verify/${encodeURIComponent(reference)}`);
+  const r = transferResult(out);
+  /* Unknown reference: not sent (yet), not a failure we can act on. */
+  if (!out.ok && (out.httpStatus === 400 || out.httpStatus === 404)) return { ...r, state: 'unknown' };
+  return r;
+}

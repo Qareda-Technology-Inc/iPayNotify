@@ -8,6 +8,7 @@ import {
   requestWithdrawal,
 } from '../services/orgWalletService.js';
 import { logOrgAudit } from '../services/orgAuditService.js';
+import { processNewWithdrawal } from '../services/payoutService.js';
 
 export const walletRouter = express.Router();
 
@@ -54,6 +55,9 @@ walletRouter.get(
         status: w.status,
         destinationNote: w.destinationNote || '',
         processNote: w.processNote || '',
+        payoutMsisdn: w.payoutMsisdn || '',
+        payoutMethod: w.payoutMethod || '',
+        holdReason: w.status === 'pending' ? w.holdReason || '' : '',
         createdAt: w.createdAt,
         processedAt: w.processedAt || null,
       }))
@@ -90,10 +94,12 @@ walletRouter.post(
           amountCents: doc.amountCents,
         },
       });
+      const payout = await processNewWithdrawal(doc);
       res.status(201).json({
         id: String(doc._id),
         amountCents: doc.amountCents,
-        status: doc.status,
+        status: payout.status,
+        holdReason: payout.holdReason || '',
         destinationNote: doc.destinationNote || '',
         createdAt: doc.createdAt,
       });

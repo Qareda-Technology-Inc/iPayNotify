@@ -59,3 +59,50 @@ export async function getPlatformSettingsPublic() {
     updatedAt: doc.updatedAt,
   };
 }
+
+const PAYOUT_DEFAULTS = {
+  autoEnabled: false,
+  maxAutoCents: 100_000,
+  dailyAutoCents: 200_000,
+  newNumberHoldHours: 48,
+  firstNeedsApproval: true,
+};
+
+/** Limits for sending vendor withdrawals straight to MoMo. Cent amounts; 0 means no limit. */
+export async function getPayoutSettings() {
+  const doc = await ensurePlatformSettings();
+  const p = doc.payouts || {};
+  const num = (v, d) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.round(Number(v)) : d);
+  return {
+    autoEnabled: p.autoEnabled === true,
+    maxAutoCents: num(p.maxAutoCents, PAYOUT_DEFAULTS.maxAutoCents),
+    dailyAutoCents: num(p.dailyAutoCents, PAYOUT_DEFAULTS.dailyAutoCents),
+    newNumberHoldHours: num(p.newNumberHoldHours, PAYOUT_DEFAULTS.newNumberHoldHours),
+    firstNeedsApproval: p.firstNeedsApproval !== false,
+  };
+}
+
+export async function updatePayoutSettings(body = {}) {
+  const set = {};
+  if (body.autoEnabled !== undefined) set['payouts.autoEnabled'] = Boolean(body.autoEnabled);
+  if (body.firstNeedsApproval !== undefined) set['payouts.firstNeedsApproval'] = Boolean(body.firstNeedsApproval);
+  for (const [field, max, label] of [
+    ['maxAutoCents', 100_000_000, 'Largest automatic payout'],
+    ['dailyAutoCents', 100_000_000, 'Daily automatic total'],
+    ['newNumberHoldHours', 24 * 90, 'Wait after a number change'],
+  ]) {
+    if (body[field] === undefined) continue;
+    const n = Math.round(Number(body[field]));
+    if (body[field] === null || body[field] === '' || !Number.isFinite(n) || n < 0 || n > max) {
+      const e = new Error(`${label} must be a number from 0 to ${field === 'newNumberHoldHours' ? max : max / 100}`);
+      e.status = 400;
+      throw e;
+    }
+    set[`payouts.${field}`] = n;
+  }
+  await ensurePlatformSettings();
+  if (Object.keys(set).length) {
+    await PlatformSettings.updateOne({ key: 'default' }, { $set: set });
+  }
+  return getPayoutSettings();
+}

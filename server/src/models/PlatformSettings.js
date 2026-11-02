@@ -23,6 +23,17 @@ const platformSettingsSchema = new mongoose.Schema(
     wgVpsSshPrivateKey: { type: String, default: '', select: false },
     wgVpsSshKeyCreatedAt: { type: Date, default: null },
     wgVpsSshKeyComment: { type: String, default: '' },
+    /**
+     * Vendor withdrawals: sent straight to the vendor's MoMo within these limits, otherwise they
+     * wait for a platform admin. Amounts in pesewas; 0 means no limit.
+     */
+    payouts: {
+      autoEnabled: { type: Boolean, default: false },
+      maxAutoCents: { type: Number, default: 100_000, min: 0 },
+      dailyAutoCents: { type: Number, default: 200_000, min: 0 },
+      newNumberHoldHours: { type: Number, default: 48, min: 0 },
+      firstNeedsApproval: { type: Boolean, default: true },
+    },
   },
   { timestamps: true }
 );
