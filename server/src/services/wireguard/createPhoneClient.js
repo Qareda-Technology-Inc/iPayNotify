@@ -131,6 +131,7 @@ export async function createPhoneClientPeer(input = {}) {
     lanSubnet: '',
     /* Whose remote access this is: switched off while that organisation is suspended for non-payment. */
     organizationId: input.organizationId || null,
+    platformStaff: Boolean(input.platformStaff),
     kind: 'client',
     status: 'active',
     lastSeen: new Date(),

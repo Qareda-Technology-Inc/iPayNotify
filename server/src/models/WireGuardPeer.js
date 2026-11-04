@@ -20,6 +20,8 @@ const wireGuardPeerSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    /** Phone/laptop profile of platform staff, on purpose not tied to any organisation. */
+    platformStaff: { type: Boolean, default: false },
     /** When linked to a billing MikroTik Router row */
     claimedRouterId: {
       type: mongoose.Schema.Types.ObjectId,

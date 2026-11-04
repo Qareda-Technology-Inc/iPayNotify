@@ -247,6 +247,19 @@ export async function removeWireGuardPeerFromVps(peer) {
         throw err;
       }
     }
+    /* Only trust what the VPS reports: the peer must be gone from the live interface. */
+    const check = await ssh.execCommand(`sudo -n wg show ${iface} peers`);
+    if (check.code !== 0 && check.code != null) {
+      const detail = (check.stderr || check.stdout || `exit ${check.code}`).trim().slice(0, 300);
+      const err = new Error(`Could not confirm the peer was removed: ${detail}`);
+      err.status = 502;
+      throw err;
+    }
+    if (String(check.stdout || '').split(/\s+/).includes(publicKey)) {
+      const err = new Error('The VPS still lists this peer after removing it. Check the WireGuard service on the VPS.');
+      err.status = 502;
+      throw err;
+    }
     console.log('[wireguard] peer removed from VPS', {
       publicKeyPrefix: `${publicKey.slice(0, 12)}…`,
     });
@@ -356,4 +369,60 @@ export async function syncWireGuardPeerToVps(peer) {
       /* ignore */
     }
   }
+}
+
+/**
+ * Every peer live on the VPS interface right now (`wg show <iface> dump`), whether or not this
+ * app knows it. Returns null when WireGuard VPS access is not configured.
+ */
+export async function readVpsPeers() {
+  if (!(await isWireGuardFullyConfigured())) return null;
+  const auth = await resolveWgVpsSshAuth();
+  if (!auth) return null;
+  const iface = String(config.wireguard.interfaceName || 'wg0').trim();
+  if (!/^[a-zA-Z0-9_.-]+$/.test(iface)) {
+    const err = new Error('Invalid WG_INTERFACE name');
+    err.status = 500;
+    throw err;
+  }
+  const ssh = new NodeSSH();
+  try {
+    await ssh.connect({ ...vpsSshConnectOptions(auth), readyTimeout: 20000 });
+    const result = await ssh.execCommand(`sudo -n wg show ${iface} dump`);
+    if (result.code !== 0 && result.code != null) {
+      const detail = (result.stderr || result.stdout || `exit ${result.code}`).trim().slice(0, 300);
+      const err = new Error(`wg show dump failed: ${detail}`);
+      err.status = 502;
+      throw err;
+    }
+    return parseWgDump(result.stdout);
+  } catch (e) {
+    throw mapVpsSshError(e);
+  } finally {
+    try {
+      ssh.dispose();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Peer lines of `wg show <iface> dump` (the first line is the interface itself). */
+export function parseWgDump(text) {
+  const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const peers = [];
+  for (const line of lines.slice(1)) {
+    const f = line.split('\t');
+    if (f.length < 8) continue;
+    const allowedIps = f[3] === '(none)' ? [] : f[3].split(',').map((x) => x.trim()).filter(Boolean);
+    peers.push({
+      publicKey: f[0],
+      endpoint: f[2] === '(none)' ? '' : f[2],
+      allowedIps,
+      latestHandshake: Number(f[4]) || 0,
+      rxBytes: Number(f[5]) || 0,
+      txBytes: Number(f[6]) || 0,
+    });
+  }
+  return peers;
 }

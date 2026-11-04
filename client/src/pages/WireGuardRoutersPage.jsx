@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch, resolveApiUrl } from '../api.js';
 import { getToken } from '../authStorage.js';
+import { VpsPeersPanel } from '../components/VpsPeersPanel.jsx';
 
 function statusBadge(status) {
   const s = String(status || '').toLowerCase();
@@ -260,8 +261,31 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
     }
   }
 
+  async function setPeerOrg(id, organizationId) {
+    if (!organizationId) return;
+    setBusyId(id);
+    setErr('');
+    setInfo('');
+    try {
+      const r = await apiFetch(`/api/super-admin/wireguard/peers/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ organizationId }),
+      });
+      setInfo(
+        r?.peer?.status === 'disabled' && r?.peer?.disabledReason === 'org_unpaid'
+          ? 'Linked. That organisation is suspended for an unpaid bill, so this profile was cut off the VPS.'
+          : 'Linked. This profile now switches off with its organisation.'
+      );
+      await load();
+    } catch (e) {
+      setErr(e.message || 'Could not link the organisation');
+    } finally {
+      setBusyId('');
+    }
+  }
+
   async function removePeer(id, name) {
-    if (!window.confirm(`Remove VPN peer “${name}” from the database? (Does not remove it on the VPS.)`)) {
+    if (!window.confirm(`Delete “${name}”? It is removed from the VPS first, so it can no longer connect.`)) {
       return;
     }
     setBusyId(id);
@@ -287,7 +311,7 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
         method: 'POST',
         body: JSON.stringify({
           label: phoneLabel.trim() || undefined,
-          organizationId: phoneOrgId || undefined,
+          organizationId: phoneOrgId,
           includeLan: phoneIncludeLan,
         }),
       });
@@ -595,9 +619,11 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
               <select
                 value={phoneOrgId}
                 onChange={(e) => setPhoneOrgId(e.target.value)}
+                required
                 className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
               >
-                <option value="">None (platform staff)</option>
+                <option value="">Choose…</option>
+                <option value="platform">Platform staff (not tied to an organisation)</option>
                 {orgs.map((o) => (
                   <option key={o._id} value={o._id}>
                     {o.name}
@@ -766,6 +792,7 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
                 <tr>
                   <th className="px-3 py-2 font-medium">Name</th>
                   {!isVpn ? <th className="px-3 py-2 font-medium">Type</th> : null}
+                  {isVpn ? <th className="px-3 py-2 font-medium">Organisation</th> : null}
                   <th className="px-3 py-2 font-medium">Tunnel IP</th>
                   <th className="px-3 py-2 font-medium">LAN</th>
                   <th className="px-3 py-2 font-medium">Public key</th>
@@ -783,6 +810,26 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
                         <span className="inline-flex rounded-md bg-slate-500/15 px-2 py-0.5 text-[11px] font-medium text-slate-300 ring-1 ring-slate-500/30">
                           Router
                         </span>
+                      </td>
+                    ) : null}
+                    {isVpn ? (
+                      <td className="px-3 py-2.5">
+                        <select
+                          value={p.organizationId || (p.platformStaff ? 'platform' : '')}
+                          disabled={busyId === p.id}
+                          onChange={(e) => setPeerOrg(p.id, e.target.value)}
+                          className={`max-w-[11rem] rounded border bg-slate-950 px-2 py-1 text-xs ${
+                            p.organizationId || p.platformStaff ? 'border-slate-700 text-white' : 'border-amber-500/60 text-amber-200'
+                          }`}
+                        >
+                          {!p.organizationId && !p.platformStaff ? <option value="">Not linked: choose</option> : null}
+                          <option value="platform">Platform staff</option>
+                          {orgs.map((o) => (
+                            <option key={o._id} value={o._id}>
+                              {o.name}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                     ) : null}
                     <td className="px-3 py-2.5 font-mono text-xs text-emerald-200">{p.tunnelIp}</td>
@@ -861,7 +908,14 @@ export function WireGuardRoutersPage({ mode = 'routers' }) {
             </table>
           </div>
         )}
+        {isVpn && phonePeers.some((p) => !p.organizationId && !p.platformStaff) ? (
+          <p className="mt-3 text-xs text-amber-200">
+            Profiles marked Not linked are never switched off when an organisation stops paying. Choose whose each one is.
+          </p>
+        ) : null}
       </section>
+
+      {isVpn ? <VpsPeersPanel orgs={orgs} onChanged={load} /> : null}
     </div>
   );
 }

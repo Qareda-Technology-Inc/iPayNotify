@@ -46,3 +46,24 @@ export async function findPeerForRouter(router) {
     $or: [{ claimedRouterId: router._id }, ...(host ? [{ tunnelIp: host }] : [])],
   }).sort({ claimedRouterId: -1 });
 }
+
+/**
+ * Line a phone/laptop profile up with its organisation: off while that organisation is suspended
+ * for an unpaid bill, back on when it is not (only if it was switched off for that reason).
+ * @param {import('mongoose').Document} peer WireGuardPeer document (kind client)
+ */
+export async function applyOrgStateToPeer(peer) {
+  if (peer.kind !== 'client' || !peer.organizationId) return { changed: false };
+  const { Organization } = await import('../../models/index.js');
+  const org = await Organization.findById(peer.organizationId).select('status statusReason').lean();
+  const locked = org?.status === 'suspended' && org?.statusReason === 'unpaid';
+  if (locked && peer.status !== 'disabled') {
+    await setPeerAccess(peer, { enabled: false, reason: 'org_unpaid' });
+    return { changed: true, enabled: false };
+  }
+  if (!locked && peer.status === 'disabled' && peer.disabledReason === 'org_unpaid') {
+    await setPeerAccess(peer, { enabled: true });
+    return { changed: true, enabled: true };
+  }
+  return { changed: false };
+}
