@@ -29,8 +29,8 @@ function Choice({ active, onClick, title, children }) {
 
 /**
  * Issue tickets: site (router) → seller → source → plan and quantity.
- * System codes are reserved for the seller and owed as customers use them; external tickets
- * (made on another platform for the same router) are owed in full when issued.
+ * The seller owes for the tickets as soon as they are issued, whether system codes or external
+ * tickets (made on another platform for the same router).
  */
 export function TicketIssuePage() {
   const { showSuccess } = useMessage();
@@ -219,10 +219,10 @@ export function TicketIssuePage() {
             3. Tickets
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
               <Choice active={source === 'system'} onClick={() => setSource('system')} title="Codes from this system">
-                Printed from here. The seller pays for each one a customer uses.
+                Unused codes from this system for this router.
               </Choice>
               <Choice active={source === 'external'} onClick={() => setSource('external')} title="External tickets">
-                Made on another platform for this router. The seller owes for all of them now.
+                Made on another platform for this router.
               </Choice>
             </div>
           </div>
@@ -289,14 +289,19 @@ export function TicketIssuePage() {
                 className={inputCls}
               />
               {shortStock ? <span className="mt-1 block text-xs text-amber-300">Only {available} ready.</span> : null}
-              {source === 'system' && batch && !shortStock ? (
+              {source === 'system' && plan && available > 0 && qty !== available ? (
                 <button
                   type="button"
-                  onClick={() => setQuantity(String(batch.available))}
-                  className="mt-1 text-xs text-emerald-400 hover:text-emerald-300"
+                  onClick={() => setQuantity(String(available))}
+                  className="mt-1 block text-xs text-emerald-400 hover:text-emerald-300"
                 >
-                  Whole batch ({batch.available})
+                  {batch ? `Whole batch (${available})` : `All ${available} ready`}
                 </button>
+              ) : null}
+              {source === 'system' && plan?.withSellers > 0 ? (
+                <span className="mt-1 block text-xs text-slate-500">
+                  {plan.withSellers} more unused already with sellers (take them back on Collections to reissue).
+                </span>
               ) : null}
             </label>
             <label className="text-sm text-slate-300">
@@ -310,11 +315,7 @@ export function TicketIssuePage() {
           <div className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300">
             <strong className="text-white">{seller.name}</strong> receives {qty} × {plan.name} ({money(unitCents)} each,{' '}
             {money(unitCents * qty)} in total).{' '}
-            {source === 'system' ? (
-              <span className="text-slate-400">They owe as customers use the codes.</span>
-            ) : (
-              <span className="text-amber-200">They owe {money(unitCents * qty)} now.</span>
-            )}
+            <span className="text-amber-200">They owe {money(unitCents * qty)} now.</span>
           </div>
         ) : null}
 

@@ -231,8 +231,8 @@ export function TicketCollectionsPage() {
       <div>
         <h1 className="text-xl font-semibold text-white">Collections</h1>
         <p className="mt-1 text-sm text-slate-400">
-          Collect cash from a seller, or take back tickets they could not sell. System codes are owed once a customer uses
-          them; external tickets are owed from the day they were issued.
+          Collect cash from a seller, or take back tickets they could not sell. Sellers owe for tickets from the day they
+          were issued; taking unsold ones back reduces what they owe.
         </p>
       </div>
       {err && <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{err}</p>}

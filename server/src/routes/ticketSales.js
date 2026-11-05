@@ -805,7 +805,7 @@ ticketSalesRouter.get(
 
 /**
  * Report: activity in a date range plus everyone's current position.
- * Owed follows the ledger rules (linked codes owe once used; count-only owe once issued).
+ * Owed follows the ledger rules: sellers owe for tickets when they are issued.
  */
 ticketSalesRouter.get(
   '/summary',

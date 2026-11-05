@@ -61,7 +61,7 @@ describe('ticket operations by router', () => {
     expect(plans).toEqual([expect.objectContaining({ name: '1 Day', priceCents: 500, available: 10 })]);
   });
 
-  it('system codes: reserved for the seller, owed only as customers use them', async () => {
+  it('system codes: the seller owes for them as soon as they are issued', async () => {
     const kofi = await seller();
     const { issue, codes } = await issueAtRouter({
       organizationId: org._id,
@@ -73,18 +73,38 @@ describe('ticket operations by router', () => {
     });
     expect(codes).toHaveLength(4);
     expect(issue).toMatchObject({ linked: true, quantity: 4, unitPriceCents: 500 });
-    expect((await plansForRouter(org._id, router._id))[0].available).toBe(6);
-    expect(await sellerPosition(kofi._id)).toMatchObject({ holdingQty: 4, balanceCents: 0 });
+    expect((await plansForRouter(org._id, router._id))[0]).toMatchObject({ available: 6, withSellers: 4 });
+    expect(await sellerPosition(kofi._id)).toMatchObject({ holdingQty: 4, balanceCents: 2000 });
 
     await HotspotVoucher.updateOne({ _id: codes[0]._id }, { usedAt: new Date() });
-    expect(await sellerPosition(kofi._id)).toMatchObject({ holdingQty: 3, usedQty: 1, balanceCents: 500 });
+    expect(await sellerPosition(kofi._id)).toMatchObject({ holdingQty: 3, usedQty: 1, balanceCents: 2000 });
 
-    await collectFromSeller({ organizationId: org._id, admin, sellerKey: `s:${kofi._id}`, amountCents: 500 });
+    await returnTickets({ organizationId: org._id, admin, issueSaleId: issue._id, quantity: 2 });
+    expect(await sellerPosition(kofi._id)).toMatchObject({ holdingQty: 1, balanceCents: 1000 });
+    expect((await plansForRouter(org._id, router._id))[0].available).toBe(8);
+
+    await expect(
+      collectFromSeller({ organizationId: org._id, admin, sellerKey: `s:${kofi._id}`, amountCents: 1500 })
+    ).rejects.toThrow(/more than this seller owes/);
+    await collectFromSeller({ organizationId: org._id, admin, sellerKey: `s:${kofi._id}`, amountCents: 1000 });
     expect(await sellerPosition(kofi._id)).toMatchObject({ balanceCents: 0 });
+    await expect(returnTickets({ organizationId: org._id, admin, issueSaleId: issue._id, quantity: 1 })).rejects.toThrow(
+      /already paid/
+    );
+  });
 
-    await returnTickets({ organizationId: org._id, admin, issueSaleId: issue._id, quantity: 3 });
-    expect(await sellerPosition(kofi._id)).toMatchObject({ holdingQty: 0 });
-    expect((await plansForRouter(org._id, router._id))[0].available).toBe(9);
+  it('can hand a seller every code that is ready', async () => {
+    const kofi = await seller();
+    const { issue } = await issueAtRouter({
+      organizationId: org._id,
+      admin,
+      routerId: router._id,
+      sellerId: kofi._id,
+      packageId: plan._id,
+      quantity: 10,
+    });
+    expect(issue.quantity).toBe(10);
+    expect((await plansForRouter(org._id, router._id))[0]).toMatchObject({ available: 0, withSellers: 10 });
   });
 
   it('external tickets: no codes taken, owed in full at the price given', async () => {

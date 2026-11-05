@@ -10,10 +10,8 @@ import { HotspotVoucher, TicketSale, TicketSite, TicketSiteSeller, TicketType, T
  * collected — cash received against one issue (one hand-over may be split over several issues: collectionGroupId).
  * returned  — unsold tickets given back.
  *
- * Owed:
- *   linked     → used codes × unit price (a code is "used" once a customer logged in with it).
- *   count-only → (issued − returned) × unit price (use cannot be seen).
- * A seller may pay ahead for linked codes they still hold (credit), never more than the face value they hold.
+ * Owed: the seller is charged when the tickets are issued, (issued − returned) × unit price, whether
+ * or not customers have used them yet. Linked codes still report how many were used, for selling progress.
  */
 
 function fail(message, status = 400) {
@@ -124,20 +122,16 @@ export async function computeIssueBalances(organizationId, issues) {
     let usedQty = null;
     let holdingQty;
     let expiredQty = 0;
-    let owedCents;
-    let maxCollectCents;
     if (issue.linked) {
       const v = vouchers.get(id) || { used: 0, expiredUnused: 0, total: 0 };
       usedQty = Number(v.used || 0) + Number(issue.archivedUsedQty || 0);
       expiredQty = Number(v.expiredUnused || 0);
       holdingQty = Math.max(0, Number(v.total || 0) - Number(v.used || 0) - expiredQty);
-      owedCents = usedQty * price;
-      maxCollectCents = (usedQty + holdingQty) * price - collectedCents;
     } else {
       holdingQty = Math.max(0, issuedQty - ret.qty);
-      owedCents = Math.max(0, Number(issue.amountCents || 0) - ret.cents);
-      maxCollectCents = owedCents - collectedCents;
     }
+    const owedCents = Math.max(0, Number(issue.amountCents || 0) - ret.cents);
+    const maxCollectCents = owedCents - collectedCents;
     out.set(id, {
       issuedQty,
       usedQty,
@@ -390,8 +384,7 @@ export async function issueTickets({
 /* ---------- Collect ---------- */
 
 /**
- * Record cash from a seller. The amount is applied oldest issue first: first to what is owed,
- * then (linked issues only) as advance payment for codes still held.
+ * Record cash from a seller. The amount is applied to what is owed, oldest issue first.
  */
 export async function collectFromSeller({
   organizationId,
@@ -408,28 +401,17 @@ export async function collectFromSeller({
   const room = rows.reduce((n, r) => n + r.maxCollectCents, 0);
   if (!rows.length) throw fail('This seller has no issued tickets');
   if (amount > room) {
-    const owed = rows.reduce((n, r) => n + Math.max(0, r.balanceCents), 0);
-    throw fail(
-      `That is more than this seller can owe right now: GHS ${(owed / 100).toFixed(2)} owed` +
-        (room > owed ? `, GHS ${(room / 100).toFixed(2)} including tickets they still hold` : '') +
-        '.'
-    );
+    throw fail(`That is more than this seller owes: GHS ${(room / 100).toFixed(2)}.`);
   }
 
   const plan = [];
   let left = amount;
-  for (const pass of ['owed', 'advance']) {
-    for (const r of rows) {
-      if (left <= 0) break;
-      const already = plan.find((p) => p.issue === r)?.cents || 0;
-      const cap = pass === 'owed' ? Math.max(0, r.balanceCents) - already : r.maxCollectCents - already;
-      const take = Math.min(left, Math.max(0, cap));
-      if (take <= 0) continue;
-      const existing = plan.find((p) => p.issue === r);
-      if (existing) existing.cents += take;
-      else plan.push({ issue: r, cents: take });
-      left -= take;
-    }
+  for (const r of rows) {
+    if (left <= 0) break;
+    const take = Math.min(left, r.maxCollectCents);
+    if (take <= 0) continue;
+    plan.push({ issue: r, cents: take });
+    left -= take;
   }
 
   const groupId = crypto.randomUUID();
@@ -466,12 +448,10 @@ export async function returnTickets({ organizationId, admin, issueSaleId, quanti
     throw fail(`The seller holds only ${row.holdingQty} unsold ticket${row.holdingQty === 1 ? '' : 's'} from this issue.`);
   }
   const price = unitPrice(row);
+  if (row.collectedCents > Math.max(0, row.owedCents - qty * price)) {
+    throw fail('The seller already paid for some of these tickets. Return fewer.');
+  }
   if (row.linked) {
-    const collectedAhead = Math.max(0, row.collectedCents - row.owedCents);
-    const stillPaidFor = Math.max(0, (row.holdingQty - qty) * price);
-    if (collectedAhead > stillPaidFor) {
-      throw fail('The seller already paid ahead for these tickets. Record a refund first, or return fewer.');
-    }
     const picks = await HotspotVoucher.find({
       issueSaleId: row._id,
       usedAt: null,
@@ -485,8 +465,6 @@ export async function returnTickets({ organizationId, admin, issueSaleId, quanti
       { _id: { $in: picks.map((p) => p._id) }, usedAt: null },
       { $set: { issueSaleId: null, issuedAt: null } }
     );
-  } else if (row.collectedCents > (row.issuedQty - row.returnedQty - qty) * price) {
-    throw fail('More cash was collected than the remaining tickets are worth. Return fewer.');
   }
   const doc = await TicketSale.create({
     organizationId,

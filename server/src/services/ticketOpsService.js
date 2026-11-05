@@ -66,10 +66,47 @@ export async function typeForPlan(organizationId, siteId, plan) {
   return (await TicketType.create({ organizationId, siteId, packageId: plan._id, ...fields })).toObject();
 }
 
-/** Unused, unissued system codes per plan on a router: Map(packageId → { available, batches }). */
+/**
+ * Unused, unissued system codes per plan on a router: Map(packageId → { available, batches, withSellers }).
+ * withSellers: unused codes already handed to a seller, so the Tickets page count can be explained.
+ */
 async function stockByPlan(organizationId, routerId) {
   await backfillOnlineVouchers(organizationId);
-  const rows = await HotspotVoucher.aggregate([
+  const [rows, held] = await Promise.all([stockRows(organizationId, routerId), heldRows(organizationId, routerId)]);
+  const out = new Map();
+  for (const r of rows) {
+    const k = String(r._id.packageId || '');
+    const cur = out.get(k) || { available: 0, batches: [], withSellers: 0 };
+    cur.available += r.available;
+    cur.batches.push({ batchId: r._id.batchId, available: r.available, createdAt: r.createdAt });
+    out.set(k, cur);
+  }
+  for (const h of held) {
+    const k = String(h._id || '');
+    const cur = out.get(k) || { available: 0, batches: [], withSellers: 0 };
+    cur.withSellers = h.count;
+    out.set(k, cur);
+  }
+  return out;
+}
+
+function heldRows(organizationId, routerId) {
+  return HotspotVoucher.aggregate([
+    {
+      $match: {
+        organizationId: oid(organizationId),
+        routerId: oid(routerId),
+        usedAt: null,
+        issueSaleId: { $ne: null },
+        $or: [{ validUntil: null }, { validUntil: { $gt: new Date() } }],
+      },
+    },
+    { $group: { _id: '$packageId', count: { $sum: 1 } } },
+  ]);
+}
+
+function stockRows(organizationId, routerId) {
+  return HotspotVoucher.aggregate([
     {
       $match: {
         organizationId: oid(organizationId),
@@ -89,15 +126,6 @@ async function stockByPlan(organizationId, routerId) {
     },
     { $sort: { createdAt: 1 } },
   ]);
-  const out = new Map();
-  for (const r of rows) {
-    const k = String(r._id.packageId || '');
-    const cur = out.get(k) || { available: 0, batches: [] };
-    cur.available += r.available;
-    cur.batches.push({ batchId: r._id.batchId, available: r.available, createdAt: r.createdAt });
-    out.set(k, cur);
-  }
-  return out;
 }
 
 /** Hotspot plans that can be issued at a router, with how many system codes are ready for each. */
@@ -111,13 +139,14 @@ export async function plansForRouter(organizationId, routerId) {
     stockByPlan(organizationId, routerId),
   ]);
   return plans.map((p) => {
-    const s = stock.get(String(p._id)) || { available: 0, batches: [] };
+    const s = stock.get(String(p._id)) || { available: 0, batches: [], withSellers: 0 };
     return {
       _id: String(p._id),
       name: p.name,
       priceCents: p.priceCents,
       currency: p.currency || 'GHS',
       available: s.available,
+      withSellers: s.withSellers,
       batches: s.batches.filter((b) => b.batchId),
     };
   });
@@ -242,8 +271,9 @@ export async function addSellerAtRouter(organizationId, routerId, { name, phone 
 
 /**
  * Issue tickets to a seller at a router.
- * source 'system': unused codes for the plan are reserved for the seller; owed as customers use them.
- * source 'external': tickets made elsewhere for the same router; owed in full when issued.
+ * source 'system': unused codes for the plan are handed to the seller.
+ * source 'external': tickets made elsewhere for the same router; no codes are taken.
+ * Either way the seller owes for them as soon as they are issued.
  */
 export async function issueAtRouter({
   organizationId,
