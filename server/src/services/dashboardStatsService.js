@@ -11,6 +11,7 @@ import {
   Admin,
   WithdrawalRequest,
 } from '../models/index.js';
+import { activatedTicketSales } from './ticketSalesReportService.js';
 
 function orgMatch(organizationId) {
   if (
@@ -23,11 +24,20 @@ function orgMatch(organizationId) {
   return { organizationId: new mongoose.Types.ObjectId(String(organizationId).trim()) };
 }
 
-function sumPaidCentsSince(since, organizationId) {
-  return Transaction.aggregate([
-    { $match: { status: 'paid', createdAt: { $gte: since }, ...orgMatch(organizationId) } },
-    { $group: { _id: null, total: { $sum: '$amountCents' } } },
-  ]).then((r) => (r[0]?.total ?? 0));
+/**
+ * Sales since a date: payments received online (MoMo) plus tickets activated, which count as sold
+ * the first time a customer logs in with the code.
+ */
+async function salesSince(since, organizationId) {
+  const scoped = Object.keys(orgMatch(organizationId)).length > 0;
+  const [online, tickets] = await Promise.all([
+    Transaction.aggregate([
+      { $match: { status: 'paid', createdAt: { $gte: since }, ...orgMatch(organizationId) } },
+      { $group: { _id: null, total: { $sum: '$amountCents' } } },
+    ]).then((r) => r[0]?.total ?? 0),
+    activatedTicketSales(scoped ? String(organizationId).trim() : null, since),
+  ]);
+  return { totalCents: online + tickets.cents, onlineCents: online, ticketCents: tickets.cents, ticketQty: tickets.qty };
 }
 
 async function getPlatformOverview() {
@@ -91,9 +101,9 @@ export async function getDashboardSummary(organizationId) {
     pppoeAccounts,
     remoteAccessSubscriptions,
     paymentsPending,
-    revenueTodayCents,
-    revenueWeekCents,
-    revenueMonthCents,
+    salesToday,
+    salesWeek,
+    salesMonth,
     platform,
   ] = await Promise.all([
     Router.countDocuments(om),
@@ -103,9 +113,9 @@ export async function getDashboardSummary(organizationId) {
     PppoeAccount.countDocuments(om),
     RemoteAccessSubscription.countDocuments(om),
     Transaction.countDocuments({ status: 'pending', ...om }),
-    sumPaidCentsSince(dayStart, organizationId),
-    sumPaidCentsSince(weekStart, organizationId),
-    sumPaidCentsSince(monthStart, organizationId),
+    salesSince(dayStart, organizationId),
+    salesSince(weekStart, organizationId),
+    salesSince(monthStart, organizationId),
     scoped ? Promise.resolve(null) : getPlatformOverview(),
   ]);
 
@@ -128,10 +138,11 @@ export async function getDashboardSummary(organizationId) {
       paymentsPending,
     },
     revenueCents: {
-      today: revenueTodayCents,
-      week: revenueWeekCents,
-      month: revenueMonthCents,
+      today: salesToday.totalCents,
+      week: salesWeek.totalCents,
+      month: salesMonth.totalCents,
     },
+    sales: { today: salesToday, week: salesWeek, month: salesMonth },
     walletBalanceCents: Number(organization?.walletBalanceCents) || 0,
     currency: 'GHS',
   };

@@ -6,7 +6,8 @@ import { backfillOnlineVouchers, sellerKeyOf, unitPrice } from './ticketLedgerSe
  * Tickets sold, from every channel:
  *   seller  — codes handed to a seller, counted when a customer used them (price = issue unit price)
  *   count   — count-only seller issues: issued minus returned (no codes to watch)
- *   office  — codes printed on the Tickets page and sold without a seller, counted when used (plan price)
+ *   office  — codes printed on the Tickets page and sold without a seller, counted when used (the site's
+ *             price for the plan, else the plan price)
  *   online  — bought on the portal with mobile money (amount paid)
  */
 export const SALES_CHANNELS = {
@@ -18,6 +19,59 @@ export const SALES_CHANNELS = {
 
 const oid = (v) => new mongoose.Types.ObjectId(String(v));
 const str = (v) => (v == null ? '' : String(v._id || v));
+
+/** Price of a printed code sold without a seller: Map key `${routerId}:${packageId}` → cents. */
+async function officePrices(rows) {
+  const routerIds = [...new Set(rows.map((r) => str(r._id.router)).filter(Boolean))];
+  const pkgIds = [...new Set(rows.map((r) => str(r._id.pkg)).filter(Boolean))];
+  const [routers, pkgs] = await Promise.all([
+    Router.find({ _id: { $in: routerIds } }).select('portalPrices').lean(),
+    PlanPackage.find({ _id: { $in: pkgIds } }).select('priceCents').lean(),
+  ]);
+  const planPrice = new Map(pkgs.map((p) => [str(p._id), Number(p.priceCents || 0)]));
+  const sitePrice = new Map();
+  for (const r of routers) {
+    for (const x of r.portalPrices || []) sitePrice.set(`${str(r._id)}:${str(x.packageId)}`, Number(x.priceCents || 0));
+  }
+  return (routerId, pkgId) => sitePrice.get(`${str(routerId)}:${str(pkgId)}`) ?? planPrice.get(str(pkgId)) ?? 0;
+}
+
+/**
+ * Tickets activated since `since` (codes from this system, not bought online): a code counts as sold
+ * the first time a customer logs in with it. Seller codes at the issue price, others at the site price.
+ * organizationId null = every organisation.
+ */
+export async function activatedTicketSales(organizationId, since) {
+  const org = organizationId ? { organizationId: oid(organizationId) } : {};
+  if (organizationId) await backfillOnlineVouchers(organizationId);
+  const [sellerUsed, officeUsed] = await Promise.all([
+    HotspotVoucher.aggregate([
+      { $match: { ...org, issueSaleId: { $ne: null }, usedAt: { $gte: since } } },
+      { $group: { _id: '$issueSaleId', qty: { $sum: 1 } } },
+    ]),
+    HotspotVoucher.aggregate([
+      { $match: { ...org, issueSaleId: null, source: { $ne: 'online' }, usedAt: { $gte: since } } },
+      { $group: { _id: { router: '$routerId', pkg: '$packageId' }, qty: { $sum: 1 } } },
+    ]),
+  ]);
+  const issues = await TicketSale.find({ _id: { $in: sellerUsed.map((r) => r._id) } })
+    .select('unitPriceCents quantity amountCents')
+    .lean();
+  const issueById = new Map(issues.map((i) => [str(i._id), i]));
+  const priceOf = await officePrices(officeUsed);
+  let qty = 0;
+  let cents = 0;
+  for (const r of sellerUsed) {
+    const issue = issueById.get(str(r._id));
+    qty += r.qty;
+    cents += issue ? r.qty * unitPrice(issue) : 0;
+  }
+  for (const r of officeUsed) {
+    qty += r.qty;
+    cents += r.qty * priceOf(r._id.router, r._id.pkg);
+  }
+  return { qty, cents };
+}
 
 function dayExpr(field, tz) {
   return { $dateToString: { format: '%Y-%m-%d', date: field, timezone: tz } };
@@ -86,9 +140,7 @@ async function gatherRows(organizationId, from, to, tz) {
   const siteOfRouter = new Map();
   for (const s of sites) if (s.routerId && !siteOfRouter.has(str(s.routerId))) siteOfRouter.set(str(s.routerId), str(s._id));
 
-  const pkgIds = [...new Set([...officeUsed, ...onlineTx].map((r) => str(r._id.pkg)).filter(Boolean))];
-  const pkgs = await PlanPackage.find({ _id: { $in: pkgIds } }).select('priceCents').lean();
-  const pkgPrice = new Map(pkgs.map((p) => [str(p._id), Number(p.priceCents || 0)]));
+  const priceOf = await officePrices(officeUsed);
 
   const rows = [];
   for (const r of sellerUsed) {
@@ -119,7 +171,7 @@ async function gatherRows(organizationId, from, to, tz) {
       sellerKey: '',
       sellerName: '',
       qty: r.qty,
-      cents: r.qty * (pkgPrice.get(str(r._id.pkg)) || 0),
+      cents: r.qty * priceOf(r._id.router, r._id.pkg),
     });
   }
   for (const r of onlineTx) {

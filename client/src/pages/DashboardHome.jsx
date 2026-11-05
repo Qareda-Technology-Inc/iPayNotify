@@ -25,6 +25,12 @@ function formatCedi(cents) {
   }).format(n / 100);
 }
 
+/** Where the sales came from: online MoMo payments and tickets customers activated. */
+function salesSplit(s) {
+  if (!s) return undefined;
+  return `MoMo ${formatCedi(s.onlineCents)} · ${s.ticketQty} ticket${s.ticketQty === 1 ? '' : 's'} activated ${formatCedi(s.ticketCents)}`;
+}
+
 function StatCard({ label, value, sub }) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
@@ -130,9 +136,9 @@ export function DashboardHome() {
             sub="Finance → Wallet to withdraw"
           />
         )}
-        <StatCard label="Today's revenue" value={formatCedi(revenueCents.today)} />
-        <StatCard label="Weekly revenue" value={formatCedi(revenueCents.week)} />
-        <StatCard label="Monthly revenue" value={formatCedi(revenueCents.month)} />
+        <StatCard label="Today's sales" value={formatCedi(revenueCents.today)} sub={salesSplit(data.sales?.today)} />
+        <StatCard label="Last 7 days" value={formatCedi(revenueCents.week)} sub={salesSplit(data.sales?.week)} />
+        <StatCard label="This month" value={formatCedi(revenueCents.month)} sub={salesSplit(data.sales?.month)} />
         <StatCard
           label="Routers"
           value={String(counts.routers)}

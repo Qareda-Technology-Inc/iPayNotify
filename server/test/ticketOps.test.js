@@ -9,6 +9,7 @@ const { addSellerAtRouter, issueAtRouter, plansForRouter, siteForRouter, ticketO
   '../src/services/ticketOpsService.js'
 );
 const { createHotspotPackage, createOrg, createRouter } = await import('./helpers/fixtures.js');
+const { getDashboardSummary } = await import('../src/services/dashboardStatsService.js');
 
 const admin = { id: '64b000000000000000000001', email: 'ops@isp.test' };
 
@@ -147,5 +148,27 @@ describe('ticket operations by router', () => {
     await expect(issueAtRouter({ ...base, sellerId: yaw._id })).rejects.toThrow(/does not work at that site/);
     const kofi = await seller();
     await expect(issueAtRouter({ ...base, sellerId: kofi._id, quantity: 11 })).rejects.toThrow(/Only 10 unused/);
+  });
+
+  it('dashboard sales count a ticket as sold when a customer activates it', async () => {
+    const kofi = await seller();
+    const { codes } = await issueAtRouter({
+      organizationId: org._id,
+      admin,
+      routerId: router._id,
+      sellerId: kofi._id,
+      packageId: plan._id,
+      quantity: 3,
+    });
+    await router.updateOne({ portalPrices: [{ packageId: plan._id, priceCents: 700 }] });
+    const printed = await HotspotVoucher.findOne({ routerId: router._id, issueSaleId: null });
+    const before = await getDashboardSummary(org._id);
+    expect(before.revenueCents.today).toBe(0);
+
+    await HotspotVoucher.updateOne({ _id: codes[0]._id }, { usedAt: new Date() });
+    await HotspotVoucher.updateOne({ _id: printed._id }, { usedAt: new Date() });
+    const after = await getDashboardSummary(org._id);
+    expect(after.sales.today).toMatchObject({ onlineCents: 0, ticketQty: 2, ticketCents: 500 + 700, totalCents: 1200 });
+    expect(after.revenueCents.month).toBe(1200);
   });
 });
