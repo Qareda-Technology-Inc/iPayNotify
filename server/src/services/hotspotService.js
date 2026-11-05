@@ -177,6 +177,7 @@ export async function pushHotspotPackageProfile(pkg, router) {
       speedUpMbps: pkg.speedUpMbps,
       sharedUsers: pkg.usersPerTicket,
       onLogin,
+      macCookieSeconds: macCookieSecondsFor(pkg),
     });
     return { ...result, profileName };
   });
@@ -322,6 +323,17 @@ function pausedSecondsFromPackage(pkg) {
   return undefined;
 }
 
+const MAX_MAC_COOKIE_SECONDS = 90 * 86400;
+
+/**
+ * How long a phone is let back in without its code: the plan's wall-clock length, or 30 days for
+ * online-time plans (they can last a long time). Expired codes are removed with their cookies.
+ */
+export function macCookieSecondsFor(pkg) {
+  const seconds = elapsedSecondsFromPackage(pkg) || 30 * 86400;
+  return Math.min(MAX_MAC_COOKIE_SECONDS, Math.max(3600, seconds));
+}
+
 function elapsedSecondsFromPackage(pkg) {
   const type = pkg.ticketDurationType || 'elapsed';
   if (type === 'paused') return undefined;
@@ -406,6 +418,7 @@ async function pushVoucherBatchToRouter(vouchers, router, pkg) {
       sharedUsers: pkg.usersPerTicket,
       comment: `QareFi-${pkg.name || profileName}`,
       onLogin,
+      macCookieSeconds: macCookieSecondsFor(pkg),
     });
 
     const userFor = (voucher) => ({

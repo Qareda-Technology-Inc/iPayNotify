@@ -197,6 +197,8 @@ export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
   const exists = await hotspotProfileExists(api, name);
 
   const onLogin = String(opts.onLogin || '').trim();
+  /* How long a phone is let back in without the code (MAC cookie); the ticket's own limits still apply. */
+  const macCookie = formatLimitUptime(opts.macCookieSeconds);
 
   if (typeof api?.execCli === 'function') {
     /* Profile first (quoted name — `10MIN` unquoted can be read as a number/time), then speed,
@@ -258,6 +260,17 @@ export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
       }
     }
 
+    if (present && macCookie) {
+      try {
+        await run(
+          `/ip hotspot user profile set [find where name=${findLit}] add-mac-cookie=yes mac-cookie-timeout=${macCookie}`,
+          'Hotspot profile mac-cookie'
+        );
+      } catch (e) {
+        console.error('[hotspot] mac-cookie not set', name, e?.message || e);
+      }
+    }
+
     const ok = present;
     let applied = null;
     if (ok && rateLimit) {
@@ -313,6 +326,7 @@ export async function upsertHotspotUserProfile(api, profileName, opts = {}) {
     ...(rateLimit ? { 'rate-limit': rateLimit } : {}),
     ...(shared ? { 'shared-users': shared } : {}),
     ...(onLogin ? { 'on-login': onLogin } : {}),
+    ...(macCookie ? { 'add-mac-cookie': 'yes', 'mac-cookie-timeout': macCookie } : {}),
   };
   if (exists) {
     const row = rows.find((r) => String(r.name || '').trim() === name);
@@ -522,6 +536,7 @@ export async function disconnectHotspotUser(api, username) {
   if (typeof api?.execCli === 'function') {
     await api.execCli(`/ip hotspot active remove [find where user=${lit}]`).catch(() => {});
     await api.execCli(`/ip hotspot user remove [find where name=${lit}]`).catch(() => {});
+    await api.execCli(`/ip hotspot cookie remove [find where user=${lit}]`).catch(() => {});
     return;
   }
   const active = normalizePrintRows(await api.write('/ip/hotspot/active/print'));
@@ -532,6 +547,12 @@ export async function disconnectHotspotUser(api, username) {
   }
   const user = await findHotspotUserByName(api, name);
   if (user?.['.id']) await removeHotspotUser(api, user['.id']);
+  /* The phone's MAC cookie would otherwise keep trying to log in with a code that no longer exists. */
+  const cookies = normalizePrintRows(await api.write('/ip/hotspot/cookie/print').catch(() => []));
+  for (const row of cookies) {
+    if (String(row.user || '').trim() !== name || !row['.id']) continue;
+    await api.write(['/ip/hotspot/cookie/remove', `=.id=${row['.id']}`]).catch(() => {});
+  }
 }
 
 /** Absolute online cap. MikroTik compares this to the user's accumulated uptime. */

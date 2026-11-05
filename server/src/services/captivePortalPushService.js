@@ -73,12 +73,16 @@ async function setProfileValue(api, profile, key, value, context) {
   }
 }
 
-function withPap(loginBy) {
+/**
+ * Login methods tickets need: http-pap for the code form, and mac-cookie so a phone that already
+ * logged in with a ticket that still has time is let back in on its own, without the code.
+ */
+function withTicketLogin(loginBy) {
   const parts = String(loginBy || 'cookie,http-chap')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  if (!parts.includes('http-pap')) parts.push('http-pap');
+  for (const want of ['http-pap', 'mac-cookie']) if (!parts.includes(want)) parts.push(want);
   return parts.join(',');
 }
 
@@ -190,7 +194,7 @@ export async function pushCaptivePortalToRouter(routerId, organizationId, { hots
     const updated = [];
     for (const p of profiles) {
       const name = String(p.name || '').trim() || 'default';
-      const next = withPap(p['login-by'] || p.loginBy);
+      const next = withTicketLogin(p['login-by'] || p.loginBy);
       if (next !== String(p['login-by'] || p.loginBy || '')) {
         await setProfileValue(api, p, 'login-by', next, 'Enable ticket login');
       }
