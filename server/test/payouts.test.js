@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const alerts = vi.hoisted(() => []);
+vi.mock('../src/services/withdrawalNotifyService.js', () => ({
+  notifyWithdrawalWaiting: async (w, reason) => {
+    alerts.push({ amountCents: w.amountCents, reason });
+  },
+}));
+
 import { config } from '../src/config.js';
 import { OrgLedgerEntry, Organization, WithdrawalRequest } from '../src/models/index.js';
 import { appendLedgerEntry, getOrgAvailableBalanceCents, requestWithdrawal } from '../src/services/orgWalletService.js';
@@ -96,6 +104,7 @@ describe('automatic vendor payouts', () => {
     const { out } = await ask(org, 1_000);
     expect(out).toMatchObject({ status: 'pending', holdReason: 'Automatic payouts are turned off' });
     expect(calls).toHaveLength(0);
+    expect(alerts.at(-1)).toEqual({ amountCents: 1_000, reason: 'Automatic payouts are turned off' });
   });
 
   it('waits for approval above the single-payout limit', async () => {
@@ -202,5 +211,23 @@ describe('automatic vendor payouts', () => {
 
   it('rejects limits that are not numbers', async () => {
     await expect(updatePayoutSettings({ maxAutoCents: 'lots' })).rejects.toThrow(/Largest automatic payout/);
+  });
+});
+
+describe('withdrawal alert to platform admins', () => {
+  it('tells super admins by email and SMS who to pay and how much', async () => {
+    const { notifyWithdrawalWaiting } = await vi.importActual('../src/services/withdrawalNotifyService.js');
+    const mail = await import('../src/integrations/mail.js');
+    const sms = await import('../src/integrations/arkesel.js');
+    const sent = [];
+    vi.spyOn(mail, 'sendSmtpMail').mockImplementation(async (m) => (sent.push(m), { ok: true }));
+    vi.spyOn(sms, 'sendArkeselSms').mockImplementation(async (m) => (sent.push(m), { ok: true }));
+    const { Admin } = await import('../src/models/index.js');
+    await Admin.create({ email: 'boss@platform.test', phone: '0241112222', role: 'super_admin', passwordHash: 'x' });
+    const org = await createOrg({ name: 'Kasoa WiFi', billing: { payoutMomoNumber: '0245556666' } });
+    const out = await notifyWithdrawalWaiting({ organizationId: org._id, amountCents: 25_000 }, 'Automatic payouts are turned off');
+    expect(out).toEqual({ emails: 1, sms: 1 });
+    expect(sent[0]).toMatchObject({ to: 'boss@platform.test', subject: 'Withdrawal to pay: Kasoa WiFi GHS 250.00' });
+    expect(sent[1].message).toContain('Kasoa WiFi wants to withdraw GHS 250.00 to 0245556666');
   });
 });

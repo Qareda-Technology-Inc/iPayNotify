@@ -8,6 +8,7 @@ import {
   verifyTransfer,
 } from '../integrations/paystack.js';
 import { getPayoutSettings } from './platformSettingsService.js';
+import { notifyWithdrawalWaiting } from './withdrawalNotifyService.js';
 import {
   RESERVED_WITHDRAWAL_STATUSES,
   appendLedgerEntry,
@@ -90,11 +91,13 @@ async function recipientFor(org) {
 }
 
 async function backToApproval(id, fromStatus, reason) {
-  return WithdrawalRequest.findOneAndUpdate(
+  const doc = await WithdrawalRequest.findOneAndUpdate(
     { _id: id, status: fromStatus },
     { $set: { status: 'pending', holdReason: reason, failureReason: reason } },
     { new: true }
   );
+  if (doc) notifyWithdrawalWaiting(doc, reason);
+  return doc;
 }
 
 async function completePaid(id) {
@@ -205,6 +208,7 @@ export async function processNewWithdrawal(withdrawal) {
   const reason = await payoutHoldReason(withdrawal, org);
   if (reason) {
     await WithdrawalRequest.updateOne({ _id: withdrawal._id }, { $set: { holdReason: reason } });
+    notifyWithdrawalWaiting(withdrawal, reason);
     return { status: 'pending', holdReason: reason };
   }
   try {
@@ -213,6 +217,7 @@ export async function processNewWithdrawal(withdrawal) {
   } catch (e) {
     const why = `Automatic payout failed: ${e.message || 'unknown error'}`;
     await WithdrawalRequest.updateOne({ _id: withdrawal._id, status: 'pending' }, { $set: { holdReason: why } });
+    notifyWithdrawalWaiting(withdrawal, why);
     return { status: 'pending', holdReason: why };
   }
 }

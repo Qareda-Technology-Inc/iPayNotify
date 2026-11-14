@@ -18,7 +18,7 @@ function NavGroup({ title, children }) {
   );
 }
 
-function SideLink({ to, children, badge, accent = 'indigo', end }) {
+function SideLink({ to, children, badge, badgeTone, badgeTitle, accent = 'indigo', end }) {
   return (
     <NavLink
       to={to}
@@ -35,7 +35,12 @@ function SideLink({ to, children, badge, accent = 'indigo', end }) {
     >
       <span>{children}</span>
       {badge != null && (
-        <span className="rounded-md bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium text-slate-300">
+        <span
+          title={badgeTitle}
+          className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
+            badgeTone === 'alert' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300'
+          }`}
+        >
           {badge}
         </span>
       )}
@@ -123,6 +128,22 @@ export function AdminShell({ onSignOut }) {
       .then((d) => setCounts(d.counts))
       .catch(() => {});
   }, [sessionTick, location.pathname]);
+
+  /* Withdrawals waiting to be paid: checked on every page change and every minute. */
+  const [waitingWithdrawals, setWaitingWithdrawals] = useState(0);
+  useEffect(() => {
+    if (!isSuper) {
+      setWaitingWithdrawals(0);
+      return undefined;
+    }
+    const check = () =>
+      apiFetch('/api/super-admin/withdrawals/waiting-count')
+        .then((d) => setWaitingWithdrawals(Number(d?.waiting) || 0))
+        .catch(() => {});
+    check();
+    const t = setInterval(check, 60_000);
+    return () => clearInterval(t);
+  }, [isSuper, sessionTick, location.pathname]);
 
   useEffect(() => {
     if (!isSuper) {
@@ -289,7 +310,13 @@ export function AdminShell({ onSignOut }) {
               <SideLink to="/super/wireguard" accent="amber">
                 WireGuard routers
               </SideLink>
-              <SideLink to="/super/withdrawals" accent="amber">
+              <SideLink
+                to="/super/withdrawals"
+                accent="amber"
+                badge={waitingWithdrawals || undefined}
+                badgeTone="alert"
+                badgeTitle={`${waitingWithdrawals} withdrawal${waitingWithdrawals === 1 ? '' : 's'} waiting to be paid`}
+              >
                 Vendor withdrawals
               </SideLink>
               <SideLink to="/super/email-templates" accent="amber">

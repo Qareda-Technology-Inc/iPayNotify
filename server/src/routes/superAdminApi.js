@@ -543,6 +543,14 @@ router.patch(
   })
 );
 
+/** How many vendor withdrawals wait for a platform admin (sidebar badge). */
+router.get(
+  '/withdrawals/waiting-count',
+  asyncHandler(async (_req, res) => {
+    res.json({ waiting: await WithdrawalRequest.countDocuments({ status: 'pending' }) });
+  })
+);
+
 router.get(
   '/withdrawals',
   asyncHandler(async (req, res) => {
