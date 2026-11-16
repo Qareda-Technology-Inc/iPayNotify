@@ -610,6 +610,7 @@ ticketSalesRouter.post(
         organizationId: req.organizationId,
         admin: req.admin,
         sellerKey,
+        ticketTypeId: req.body?.ticketTypeId ? String(req.body.ticketTypeId) : undefined,
         amountCents,
         receivedFromName,
         receivedFromPhone,
@@ -631,6 +632,7 @@ ticketSalesRouter.post(
       action: 'ticket.collect',
       meta: {
         sellerKey,
+        ...(req.body?.ticketTypeId ? { ticketTypeId: String(req.body.ticketTypeId) } : {}),
         amountCents,
         entries: result.entries.map((e) => String(e._id)),
       },

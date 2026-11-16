@@ -384,12 +384,14 @@ export async function issueTickets({
 /* ---------- Collect ---------- */
 
 /**
- * Record cash from a seller. The amount is applied to what is owed, oldest issue first.
+ * Record cash from a seller. The amount is applied to what is owed, oldest issue first;
+ * with `ticketTypeId`, only to that plan's issues.
  */
 export async function collectFromSeller({
   organizationId,
   admin,
   sellerKey,
+  ticketTypeId,
   amountCents,
   receivedFromName,
   receivedFromPhone,
@@ -397,11 +399,18 @@ export async function collectFromSeller({
 }) {
   const amount = Math.round(Number(amountCents) || 0);
   if (amount <= 0) throw fail('Enter the amount received');
-  const rows = await issuesWithBalances(organizationId, sellerQueryFromKey(organizationId, sellerKey));
+  const query = sellerQueryFromKey(organizationId, sellerKey);
+  if (ticketTypeId != null && ticketTypeId !== '') {
+    if (!mongoose.isValidObjectId(String(ticketTypeId))) throw fail('Choose the plan');
+    query.ticketTypeId = oid(ticketTypeId);
+  }
+  const rows = await issuesWithBalances(organizationId, query);
   const room = rows.reduce((n, r) => n + r.maxCollectCents, 0);
-  if (!rows.length) throw fail('This seller has no issued tickets');
+  if (!rows.length) throw fail(query.ticketTypeId ? 'This seller has no tickets of that plan' : 'This seller has no issued tickets');
   if (amount > room) {
-    throw fail(`That is more than this seller owes: GHS ${(room / 100).toFixed(2)}.`);
+    throw fail(
+      `That is more than this seller owes${query.ticketTypeId ? ' for this plan' : ''}: GHS ${(room / 100).toFixed(2)}.`
+    );
   }
 
   const plan = [];

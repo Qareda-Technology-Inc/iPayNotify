@@ -171,4 +171,24 @@ describe('ticket operations by router', () => {
     expect(after.sales.today).toMatchObject({ onlineCents: 0, ticketQty: 2, ticketCents: 500 + 700, totalCents: 1200 });
     expect(after.revenueCents.month).toBe(1200);
   });
+
+  it('collects against one plan only', async () => {
+    const week = await createHotspotPackage(org, { name: '1 Week', priceCents: 2000, elapsedSeconds: 7 * 86400 });
+    await generateVouchers({ count: 5, packageId: week._id, routerId: router._id, organizationId: org._id, pushToRouter: false });
+    const kofi = await seller();
+    const base = { organizationId: org._id, admin, routerId: router._id, sellerId: kofi._id };
+    const day = await issueAtRouter({ ...base, packageId: plan._id, quantity: 4 });
+    await issueAtRouter({ ...base, packageId: week._id, quantity: 2 });
+    const dayType = String(day.issue.ticketTypeId);
+
+    await expect(
+      collectFromSeller({ organizationId: org._id, admin, sellerKey: `s:${kofi._id}`, ticketTypeId: dayType, amountCents: 2500 })
+    ).rejects.toThrow(/owes for this plan: GHS 20.00/);
+    await collectFromSeller({ organizationId: org._id, admin, sellerKey: `s:${kofi._id}`, ticketTypeId: dayType, amountCents: 1500 });
+    const rows = await issuesWithBalances(org._id, {});
+    expect(rows.map((r) => [r.ticketTypeId.label, r.balanceCents])).toEqual([
+      ['1 Day', 500],
+      ['1 Week', 4000],
+    ]);
+  });
 });

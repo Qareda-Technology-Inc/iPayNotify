@@ -45,7 +45,9 @@ export function TicketCollectionsPage() {
   const [issues, setIssues] = useState([]);
   const [issuesLoading, setIssuesLoading] = useState(false);
   const [collections, setCollections] = useState([]);
+  const [planKey, setPlanKey] = useState('');
   const [amountGhs, setAmountGhs] = useState('');
+  const [ticketsPaid, setTicketsPaid] = useState('');
   const [handoverByOther, setHandoverByOther] = useState(false);
   const [receivedFromName, setReceivedFromName] = useState('');
   const [receivedFromPhone, setReceivedFromPhone] = useState('');
@@ -114,6 +116,8 @@ export function TicketCollectionsPage() {
 
   useEffect(() => {
     setAmountGhs('');
+    setTicketsPaid('');
+    setPlanKey('');
     setReturnFor('');
     loadIssues(sellerKey);
   }, [sellerKey, loadIssues]);
@@ -153,10 +157,49 @@ export function TicketCollectionsPage() {
     () => issues.filter((i) => i.balanceCents !== 0 || i.holdingQty > 0 || i.maxCollectCents > 0),
     [issues]
   );
+  /* What the seller owes per plan, so cash is taken against one plan at a time. */
+  const plans = useMemo(() => {
+    const by = new Map();
+    for (const i of issues) {
+      const key = String(i.ticketTypeId?._id || i.ticketTypeId || '');
+      if (!key) continue;
+      const cur = by.get(key) || {
+        key,
+        label: i.ticketTypeId?.label || 'Ticket',
+        owedCents: 0,
+        holdingQty: 0,
+        prices: new Set(),
+      };
+      cur.owedCents += Math.max(0, Number(i.maxCollectCents || 0));
+      cur.holdingQty += Number(i.holdingQty || 0);
+      if (i.maxCollectCents > 0) cur.prices.add(Number(i.unitPriceCents || 0));
+      by.set(key, cur);
+    }
+    return [...by.values()]
+      .filter((p) => p.owedCents > 0)
+      .map((p) => ({ ...p, unitPriceCents: p.prices.size === 1 ? [...p.prices][0] : 0 }))
+      .sort((a, b) => b.owedCents - a.owedCents || a.label.localeCompare(b.label));
+  }, [issues]);
+  const plan = plans.find((p) => p.key === planKey);
   const owedCents = Math.max(0, seller?.balanceCents || 0);
-  const maxCents = issues.reduce((n, i) => n + Number(i.maxCollectCents || 0), 0);
+  const maxCents = plan ? plan.owedCents : 0;
   const amountCents = Math.round(Number(amountGhs || 0) * 100);
-  const advanceCents = Math.max(0, amountCents - owedCents);
+
+  useEffect(() => {
+    if (planKey && plans.some((p) => p.key === planKey)) return;
+    setPlanKey(plans.length === 1 ? plans[0].key : '');
+  }, [plans, planKey]);
+
+  useEffect(() => {
+    setAmountGhs('');
+    setTicketsPaid('');
+  }, [planKey]);
+
+  function setTickets(v) {
+    setTicketsPaid(v);
+    const n = Math.max(0, Math.round(Number(v) || 0));
+    if (plan?.unitPriceCents) setAmountGhs(n ? ((n * plan.unitPriceCents) / 100).toFixed(2) : '');
+  }
 
   async function refreshAfterChange() {
     await Promise.all([loadSellers(), loadIssues(sellerKey), loadCollections()]);
@@ -175,6 +218,7 @@ export function TicketCollectionsPage() {
         method: 'POST',
         body: JSON.stringify({
           sellerKey,
+          ticketTypeId: planKey,
           amountCents,
           ...(handoverByOther && receivedFromName.trim()
             ? {
@@ -187,10 +231,11 @@ export function TicketCollectionsPage() {
       });
       showSuccess(
         r?.allocatedTo > 1
-          ? `${presetMessages.collectionRecorded} Spread over ${r.allocatedTo} issues, oldest first.`
+          ? `${presetMessages.collectionRecorded} Spread over ${r.allocatedTo} ${plan?.label || ''} issues, oldest first.`
           : presetMessages.collectionRecorded
       );
       setAmountGhs('');
+      setTicketsPaid('');
       setHandoverByOther(false);
       setReceivedFromName('');
       setReceivedFromPhone('');
@@ -273,52 +318,104 @@ export function TicketCollectionsPage() {
           </div>
 
           <form onSubmit={collect} className="grid gap-3 rounded-xl border border-slate-800 bg-slate-950/40 p-4 sm:grid-cols-2">
-            <label className="text-sm text-slate-300">
-              Amount received (GHS)
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                required
-                value={amountGhs}
-                onChange={(e) => setAmountGhs(e.target.value)}
-                className={inputCls}
-              />
-              <span className="mt-1 flex flex-wrap gap-3 text-xs">
-                {owedCents > 0 ? (
-                  <button type="button" className="text-emerald-400 hover:text-emerald-300" onClick={() => setAmountGhs((owedCents / 100).toFixed(2))}>
-                    All owed ({money(owedCents)})
-                  </button>
-                ) : null}
-                {maxCents > owedCents ? (
-                  <span className="text-slate-500">Up to {money(maxCents)} including tickets held</span>
-                ) : null}
-              </span>
-            </label>
-            <div className="rounded-lg border border-slate-800 px-3 py-2 text-sm text-slate-400">
-              {amountCents > 0 ? (
-                amountCents > maxCents ? (
-                  <span className="text-red-300">More than this seller can owe ({money(maxCents)}).</span>
-                ) : (
-                  <>
-                    {money(Math.min(amountCents, owedCents))} clears what is owed
-                    {advanceCents > 0 ? (
-                      <>
-                        , <span className="text-emerald-300">{money(advanceCents)}</span> paid ahead for tickets they hold
-                      </>
-                    ) : null}
-                    {amountCents < owedCents ? (
-                      <>
-                        ; <span className="text-amber-300">{money(owedCents - amountCents)}</span> still owed after this
-                      </>
-                    ) : null}
-                    .
-                  </>
-                )
+            <div className="text-sm text-slate-300 sm:col-span-2">
+              Plan
+              {plans.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {plans.map((p) => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      onClick={() => setPlanKey(p.key)}
+                      className={`rounded-lg border px-3 py-2 text-left ${
+                        p.key === planKey
+                          ? 'border-amber-500/60 bg-amber-500/10 text-white'
+                          : 'border-slate-700 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      <span className="block font-medium">{p.label}</span>
+                      <span className="block text-xs text-slate-400">
+                        owes {money(p.owedCents)}
+                        {p.unitPriceCents ? ` · ${Math.round(p.owedCents / p.unitPriceCents)} × ${money(p.unitPriceCents)}` : ''}
+                        {p.holdingQty ? ` · holding ${p.holdingQty}` : ''}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               ) : (
-                'Enter the cash handed over.'
+                <p className="mt-2 text-sm text-slate-500">{issuesLoading ? 'Loading…' : 'Nothing owed on any plan.'}</p>
               )}
             </div>
+            {plan ? (
+              <>
+                {plan.unitPriceCents ? (
+                  <label className="text-sm text-slate-300">
+                    Tickets paid for
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      inputMode="numeric"
+                      value={ticketsPaid}
+                      onChange={(e) => setTickets(e.target.value)}
+                      placeholder={`up to ${Math.floor(plan.owedCents / plan.unitPriceCents)}`}
+                      className={inputCls}
+                    />
+                    <span className="mt-1 block text-xs text-slate-500">
+                      {money(plan.unitPriceCents)} each. Fills in the amount.
+                    </span>
+                  </label>
+                ) : null}
+                <label className="text-sm text-slate-300">
+                  Amount received (GHS)
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    required
+                    value={amountGhs}
+                    onChange={(e) => {
+                      setAmountGhs(e.target.value);
+                      setTicketsPaid('');
+                    }}
+                    className={inputCls}
+                  />
+                  <button
+                    type="button"
+                    className="mt-1 text-xs text-emerald-400 hover:text-emerald-300"
+                    onClick={() => {
+                      setAmountGhs((plan.owedCents / 100).toFixed(2));
+                      setTicketsPaid('');
+                    }}
+                  >
+                    All owed on {plan.label} ({money(plan.owedCents)})
+                  </button>
+                </label>
+                <div className="rounded-lg border border-slate-800 px-3 py-2 text-sm text-slate-400 sm:col-span-2">
+                  {amountCents > 0 ? (
+                    amountCents > maxCents ? (
+                      <span className="text-red-300">
+                        More than this seller owes on {plan.label} ({money(maxCents)}).
+                      </span>
+                    ) : (
+                      <>
+                        {money(amountCents)} against {plan.label}
+                        {amountCents < maxCents ? (
+                          <>
+                            ; <span className="text-amber-300">{money(maxCents - amountCents)}</span> still owed on this plan
+                          </>
+                        ) : (
+                          '; this plan is cleared'
+                        )}
+                        {owedCents - amountCents > 0 ? `, ${money(owedCents - amountCents)} in total` : ''}.
+                      </>
+                    )
+                  ) : (
+                    'Enter the cash handed over for this plan.'
+                  )}
+                </div>
+              </>
+            ) : null}
             <div className="space-y-2 sm:col-span-2">
               <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-300">
                 <input
