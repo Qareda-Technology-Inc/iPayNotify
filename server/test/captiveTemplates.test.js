@@ -97,4 +97,13 @@ describe('plan details on the login page', () => {
     expect(html).toContain('GHS 10');
     expect(html).not.toMatch(/Mbps|devices|GB|MB|Unlimited data/);
   });
+
+describe('login page code box', () => {
+  it('takes letters as well as numbers (no number-only keypad)', () => {
+    const html = renderLoginPage({});
+    const box = html.match(/<input id="code"[^>]*>/)[0];
+    expect(box).not.toMatch(/inputmode|pattern=|type="(number|tel)"/);
+    expect(box).toContain('autocapitalize="off"');
+  });
+});
 });

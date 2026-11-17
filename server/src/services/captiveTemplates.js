@@ -500,7 +500,7 @@ export function renderLoginPage(o = {}) {
 <input type="hidden" name="dst" value="${dst}">
 <input type="hidden" name="popup" value="true">
 <label for="code">Access code</label>
-<input id="code" type="text" name="username" value="${username}" inputmode="numeric" autocomplete="off" autocapitalize="off" spellcheck="false">
+<input id="code" type="text" name="username" value="${username}" autocomplete="off" autocapitalize="off" spellcheck="false">
 <input type="hidden" name="password" value="">
 <button type="submit">${esc(buttonLabel)}</button>
 </form>`;
