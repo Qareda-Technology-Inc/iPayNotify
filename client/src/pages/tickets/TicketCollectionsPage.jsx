@@ -141,14 +141,22 @@ export function TicketCollectionsPage() {
     [sellers]
   );
 
+  /* A site can have several sellers: never guess who is paying unless only one of them owes. */
   useEffect(() => {
     if (sellersLoading) return;
     if (sellerKey && sellers.some((s) => s.sellerKey === sellerKey)) return;
-    const top = sellers.find((s) => s.balanceCents > 0);
-    setSellerKey(top ? top.sellerKey : '');
-  }, [sellers, sellerKey, sellersLoading]);
+    const owing = sellers.filter((s) => s.balanceCents > 0);
+    setSellerKey(siteKey && owing.length === 1 ? owing[0].sellerKey : '');
+  }, [sellers, sellerKey, sellersLoading, siteKey]);
+
+  useEffect(() => {
+    if (!siteKey && sites.length === 1) setSiteKey(sites[0].key);
+  }, [sites, siteKey]);
 
   function chooseSeller(key) {
+    const row = allSellers.find((s) => s.sellerKey === key);
+    const site = row && sites.find((x) => x.siteIds.includes(row.siteId));
+    if (site) setSiteKey(site.key);
     setSellerKey(key);
     collectRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -283,20 +291,54 @@ export function TicketCollectionsPage() {
       {err && <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{err}</p>}
 
       <section ref={collectRef} className="space-y-4 rounded-2xl border border-amber-500/30 bg-slate-900/40 p-5">
-        <div className="flex flex-wrap items-end gap-3">
-          <h2 className="w-full text-lg font-medium text-white">Collect money</h2>
-          <label className="min-w-[240px] flex-1 text-sm text-slate-300">
-            Seller
-            <select value={sellerKey} onChange={(e) => setSellerKey(e.target.value)} className={inputCls}>
-              <option value="">{sellersLoading ? 'Loading sellers…' : sellers.length ? 'Choose the seller…' : 'No tickets issued yet'}</option>
+        <h2 className="text-lg font-medium text-white">Collect money</h2>
+        <label className="block max-w-md text-sm text-slate-300">
+          1. Site
+          <select
+            value={siteKey}
+            onChange={(e) => {
+              setSiteKey(e.target.value);
+              setSellerKey('');
+            }}
+            className={inputCls}
+          >
+            <option value="">All sites</option>
+            {sites.map((x) => (
+              <option key={x.key} value={x.key}>
+                {x.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="text-sm text-slate-300">
+          2. Seller paying
+          {pickerSellers.length ? (
+            <div className="mt-2 flex flex-wrap gap-2">
               {pickerSellers.map((s) => (
-                <option key={s.sellerKey} value={s.sellerKey}>
-                  {s.sellerName} · {siteNameOf(s.siteId) || s.siteName || 'Site'}
-                  {s.balanceCents > 0 ? ` · owes ${money(s.balanceCents)}` : s.balanceCents < 0 ? ' · paid ahead' : ' · settled'}
-                </option>
+                <button
+                  key={s.sellerKey}
+                  type="button"
+                  onClick={() => setSellerKey(s.sellerKey)}
+                  className={`rounded-lg border px-3 py-2 text-left ${
+                    s.sellerKey === sellerKey
+                      ? 'border-amber-500/60 bg-amber-500/10 text-white'
+                      : 'border-slate-700 text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <span className="block font-medium">{s.sellerName}</span>
+                  <span className="block text-xs text-slate-400">
+                    {siteKey ? '' : `${siteNameOf(s.siteId) || s.siteName || 'Site'} · `}
+                    {s.balanceCents > 0 ? `owes ${money(s.balanceCents)}` : 'settled'}
+                    {s.holdingQty ? ` · holding ${s.holdingQty}` : ''}
+                  </span>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-slate-500">
+              {sellersLoading ? 'Loading sellers…' : siteKey ? 'No seller at this site has tickets.' : 'No tickets issued yet.'}
+            </p>
+          )}
         </div>
       {seller ? (
         <>
@@ -319,7 +361,7 @@ export function TicketCollectionsPage() {
 
           <form onSubmit={collect} className="grid gap-3 rounded-xl border border-slate-800 bg-slate-950/40 p-4 sm:grid-cols-2">
             <div className="text-sm text-slate-300 sm:col-span-2">
-              Plan
+              3. Plan {seller.sellerName} is paying for
               {plans.length ? (
                 <div className="mt-2 flex flex-wrap gap-2">
                   {plans.map((p) => (
@@ -561,7 +603,7 @@ export function TicketCollectionsPage() {
       ) : (
         <p className="text-sm text-slate-500">
           {sellers.length
-            ? 'Choose the seller who is paying. You will see what they owe, then enter the amount.'
+            ? 'Choose the site, then the seller who is paying. You will see what they owe on each plan.'
             : 'Issue tickets to a seller first; they will appear here to collect from.'}
         </p>
       )}
